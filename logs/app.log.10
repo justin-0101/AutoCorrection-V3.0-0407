@@ -1,0 +1,109 @@
+2025-04-04 11:59:21,857 INFO [werkzeug] [_internal.py:97] -  * Restarting with stat
+2025-04-04 11:59:23,611 INFO [app] [__init__.py:129] - ×÷ÎÄÅú¸ÄÏµÍ³Æô¶¯
+2025-04-04 11:59:23,891 WARNING [werkzeug] [_internal.py:97] -  * Debugger is active!
+2025-04-04 11:59:23,901 INFO [werkzeug] [_internal.py:97] -  * Debugger PIN: 288-261-912
+2025-04-04 11:59:48,745 INFO [werkzeug] [_internal.py:97] -  * Detected change in 'D:\\git-justin0101\\auto-currection\\AutoCorrection-V2.0-Backup-Before-Refactor\\app\\__init__.py', reloading
+2025-04-04 11:59:49,022 INFO [werkzeug] [_internal.py:97] -  * Restarting with stat
+2025-04-04 11:59:51,004 INFO [app] [__init__.py:132] - ×÷ÎÄÅú¸ÄÏµÍ³Æô¶¯
+2025-04-04 11:59:51,089 WARNING [werkzeug] [_internal.py:97] -  * Debugger is active!
+2025-04-04 11:59:51,095 INFO [werkzeug] [_internal.py:97] -  * Debugger PIN: 288-261-912
+2025-04-04 11:59:56,886 INFO [app] [__init__.py:132] - ×÷ÎÄÅú¸ÄÏµÍ³Æô¶¯
+2025-04-04 11:59:56,984 INFO [werkzeug] [_internal.py:97] - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.0.132:5000
+2025-04-04 11:59:56,984 INFO [werkzeug] [_internal.py:97] - [33mPress CTRL+C to quit[0m
+2025-04-04 11:59:56,984 INFO [werkzeug] [_internal.py:97] -  * Restarting with stat
+2025-04-04 11:59:58,757 INFO [app] [__init__.py:132] - ×÷ÎÄÅú¸ÄÏµÍ³Æô¶¯
+2025-04-04 11:59:58,844 WARNING [werkzeug] [_internal.py:97] -  * Debugger is active!
+2025-04-04 11:59:58,852 INFO [werkzeug] [_internal.py:97] -  * Debugger PIN: 288-261-912
+2025-04-04 12:00:15,722 INFO [werkzeug] [_internal.py:97] - 127.0.0.1 - - [04/Apr/2025 12:00:15] "GET / HTTP/1.1" 200 -
+2025-04-04 12:00:17,741 INFO [app] [main_routes.py:109] - Login route accessed with method: GET
+2025-04-04 12:00:17,760 INFO [werkzeug] [_internal.py:97] - 127.0.0.1 - - [04/Apr/2025 12:00:17] "GET /login HTTP/1.1" 200 -
+2025-04-04 12:00:22,090 INFO [app] [main_routes.py:109] - Login route accessed with method: POST
+2025-04-04 12:00:22,093 INFO [app] [main_routes.py:114] - Login form submitted with data: {'login_type': 'password', 'username': 'juschc', 'remember': '1'}
+2025-04-04 12:00:22,094 INFO [app] [main_routes.py:129] - User juschc logged in successfully
+2025-04-04 12:00:22,096 INFO [werkzeug] [_internal.py:97] - 127.0.0.1 - - [04/Apr/2025 12:00:22] "[32mPOST /login HTTP/1.1[0m" 302 -
+2025-04-04 12:00:22,105 INFO [werkzeug] [_internal.py:97] - 127.0.0.1 - - [04/Apr/2025 12:00:22] "GET / HTTP/1.1" 200 -
+2025-04-04 12:00:27,293 INFO [werkzeug] [_internal.py:97] - 127.0.0.1 - - [04/Apr/2025 12:00:27] "[32mGET /logout HTTP/1.1[0m" 302 -
+2025-04-04 12:00:27,310 INFO [werkzeug] [_internal.py:97] - 127.0.0.1 - - [04/Apr/2025 12:00:27] "GET / HTTP/1.1" 200 -
+2025-04-04 12:00:28,505 INFO [app] [main_routes.py:109] - Login route accessed with method: GET
+2025-04-04 12:00:28,507 INFO [werkzeug] [_internal.py:97] - 127.0.0.1 - - [04/Apr/2025 12:00:28] "GET /login HTTP/1.1" 200 -
+2025-04-04 12:00:34,075 INFO [app] [main_routes.py:109] - Login route accessed with method: POST
+2025-04-04 12:00:34,076 INFO [app] [main_routes.py:114] - Login form submitted with data: {'login_type': 'password', 'username': 'juschen'}
+2025-04-04 12:00:34,077 INFO [app] [main_routes.py:129] - User juschen logged in successfully
+2025-04-04 12:00:34,078 INFO [werkzeug] [_internal.py:97] - 127.0.0.1 - - [04/Apr/2025 12:00:34] "[32mPOST /login HTTP/1.1[0m" 302 -
+2025-04-04 12:00:34,088 INFO [werkzeug] [_internal.py:97] - 127.0.0.1 - - [04/Apr/2025 12:00:34] "GET / HTTP/1.1" 200 -
+2025-04-04 12:00:37,386 ERROR [app] [main_routes.py:81] - Failed to render membership.html. Error: 'user' is undefined
+Traceback:
+Traceback (most recent call last):
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\app\routes\main_routes.py", line 78, in membership
+    return render_template('membership.html')
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\.venv\Lib\site-packages\flask\templating.py", line 150, in render_template
+    return _render(app, template, context)
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\.venv\Lib\site-packages\flask\templating.py", line 131, in _render
+    rv = template.render(context)
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\.venv\Lib\site-packages\jinja2\environment.py", line 1295, in render
+    self.environment.handle_exception()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\.venv\Lib\site-packages\jinja2\environment.py", line 942, in handle_exception
+    raise rewrite_traceback_stack(source=source)
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\templates\membership.html", line 82, in top-level template code
+    {% if user.user_type == 'premium' %}
+    ^
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\.venv\Lib\site-packages\jinja2\environment.py", line 490, in getattr
+    return getattr(obj, attribute)
+jinja2.exceptions.UndefinedError: 'user' is undefined
+
+2025-04-04 12:00:37,388 INFO [werkzeug] [_internal.py:97] - 127.0.0.1 - - [04/Apr/2025 12:00:37] "GET /membership HTTP/1.1" 200 -
+2025-04-04 12:00:39,142 INFO [werkzeug] [_internal.py:97] - 127.0.0.1 - - [04/Apr/2025 12:00:39] "GET / HTTP/1.1" 200 -
+2025-04-04 12:00:40,516 INFO [werkzeug] [_internal.py:97] - 127.0.0.1 - - [04/Apr/2025 12:00:40] "GET /history HTTP/1.1" 200 -
+2025-04-04 12:00:43,719 ERROR [app] [main_routes.py:50] - Failed to render correction.html. Error: Could not build url for endpoint 'correction'. Did you mean 'main.correction' instead?
+Traceback:
+Traceback (most recent call last):
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\app\routes\main_routes.py", line 47, in correction
+    return render_template('correction.html')
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\.venv\Lib\site-packages\flask\templating.py", line 150, in render_template
+    return _render(app, template, context)
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\.venv\Lib\site-packages\flask\templating.py", line 131, in _render
+    rv = template.render(context)
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\.venv\Lib\site-packages\jinja2\environment.py", line 1295, in render
+    self.environment.handle_exception()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\.venv\Lib\site-packages\jinja2\environment.py", line 942, in handle_exception
+    raise rewrite_traceback_stack(source=source)
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\templates\correction.html", line 110, in top-level template code
+    <form id="essayForm" method="post" action="{{ url_for('correction') }}" enctype="multipart/form-data">
+    
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\.venv\Lib\site-packages\flask\app.py", line 1121, in url_for
+    return self.handle_url_build_error(error, endpoint, values)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\.venv\Lib\site-packages\flask\app.py", line 1110, in url_for
+    rv = url_adapter.build(  # type: ignore[union-attr]
+        endpoint,
+    ...<3 lines>...
+        force_external=_external,
+    )
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\.venv\Lib\site-packages\werkzeug\routing\map.py", line 924, in build
+    raise BuildError(endpoint, values, method, self)
+werkzeug.routing.exceptions.BuildError: Could not build url for endpoint 'correction'. Did you mean 'main.correction' instead?
+
+2025-04-04 12:00:43,721 INFO [werkzeug] [_internal.py:97] - 127.0.0.1 - - [04/Apr/2025 12:00:43] "GET /correction HTTP/1.1" 200 -
+2025-04-04 12:00:46,582 INFO [werkzeug] [_internal.py:97] - 127.0.0.1 - - [04/Apr/2025 12:00:46] "GET /correction HTTP/1.1" 200 -
+2025-04-04 12:00:52,209 INFO [werkzeug] [_internal.py:97] - 127.0.0.1 - - [04/Apr/2025 12:00:52] "[32mGET /logout HTTP/1.1[0m" 302 -
+2025-04-04 12:00:52,216 INFO [werkzeug] [_internal.py:97] - 127.0.0.1 - - [04/Apr/2025 12:00:52] "GET / HTTP/1.1" 200 -
+2025-04-04 12:00:53,184 INFO [app] [main_routes.py:109] - Login route accessed with method: GET
+2025-04-04 12:00:53,186 INFO [werkzeug] [_internal.py:97] - 127.0.0.1 - - [04/Apr/2025 12:00:53] "GET /login HTTP/1.1" 200 -
+2025-04-04 12:00:57,217 INFO [app] [main_routes.py:109] - Login route accessed with method: POST
+2025-04-04 12:00:57,218 INFO [app] [main_routes.py:114] - Login form submitted with data: {'login_type': 'password', 'username': 'chcfyl'}
+2025-04-04 12:00:57,219 INFO [app] [main_routes.py:129] - User chcfyl logged in successfully
+2025-04-04 12:00:57,219 INFO [werkzeug] [_internal.py:97] - 127.0.0.1 - - [04/Apr/2025 12:00:57] "[32mPOST /login HTTP/1.1[0m" 302 -
+2025-04-04 12:00:57,227 INFO [werkzeug] [_internal.py:97] - 127.0.0.1 - - [04/Apr/2025 12:00:57] "GET / HTTP/1.1" 200 -
+2025-04-04 12:00:58,905 INFO [werkzeug] [_internal.py:97] - 127.0.0.1 - - [04/Apr/2025 12:00:58] "GET /history HTTP/1.1" 200 -
+2025-04-04 12:01:00,077 INFO [werkzeug] [_internal.py:97] - 127.0.0.1 - - [04/Apr/2025 12:01:00] "GET /batch_upload HTTP/1.1" 200 -
+2025-04-04 12:01:02,138 INFO [werkzeug] [_internal.py:97] - 127.0.0.1 - - [04/Apr/2025 12:01:02] "GET /correction HTTP/1.1" 200 -
+2025-04-04 12:01:40,724 INFO [werkzeug] [_internal.py:97] - 127.0.0.1 - - [04/Apr/2025 12:01:40] "GET /correction HTTP/1.1" 200 -
+2025-04-04 12:01:55,979 INFO [werkzeug] [_internal.py:97] - 127.0.0.1 - - [04/Apr/2025 12:01:55] "GET /membership HTTP/1.1" 200 -
+2025-04-04 12:06:44,484 INFO [werkzeug] [_internal.py:97] -  * Restarting with stat
+2025-04-04 12:06:44,855 INFO [werkzeug] [_internal.py:97] -  * Detected change in 'D:\\git-justin0101\\auto-currection\\AutoCorrection-V2.0-Backup-Before-Refactor\\app\\routes\\main_routes.py', reloading
+2025-04-04 12:06:45,101 INFO [werkzeug] [_internal.py:97] -  * Restarting with stat

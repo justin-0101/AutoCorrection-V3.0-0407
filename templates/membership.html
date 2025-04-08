@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>会员中心 - 小园丁作文批改</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
+    <style>
+        .pricing-header {
+            max-width: 700px;
+        }
+        .card-deck .card {
+            min-width: 220px;
+        }
+        .card-header.premium {
+            background-color: #9c27b0;
+            color: white;
+        }
+        .card-header.regular {
+            background-color: #2196f3;
+            color: white;
+        }
+        .card-header.free {
+            background-color: #4caf50;
+            color: white;
+        }
+        .feature-list {
+            list-style-type: none;
+            padding-left: 0;
+        }
+        .feature-list li {
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(0,0,0,.125);
+        }
+        .feature-list li:last-child {
+            border-bottom: none;
+        }
+        .feature-icon {
+            margin-right: 10px;
+        }
+        .usage-info {
+            background-color: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+        .progress {
+            height: 20px;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <!-- 导航栏 -->
+    {% include 'navbar.html' %}
+
+    <div class="container py-5">
+        <!-- 消息提示 -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible fade show">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="pricing-header p-3 pb-md-4 mx-auto text-center">
+            <h1 class="display-4 fw-normal">会员中心</h1>
+            <p class="fs-5 text-muted">升级您的会员等级，获取更多批改次数和高级功能</p>
+        </div>
+
+        <!-- 会员使用情况 -->
+        <div class="usage-info">
+            <h4>您的会员情况</h4>
+            <div class="row mt-3">
+                <div class="col-md-6">
+                    <p><strong>当前会员类型:</strong> 
+                        {% if user.user_type == 'premium' %}
+                            <span class="badge bg-primary">高级会员</span>
+                        {% elif user.user_type == 'regular' %}
+                            <span class="badge bg-info">普通会员</span>
+                        {% else %}
+                            <span class="badge bg-secondary">免费用户</span>
+                        {% endif %}
+                    </p>
+                    {% if user.membership_expiry and user.user_type != 'free' %}
+                        <p><strong>会员到期日:</strong> {{ user.membership_expiry }}</p>
+                    {% endif %}
+                </div>
+                <div class="col-md-6">
+                    <p><strong>已使用次数:</strong> {{ user.essays_total_used }}</p>
+                    <p><strong>剩余批改次数:</strong> 
+                        {% if user.vip_status == -1 %}
+                            <span class="badge bg-success">无限</span>
+                        {% else %}
+                            {{ user.essays_remaining }}
+                        {% endif %}
+                    </p>
+                    <p><a href="{{ url_for('main.user_history') }}" class="btn btn-sm btn-outline-primary mt-2">
+                        <i class="bi bi-receipt"></i> 查看订单历史
+                    </a></p>
+                </div>
+            </div>
+            
+            <!-- 剩余批改次数进度条 -->
+            {% if user.vip_status != -1 and user.user_type != 'free' %}
+                <div class="mt-3">
+                    <label><strong>本月批改次数使用情况:</strong></label>
+                    {% set percentage = (user.essays_total_used / (user.essays_total_used + user.essays_remaining)) * 100 if user.essays_remaining > 0 else 100 %}
+                    <div class="progress">
+                        <div class="progress-bar progress-bar-striped" 
+                             role="progressbar" 
+                             style="width: {{ percentage }}%;" 
+                             aria-valuenow="{{ percentage }}" 
+                             aria-valuemin="0" 
+                             aria-valuemax="100">
+                            {{ user.essays_total_used }}/{{ user.essays_total_used + user.essays_remaining }}
+                        </div>
+                    </div>
+                </div>
+            {% endif %}
+            
+            <!-- 每日使用限制进度条 -->
+            {% if user.essays_daily_limit > 0 %}
+                <div class="mt-3">
+                    <label><strong>今日已使用:</strong></label>
+                    {% set daily_percentage = (user.essays_daily_used / user.essays_daily_limit) * 100 %}
+                    <div class="progress">
+                        <div class="progress-bar progress-bar-striped bg-info" 
+                             role="progressbar" 
+                             style="width: {{ daily_percentage }}%;" 
+                             aria-valuenow="{{ daily_percentage }}" 
+                             aria-valuemin="0" 
+                             aria-valuemax="100">
+                            {{ user.essays_daily_used }}/{{ user.essays_daily_limit }}
+                        </div>
+                    </div>
+                </div>
+            {% endif %}
+        </div>
+
+        <!-- 会员套餐 -->
+        <div class="row row-cols-1 row-cols-md-3 mb-3 text-center">
+            <!-- 免费套餐 -->
+            <div class="col">
+                <div class="card mb-4 rounded-3 shadow-sm">
+                    <div class="card-header py-3 free">
+                        <h4 class="my-0 fw-normal">免费用户</h4>
+                    </div>
+                    <div class="card-body">
+                        <h1 class="card-title pricing-card-title">¥0<small class="text-muted fw-light">/永久</small></h1>
+                        <ul class="feature-list mt-3 mb-4">
+                            <li><i class="bi bi-check-circle-fill text-success feature-icon"></i>{{ config.free_essays }}篇作文批改额度</li>
+                            <li><i class="bi bi-check-circle-fill text-success feature-icon"></i>每日限制{{ config.free_daily_limit }}篇</li>
+                            <li><i class="bi bi-check-circle-fill text-success feature-icon"></i>AI智能批改</li>
+                            <li><i class="bi bi-x-circle-fill text-danger feature-icon"></i>批量上传功能</li>
+                            <li><i class="bi bi-x-circle-fill text-danger feature-icon"></i>高级评分报告</li>
+                        </ul>
+                        {% if user.user_type == 'free' %}
+                            <button type="button" class="w-100 btn btn-lg btn-outline-success" disabled>当前套餐</button>
+                        {% else %}
+                            <button type="button" class="w-100 btn btn-lg btn-outline-success" disabled>基础套餐</button>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 普通会员 -->
+            <div class="col">
+                <div class="card mb-4 rounded-3 shadow-sm">
+                    <div class="card-header py-3 regular">
+                        <h4 class="my-0 fw-normal">普通会员</h4>
+                    </div>
+                    <div class="card-body">
+                        <h1 class="card-title pricing-card-title">¥89<small class="text-muted fw-light">/月</small></h1>
+                        <ul class="feature-list mt-3 mb-4">
+                            <li><i class="bi bi-check-circle-fill text-success feature-icon"></i>{{ config.regular_monthly_essays }}篇作文批改额度/月</li>
+                            <li><i class="bi bi-check-circle-fill text-success feature-icon"></i>每日限制{{ config.regular_daily_essays }}篇</li>
+                            <li><i class="bi bi-check-circle-fill text-success feature-icon"></i>高级AI智能批改</li>
+                            <li><i class="bi bi-check-circle-fill text-success feature-icon"></i>批量上传功能</li>
+                            <li><i class="bi bi-check-circle-fill text-success feature-icon"></i>详细评分报告</li>
+                        </ul>
+                        {% if user.user_type == 'regular' %}
+                            <button type="button" class="w-100 btn btn-lg btn-primary" disabled>当前套餐</button>
+                        {% else %}
+                            <button type="button" class="w-100 btn btn-lg btn-outline-primary" onclick="alert('购买功能即将上线，敬请期待！')">立即购买</button>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 高级会员 -->
+            <div class="col">
+                <div class="card mb-4 rounded-3 shadow-sm border-primary">
+                    <div class="card-header py-3 premium text-white">
+                        <h4 class="my-0 fw-normal">高级会员</h4>
+                    </div>
+                    <div class="card-body">
+                        <h1 class="card-title pricing-card-title">¥129<small class="text-muted fw-light">/月</small></h1>
+                        <ul class="feature-list mt-3 mb-4">
+                            <li><i class="bi bi-check-circle-fill text-success feature-icon"></i>{{ config.premium_monthly_essays }}篇作文批改额度/月</li>
+                            <li><i class="bi bi-check-circle-fill text-success feature-icon"></i>每日限制{{ config.premium_daily_essays }}篇</li>
+                            <li><i class="bi bi-check-circle-fill text-success feature-icon"></i>高级AI智能批改</li>
+                            <li><i class="bi bi-check-circle-fill text-success feature-icon"></i>批量上传功能</li>
+                            <li><i class="bi bi-check-circle-fill text-success feature-icon"></i>详细评分报告</li>
+                            <li><i class="bi bi-check-circle-fill text-success feature-icon"></i>优先处理</li>
+                        </ul>
+                        {% if user.user_type == 'premium' %}
+                            <button type="button" class="w-100 btn btn-lg btn-primary" disabled>当前套餐</button>
+                        {% else %}
+                            <button type="button" class="w-100 btn btn-lg btn-primary" onclick="alert('购买功能即将上线，敬请期待！')">立即购买</button>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 会员说明 -->
+        <div class="row mt-5">
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-header bg-light">
+                        <h5 class="mb-0">会员使用须知</h5>
+                    </div>
+                    <div class="card-body">
+                        <ol>
+                            <li>免费用户可永久使用系统，但有限制次数。</li>
+                            <li>普通会员和高级会员为按月订阅，到期后自动恢复为免费用户。</li>
+                            <li>会员剩余次数在到期后不会累计到下一个订阅周期。</li>
+                            <li>每日使用次数限制在每天零点自动重置。</li>
+                            <li>批量上传功能仅对会员开放，请合理使用。</li>
+                            <li>如有任何问题，请联系客服。</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 页脚 -->
+    <footer class="footer mt-5 py-3 bg-light">
+        <div class="container text-center">
+            <span class="text-muted">© 2025 小园丁作文批改系统 版权所有</span>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html> 

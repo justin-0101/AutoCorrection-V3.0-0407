@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>错误 {{ error_code|default('500') }} - 作文批改系统管理后台</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <style>
+        body {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background-color: #f8f9fa;
+        }
+        .error-container {
+            text-align: center;
+            max-width: 500px;
+            padding: 40px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .error-code {
+            font-size: 72px;
+            font-weight: bold;
+            color: #dc3545;
+            margin-bottom: 20px;
+        }
+        .error-message {
+            font-size: 24px;
+            margin-bottom: 30px;
+            color: #343a40;
+        }
+        .error-icon {
+            font-size: 60px;
+            color: #dc3545;
+            margin-bottom: 20px;
+        }
+    </style>
+    <script>
+        // 确保所有必要的变量都有默认值
+        window.stats = window.stats || { 
+            total_users: 0, 
+            total_essays: 0, 
+            premium_users: 0, 
+            total_income: 0 
+        };
+        
+        window.system_info = window.system_info || {
+            ai_available: false,
+            last_backup: '从未备份',
+            uptime: '未知',
+            error_logs: 0
+        };
+        
+        window.backup_info = window.backup_info || {
+            last_backup: '从未备份',
+            backup_count: 0,
+            auto_backup: false,
+            backup_location: 'backups/'
+        };
+        
+        window.config = window.config || {
+            ai_service_status: '1',
+            max_tokens: 4096,
+            temperature: 0.7,
+            model_name: 'deepseek-reasoner'
+        };
+    </script>
+</head>
+<body>
+    <div class="error-container">
+        <div class="error-icon">
+            {% if error_code == 404 %}
+                <i class="bi bi-exclamation-triangle"></i>
+            {% elif error_code == 403 %}
+                <i class="bi bi-lock"></i>
+            {% else %}
+                <i class="bi bi-exclamation-circle"></i>
+            {% endif %}
+        </div>
+        <div class="error-code">{{ error_code|default('500') }}</div>
+        <div class="error-message">{{ error_message|default('服务器内部错误') }}</div>
+        <p class="text-muted mb-4">抱歉，您请求的页面出现了错误。</p>
+        <div class="d-grid gap-2">
+            <a href="{{ url_for('admin.index') }}" class="btn btn-primary">
+                <i class="bi bi-house-door me-2"></i>返回管理后台
+            </a>
+            <a href="{{ url_for('main.index') }}" class="btn btn-outline-secondary">
+                <i class="bi bi-arrow-left me-2"></i>返回前台首页
+            </a>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html> 

@@ -1,0 +1,146 @@
+import sqlite3
+import os
+import logging
+from werkzeug.security import generate_password_hash
+from datetime import datetime
+
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("init_db.log"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# 数据库文件
+DB_FILE = 'instance/essay_correction.db'
+
+def init_db():
+    """初始化数据库，创建所需表格"""
+    try:
+        # 确保instance目录存在
+        if not os.path.exists('instance'):
+            os.makedirs('instance')
+            
+        # 检查数据库文件是否存在，如果存在则先备份
+        if os.path.exists(DB_FILE):
+            backup_file = f"{DB_FILE}.bak.{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            os.rename(DB_FILE, backup_file)
+            logger.info(f"已将旧数据库备份为: {backup_file}")
+        
+        # 连接到数据库
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        logger.info("已连接到数据库")
+        
+        # 创建用户表
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            email TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_login TIMESTAMP,
+            role TEXT DEFAULT 'user',
+            is_active BOOLEAN DEFAULT 1,
+            user_type TEXT DEFAULT 'free',
+            essays_remaining INTEGER DEFAULT 10,
+            essays_monthly_limit INTEGER DEFAULT 10,
+            essays_daily_limit INTEGER DEFAULT 5,
+            essays_daily_used INTEGER DEFAULT 0,
+            essays_total_used INTEGER DEFAULT 0,
+            daily_reset_date TEXT,
+            membership_expiry DATE,
+            vip_status INTEGER DEFAULT 0,
+            registration_bonus_claimed BOOLEAN DEFAULT 0
+        )
+        ''')
+        logger.info("已创建用户表")
+        
+        # 创建文章历史表
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS essay_history (
+            essay_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            title TEXT,
+            original_text TEXT,
+            corrected_text TEXT,
+            score INTEGER,
+            feedback TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (user_id)
+        )
+        ''')
+        logger.info("已创建文章历史表")
+
+        # 创建会员订单表
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS membership_orders (
+            order_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            order_number TEXT NOT NULL UNIQUE,
+            membership_type TEXT NOT NULL,
+            amount DECIMAL(10,2) NOT NULL,
+            payment_status TEXT DEFAULT 'pending',
+            payment_method TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            paid_at TIMESTAMP,
+            expiry_date DATE,
+            FOREIGN KEY (user_id) REFERENCES users (user_id)
+        )
+        ''')
+        logger.info("已创建会员订单表")
+        
+        # 创建网站配置表
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS website_config (
+            config_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            config_name TEXT NOT NULL UNIQUE,
+            config_value TEXT,
+            config_description TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP
+        )
+        ''')
+        logger.info("已创建网站配置表")
+
+        # 插入默认网站配置
+        default_configs = [
+            ('site_name', '英语作文AI批改系统', '网站名称'),
+            ('admin_email', 'admin@example.com', '管理员邮箱'),
+            ('max_upload_size', '5', '最大上传文件大小(MB)'),
+            ('maintenance_mode', '0', '维护模式(0=关闭,1=开启)'),
+            ('scoring_preset', '75', '评分预设分数'),
+            ('enable_registration', '1', '是否允许新用户注册(0=关闭,1=开启)'),
+            ('free_essays', '10', '免费用户可用次数'),
+            ('regular_monthly_essays', '300', '普通会员每月可用次数'),
+            ('regular_daily_essays', '30', '普通会员每日可用次数'),
+            ('premium_monthly_essays', '500', '高级会员每月可用次数'),
+            ('premium_daily_essays', '60', '高级会员每日可用次数'),
+            ('registration_bonus', '3', '注册奖励次数')
+        ]
+        
+        for config in default_configs:
+            cursor.execute('''
+            INSERT OR IGNORE INTO website_config (config_name, config_value, config_description)
+            VALUES (?, ?, ?)
+            ''', config)
+        logger.info("已插入默认网站配置")
+        
+        # 提交更改并关闭连接
+        conn.commit()
+        conn.close()
+        logger.info("数据库初始化完成")
+        
+        return True, "数据库初始化成功"
+    except Exception as e:
+        logger.error(f"数据库初始化失败: {str(e)}")
+        return False, f"数据库初始化失败: {str(e)}"
+
+if __name__ == "__main__":
+    success, message = init_db()
+    print(message) 

@@ -1,0 +1,208 @@
+{% extends "admin/layout.html" %}
+
+{% block title %}控制面板 - 管理后台{% endblock %}
+
+{% block head_extra %}
+<style>
+.stat-card {
+    border-radius: 8px;
+    padding: 20px;
+    transition: transform 0.3s ease;
+}
+.stat-card:hover {
+    transform: translateY(-5px);
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="admin-title">
+    <i class="bi bi-speedometer2"></i> 系统控制面板
+</div>
+
+<!-- 统计概览 -->
+<div class="row mb-4">
+    <div class="col-lg-3 col-md-6 mb-3">
+        <div class="card h-100">
+            <div class="stat-card bg-primary bg-opacity-10">
+                <div class="stat-value text-primary">{{ stats.total_users if stats is defined else 0 }}</div>
+                <div class="stat-label">注册用户</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-3 col-md-6 mb-3">
+        <div class="card h-100">
+            <div class="stat-card bg-success bg-opacity-10">
+                <div class="stat-value text-success">{{ stats.total_essays if stats is defined else 0 }}</div>
+                <div class="stat-label">批改作文</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-3 col-md-6 mb-3">
+        <div class="card h-100">
+            <div class="stat-card bg-warning bg-opacity-10">
+                <div class="stat-value text-warning">{{ stats.premium_users if stats is defined else 0 }}</div>
+                <div class="stat-label">付费会员</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-3 col-md-6 mb-3">
+        <div class="card h-100">
+            <div class="stat-card bg-info bg-opacity-10">
+                <div class="stat-value text-info">{{ stats.total_income if stats is defined else 0 }}</div>
+                <div class="stat-label">总收入(元)</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 系统信息 -->
+<div class="row mb-4">
+    <div class="col-lg-6 mb-4 mb-lg-0">
+        <div class="card h-100">
+            <div class="card-header">
+                <i class="bi bi-people"></i> 最近注册用户
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>用户名</th>
+                                <th>注册时间</th>
+                                <th>用户类型</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% if recent_users is defined and recent_users %}
+                                {% for user in recent_users %}
+                                <tr>
+                                    <td>{{ user.username }}</td>
+                                    <td>{{ user.created_at }}</td>
+                                    <td>
+                                        {% if user.user_type == 'free' %}
+                                        <span class="badge bg-secondary">免费用户</span>
+                                        {% elif user.user_type == 'regular' %}
+                                        <span class="badge bg-primary">普通会员</span>
+                                        {% elif user.user_type == 'premium' %}
+                                        <span class="badge bg-warning">高级会员</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <a href="{{ url_for('admin.users') }}" class="btn btn-sm btn-outline-primary">
+                                            <i class="bi bi-pencil"></i>
+                                        </a>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            {% else %}
+                                <tr>
+                                    <td colspan="4" class="text-center">暂无数据</td>
+                                </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="text-end">
+                    <a href="{{ url_for('admin.users') }}" class="btn btn-sm btn-outline-primary">查看所有用户</a>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-header">
+                <i class="bi bi-file-earmark-text"></i> 最近批改的作文
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>标题</th>
+                                <th>用户</th>
+                                <th>提交时间</th>
+                                <th>得分</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% if recent_essays is defined and recent_essays %}
+                                {% for essay in recent_essays %}
+                                <tr>
+                                    <td>{{ essay.title }}</td>
+                                    <td>{{ essay.username }}</td>
+                                    <td>{{ essay.submission_time }}</td>
+                                    <td>{{ essay.total_score }}</td>
+                                </tr>
+                                {% endfor %}
+                            {% else %}
+                                <tr>
+                                    <td colspan="4" class="text-center">暂无数据</td>
+                                </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="text-end">
+                    <a href="{{ url_for('admin.stats') }}" class="btn btn-sm btn-outline-primary">查看统计数据</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 系统状态 -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-gear"></i> 系统状态
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <p><strong>AI评分服务状态：</strong> 
+                            {% if system_info is defined and system_info.ai_available %}
+                            <span class="badge bg-success">正常</span>
+                            {% else %}
+                            <span class="badge bg-danger">异常</span>
+                            {% endif %}
+                        </p>
+                        <p><strong>数据库状态：</strong> 
+                            <span class="badge bg-success">正常</span>
+                        </p>
+                        <p><strong>系统版本：</strong> v2.0</p>
+                    </div>
+                    <div class="col-md-6">
+                        <p><strong>上次数据备份：</strong> {{ system_info.last_backup|default('从未备份') if system_info is defined else '从未备份' }}</p>
+                        <p><strong>系统运行时间：</strong> {{ system_info.uptime if system_info is defined else '未知' }}</p>
+                        <p><strong>最近错误日志数：</strong> {{ system_info.error_logs if system_info is defined else 0 }}</p>
+                    </div>
+                </div>
+                <div class="text-end mt-3">
+                    <a href="{{ url_for('admin.stats') }}" class="btn btn-sm btn-outline-danger">查看系统日志</a>
+                    <a href="{{ url_for('admin.config') }}" class="btn btn-sm btn-outline-primary">系统设置</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // 确保jQuery已加载
+    if (typeof $ !== 'undefined') {
+        console.log("jQuery is properly loaded!");
+        $(document).ready(function() {
+            console.log("Dashboard loaded successfully");
+        });
+    } else {
+        console.error("jQuery is not loaded properly!");
+    }
+});
+</script>
+{% endblock %} 

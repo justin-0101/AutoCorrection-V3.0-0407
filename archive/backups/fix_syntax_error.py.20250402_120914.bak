@@ -1,0 +1,67 @@
+"""
+修复app.py文件中的语法错误 - 未闭合的try-except块
+"""
+
+def fix_syntax_error():
+    try:
+        # 读取app.py文件
+        with open('app.py', 'r', encoding='utf-8') as file:
+            lines = file.readlines()
+        
+        # 查找并修复错误的语法
+        fixed_lines = []
+        in_try_block = False
+        has_except_block = False
+        for i, line in enumerate(lines):
+            # 检测try块的开始
+            if "try:" in line and not line.strip().startswith("#"):
+                in_try_block = True
+                has_except_block = False
+            
+            # 检测except块
+            if "except" in line and not line.strip().startswith("#") and in_try_block:
+                has_except_block = True
+            
+            # 特别处理第795行左右的错误
+            if i >= 794 and i <= 796 and "logger.error(f\"购买会员失败" in line:
+                # 跳过这行错误的代码
+                print(f"跳过错误行: {line.strip()}")
+                continue
+            
+            if i >= 796 and i <= 798 and "flash(f'购买会员失败" in line:
+                # 跳过这行错误的代码
+                print(f"跳过错误行: {line.strip()}")
+                continue
+                
+            if i >= 798 and i <= 800 and "return redirect(url_for('membership'))" in line:
+                # 跳过这行错误的代码
+                print(f"跳过错误行: {line.strip()}")
+                continue
+                
+            # 在if-elif块的最后添加else块和缺失的except块
+            if i >= 793 and i <= 795 and "及格" in line and line.strip().endswith(":"):
+                fixed_lines.append(line)
+                # 添加else块并关闭try-except块
+                fixed_lines.append("            else:\n")
+                fixed_lines.append("                grade = \"不及格\"\n")
+                fixed_lines.append("\n")
+                fixed_lines.append("        except (KeyError, ValueError) as e:\n")
+                fixed_lines.append("            logger.warning(f\"确定等级时出现问题: {e}，使用默认值\")\n")
+                fixed_lines.append("            grade = \"未评级\"\n")
+                fixed_lines.append("\n")
+                continue
+            
+            fixed_lines.append(line)
+        
+        # 写回文件
+        with open('app.py', 'w', encoding='utf-8') as file:
+            file.writelines(fixed_lines)
+        
+        print("成功修复app.py文件中的语法错误!")
+        return True
+    except Exception as e:
+        print(f"修复过程中出错: {str(e)}")
+        return False
+
+if __name__ == "__main__":
+    fix_syntax_error() 

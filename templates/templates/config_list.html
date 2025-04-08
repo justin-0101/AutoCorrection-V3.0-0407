@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>配置管理</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1000px;
+        }
+        .card {
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .config-item {
+            border-bottom: 1px solid #dee2e6;
+            padding: 15px 0;
+        }
+        .config-item:last-child {
+            border-bottom: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2>网站配置管理</h2>
+            <a href="/website-config" class="btn btn-primary">添加新配置</a>
+        </div>
+        
+        <div class="card">
+            <div class="card-body" id="configList">
+                <!-- 配置列表将通过JavaScript动态加载 -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 加载配置列表
+        async function loadConfigs() {
+            try {
+                const response = await fetch('/api/website-configs');
+                const result = await response.json();
+                
+                const configList = document.getElementById('configList');
+                if (result.success && result.configs.length > 0) {
+                    configList.innerHTML = result.configs.map(config => `
+                        <div class="config-item">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div>
+                                    <h5 class="mb-1">${config.projectName}</h5>
+                                    <p class="mb-1"><strong>根目录：</strong>${config.rootDir}</p>
+                                    ${config.notes ? `<p class="mb-1"><strong>备注：</strong>${config.notes}</p>` : ''}
+                                    <p class="mb-0">
+                                        <strong>SSL状态：</strong>
+                                        ${config.sslEnabled ? '<span class="text-success">已启用</span>' : '<span class="text-secondary">未启用</span>'}
+                                    </p>
+                                </div>
+                                <div>
+                                    <button class="btn btn-danger btn-sm" onclick="deleteConfig('${config.projectName}')">
+                                        删除
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    configList.innerHTML = '<p class="text-center text-muted my-4">暂无配置</p>';
+                }
+            } catch (error) {
+                console.error('加载配置失败：', error);
+                document.getElementById('configList').innerHTML = 
+                    '<p class="text-center text-danger my-4">加载配置失败，请刷新页面重试</p>';
+            }
+        }
+
+        // 删除配置
+        async function deleteConfig(projectName) {
+            if (!confirm(`确定要删除 ${projectName} 的配置吗？`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/website-config/${projectName}`, {
+                    method: 'DELETE'
+                });
+                const result = await response.json();
+                
+                if (result.success) {
+                    alert('配置删除成功');
+                    loadConfigs(); // 重新加载配置列表
+                } else {
+                    alert('删除失败：' + result.message);
+                }
+            } catch (error) {
+                console.error('删除配置失败：', error);
+                alert('删除配置失败，请稍后重试');
+            }
+        }
+
+        // 页面加载时获取配置列表
+        document.addEventListener('DOMContentLoaded', loadConfigs);
+    </script>
+</body>
+</html>

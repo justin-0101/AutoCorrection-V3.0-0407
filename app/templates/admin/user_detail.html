@@ -1,0 +1,216 @@
+{% extends "admin/layout.html" %}
+
+{% block title %}用户详情 - 管理后台{% endblock %}
+
+{% block content %}
+<div class="admin-title">
+    <i class="bi bi-person"></i> 用户详情：{{ user.username }}
+</div>
+
+<div class="row">
+    <!-- 用户基本信息 -->
+    <div class="col-lg-6">
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <div>基本信息</div>
+                <div>
+                    <a href="{{ url_for('user_management') }}" class="btn btn-sm btn-outline-secondary">
+                        <i class="bi bi-arrow-left"></i> 返回
+                    </a>
+                </div>
+            </div>
+            <div class="card-body">
+                <form action="{{ url_for('update_user', user_id=user.id) }}" method="post">
+                    <div class="mb-3">
+                        <label for="username" class="form-label">用户名</label>
+                        <input type="text" class="form-control" id="username" name="username" value="{{ user.username }}" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="email" class="form-label">邮箱</label>
+                        <input type="email" class="form-control" id="email" name="email" value="{{ user.email }}" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="new_password" class="form-label">新密码</label>
+                        <input type="password" class="form-control" id="new_password" name="new_password" placeholder="留空表示不修改">
+                    </div>
+                    <div class="mb-3">
+                        <label for="role" class="form-label">角色</label>
+                        <select class="form-select" id="role" name="role">
+                            <option value="user" {% if user.role == 'user' %}selected{% endif %}>普通用户</option>
+                            <option value="admin" {% if user.role == 'admin' %}selected{% endif %}>管理员</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="user_type" class="form-label">用户类型</label>
+                        <select class="form-select" id="user_type" name="user_type">
+                            <option value="free" {% if user.user_type == 'free' %}selected{% endif %}>免费用户</option>
+                            <option value="regular" {% if user.user_type == 'regular' %}selected{% endif %}>普通会员</option>
+                            <option value="premium" {% if user.user_type == 'premium' %}selected{% endif %}>高级会员</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="is_active" class="form-label">状态</label>
+                        <select class="form-select" id="is_active" name="is_active">
+                            <option value="1" {% if user.is_active %}selected{% endif %}>正常</option>
+                            <option value="0" {% if not user.is_active %}selected{% endif %}>禁用</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="created_at" class="form-label">注册时间</label>
+                        <input type="text" class="form-control" id="created_at" value="{{ user.created_at }}" disabled>
+                    </div>
+                    <div class="mb-3">
+                        <label for="last_login" class="form-label">最近登录</label>
+                        <input type="text" class="form-control" id="last_login" value="{{ user.last_login|default('-') }}" disabled>
+                    </div>
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary">保存更改</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 会员权益设置 -->
+    <div class="col-lg-6">
+        <div class="card mb-4">
+            <div class="card-header">会员权益设置</div>
+            <div class="card-body">
+                <form action="{{ url_for('update_user_membership', user_id=user.id) }}" method="post">
+                    <div class="mb-3">
+                        <label for="essays_remaining" class="form-label">剩余批改次数</label>
+                        <input type="number" class="form-control" id="essays_remaining" name="essays_remaining" value="{{ user.essays_remaining }}" min="0">
+                    </div>
+                    <div class="mb-3">
+                        <label for="essays_monthly_limit" class="form-label">每月批改次数限制</label>
+                        <input type="number" class="form-control" id="essays_monthly_limit" name="essays_monthly_limit" value="{{ user.essays_monthly_limit }}" min="0">
+                    </div>
+                    <div class="mb-3">
+                        <label for="essays_daily_limit" class="form-label">每日批改次数限制</label>
+                        <input type="number" class="form-control" id="essays_daily_limit" name="essays_daily_limit" value="{{ user.essays_daily_limit }}" min="0">
+                    </div>
+                    <div class="mb-3">
+                        <label for="essays_daily_used" class="form-label">今日已用次数</label>
+                        <input type="number" class="form-control" id="essays_daily_used" name="essays_daily_used" value="{{ user.essays_daily_used }}" min="0">
+                    </div>
+                    <div class="mb-3">
+                        <label for="essays_total_used" class="form-label">总共使用次数</label>
+                        <input type="number" class="form-control" id="essays_total_used" name="essays_total_used" value="{{ user.essays_total_used }}" min="0" disabled>
+                    </div>
+                    <div class="mb-3">
+                        <label for="vip_status" class="form-label">VIP状态</label>
+                        <select class="form-select" id="vip_status" name="vip_status">
+                            <option value="0" {% if user.vip_status == 0 %}selected{% endif %}>普通</option>
+                            <option value="1" {% if user.vip_status == 1 %}selected{% endif %}>VIP用户</option>
+                            <option value="-1" {% if user.vip_status == -1 %}selected{% endif %}>不限次数特权</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="membership_expiry" class="form-label">会员过期时间</label>
+                        <input type="date" class="form-control" id="membership_expiry" name="membership_expiry" value="{{ user.membership_expiry }}">
+                    </div>
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-success">更新会员权益</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        <!-- 用户订单记录 -->
+        <div class="card mb-4">
+            <div class="card-header">订单记录</div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>订单号</th>
+                                <th>会员类型</th>
+                                <th>金额(元)</th>
+                                <th>状态</th>
+                                <th>时间</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% if user_orders %}
+                                {% for order in user_orders %}
+                                <tr>
+                                    <td>{{ order.order_number }}</td>
+                                    <td>
+                                        {% if order.membership_type == 'regular' %}
+                                        <span class="badge bg-primary">普通会员</span>
+                                        {% elif order.membership_type == 'premium' %}
+                                        <span class="badge bg-warning">高级会员</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ order.amount }}</td>
+                                    <td>
+                                        {% if order.payment_status == 'completed' %}
+                                        <span class="badge bg-success">已完成</span>
+                                        {% elif order.payment_status == 'pending' %}
+                                        <span class="badge bg-warning">处理中</span>
+                                        {% else %}
+                                        <span class="badge bg-danger">失败</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ order.created_at }}</td>
+                                </tr>
+                                {% endfor %}
+                            {% else %}
+                                <tr>
+                                    <td colspan="5" class="text-center">暂无订单记录</td>
+                                </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 用户作文列表 -->
+<div class="card mb-4">
+    <div class="card-header">
+        <i class="bi bi-file-earmark-text"></i> 作文历史
+    </div>
+    <div class="card-body">
+        {% if user_essays %}
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>标题</th>
+                        <th>提交时间</th>
+                        <th>字数</th>
+                        <th>评分</th>
+                        <th>等级</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for essay in user_essays %}
+                    <tr>
+                        <td>{{ essay.id }}</td>
+                        <td>{{ essay.title }}</td>
+                        <td>{{ essay.submission_time }}</td>
+                        <td>{{ essay.word_count }}</td>
+                        <td>{{ essay.total_score }}</td>
+                        <td>{{ essay.grade }}</td>
+                        <td>
+                            <a href="{{ url_for('results', essay_id=essay.id) }}" class="btn btn-sm btn-outline-primary" target="_blank">
+                                <i class="bi bi-eye"></i> 查看
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-center">该用户暂无作文记录</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %} 

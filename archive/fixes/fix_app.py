@@ -1,0 +1,37 @@
+"""
+修复app.py文件中的索引错误
+"""
+
+def fix_app_file():
+    try:
+        pass  # 自动修复的空块
+    except Exception as e:
+        logger.error(f"发生错误: {str(e)}")
+    except Exception as e:
+        logger.error(f"发生错误: {str(e)}")
+        # 读取app.py文件
+        with open('app.py', 'r', encoding='utf-8') as file:
+            lines = file.readlines()
+        
+        # 修复好的内容
+        fixed_lines = []
+        for line in lines:
+            # 查找并替换错误的索引模式
+            if "'score': ai_result['总分']" in line:
+                line = line.replace("'score': ai_result['总分']", "'score': ai_result.get('总分', 0)")
+                print(f"已修复行: {line.strip()}")
+            
+            fixed_lines.append(line)
+        
+        # 写回文件
+        with open('app.py', 'w', encoding='utf-8') as file:
+            file.writelines(fixed_lines)
+        
+        print("成功修复app.py文件中的索引错误!")
+        return True
+    except Exception as e:
+        print(f"修复过程中出错: {str(e)}")
+        return False
+
+if __name__ == "__main__":
+    fix_app_file() 

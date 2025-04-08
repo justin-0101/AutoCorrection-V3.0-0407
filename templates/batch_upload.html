@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>批量上传作文 - 小园丁作文批改</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .navbar-brand {
+            font-weight: bold;
+        }
+        .main-content {
+            flex: 1;
+        }
+        .footer {
+            background-color: #212529;
+            color: rgba(255,255,255,0.6);
+            padding: 20px 0;
+            margin-top: auto;
+        }
+        .footer-link {
+            color: rgba(255,255,255,0.6);
+            text-decoration: none;
+        }
+        .footer-link:hover {
+            color: white;
+        }
+        .upload-area {
+            border: 2px dashed #dee2e6;
+            border-radius: 12px;
+            padding: 40px 20px;
+            text-align: center;
+            background-color: #fff;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .upload-area:hover {
+            border-color: #0d6efd;
+            background-color: #f8f9fa;
+        }
+        .upload-area.dragover {
+            border-color: #0d6efd;
+            background-color: #f1f8ff;
+        }
+        .upload-icon {
+            font-size: 3.5rem;
+            color: #0d6efd;
+            margin-bottom: 1rem;
+            opacity: 0.8;
+        }
+        .selected-files {
+            margin-top: 20px;
+        }
+        .file-item {
+            display: flex;
+            align-items: center;
+            padding: 12px;
+            background-color: #fff;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            transition: all 0.2s ease;
+        }
+        .file-item:hover {
+            border-color: #0d6efd;
+            box-shadow: 0 2px 4px rgba(13, 110, 253, 0.1);
+        }
+        .file-icon {
+            margin-right: 12px;
+            color: #0d6efd;
+            font-size: 1.2rem;
+        }
+        .file-info {
+            flex-grow: 1;
+            margin-right: 12px;
+        }
+        .file-name {
+            margin-bottom: 2px;
+        }
+        .file-status {
+            margin-left: 12px;
+            font-size: 0.85rem;
+            padding: 4px 8px;
+            border-radius: 12px;
+        }
+        .status-pending {
+            background-color: #ffc107;
+            color: #000;
+        }
+        .status-processing {
+            background-color: #0dcaf0;
+            color: #fff;
+        }
+        .status-success {
+            background-color: #198754;
+            color: #fff;
+        }
+        .status-error {
+            background-color: #dc3545;
+            color: #fff;
+        }
+        .remove-file {
+            color: #dc3545;
+            cursor: pointer;
+            padding: 6px;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+        }
+        .remove-file:hover {
+            background-color: #fef2f2;
+            color: #dc3545;
+        }
+        .progress {
+            height: 5px;
+        }
+        .membership-info {
+            background-color: #f1f8ff;
+            border-left: 4px solid #0d6efd;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+        }
+        .membership-badge {
+            padding: 5px 10px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: bold;
+        }
+        .badge-free {
+            background-color: #6c757d;
+            color: white;
+        }
+        .badge-regular {
+            background-color: #198754;
+            color: white;
+        }
+        .badge-premium {
+            background-color: #ffc107;
+            color: black;
+        }
+        .loading-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1050;
+        }
+        .loading-content {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .processing-list {
+            margin-top: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .task-progress {
+            height: 4px;
+            margin-top: 4px;
+            background-color: #e9ecef;
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        .task-progress-bar {
+            height: 100%;
+            background-color: #0d6efd;
+            transition: width 0.3s ease;
+        }
+    </style>
+</head>
+<body>
+    <!-- 导航栏 -->
+    {% include 'navbar.html' %}
+    
+    <div class="main-content py-5">
+        <div class="container">
+            <h2 class="mb-4">批量上传作文</h2>
+            
+            <div class="row">
+                <div class="col-lg-10 mx-auto">
+                    <!-- 会员信息展示 -->
+                    {% if remaining_info %}
+                    <div class="membership-info mb-4">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <div>
+                                <h5 class="mb-0">您的批改次数</h5>
+                            </div>
+                            <span class="membership-badge 
+                                {% if remaining_info.user_type == 'free' %}badge-free
+                                {% elif remaining_info.user_type == 'regular' %}badge-regular
+                                {% elif remaining_info.user_type == 'premium' %}badge-premium{% endif %}">
+                                {{ '免费用户' if remaining_info.user_type == 'free' else
+                                   '普通会员' if remaining_info.user_type == 'regular' else
+                                   '高级会员' if remaining_info.user_type == 'premium' else
+                                   '未知' }}
+                            </span>
+                        </div>
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <strong>总剩余次数:</strong> 
+                                <span data-remaining="total">{{ remaining_info.total_remaining }}</span>
+                            </div>
+                            <div>
+                                <strong>今日剩余:</strong> 
+                                <span data-remaining="daily">{{ remaining_info.daily_remaining }}</span>
+                            </div>
+                        </div>
+                        <div class="mt-2 small text-muted">
+                            <i class="bi bi-info-circle"></i> 批量上传会根据处理成功的文件数量减少相应的批改次数
+                        </div>
+                    </div>
+                    {% endif %}
+                    
+                    <div class="card shadow-sm mb-4">
+                        <div class="card-body">
+                            <form id="uploadForm" action="{{ url_for('main.batch_upload') }}" method="post" enctype="multipart/form-data">
+                                <div class="upload-area" id="dropZone">
+                                    <i class="bi bi-cloud-arrow-up upload-icon"></i>
+                                    <h4>拖拽文件到此处或点击选择文件</h4>
+                                    <p class="text-muted">支持 .txt, .doc, .docx 格式，最多10个文件</p>
+                                    <input type="file" id="files" name="files[]" multiple accept=".txt,.doc,.docx" style="display: none;">
+                                    <button type="button" class="btn btn-primary" onclick="document.getElementById('files').click()">
+                                        <i class="bi bi-folder-plus me-1"></i> 选择文件
+                                    </button>
+                                </div>
+                                
+                                <div class="selected-files" id="fileList"></div>
+                                
+                                <div class="text-end mt-4">
+                                    <button type="submit" class="btn btn-primary" id="submitBtn" disabled>
+                                        <i class="bi bi-cloud-upload me-1"></i> 开始上传
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                    
+                    <!-- 处理结果显示区域 -->
+                    <div id="resultsArea" class="card shadow-sm mt-4" style="display: none;">
+                        <div class="card-header bg-white">
+                            <h5 class="mb-0">处理结果</h5>
+                        </div>
+                        <div class="card-body">
+                            <div id="processingResults" class="processing-list">
+                                <!-- 处理结果将在这里动态显示 -->
+                    </div>
+                </div>
+            </div>
+            
+                    <!-- 说明内容 -->
+                    <div class="card shadow-sm mt-4">
+                        <div class="card-header bg-white">
+                            <h5 class="mb-0">使用说明</h5>
+                        </div>
+                        <div class="card-body">
+                            <ul class="list-unstyled mb-0">
+                                <li class="mb-2">
+                                    <i class="bi bi-1-circle-fill text-primary me-2"></i>
+                                    选择或拖放多个文件到上传区域
+                                </li>
+                                <li class="mb-2">
+                                    <i class="bi bi-2-circle-fill text-primary me-2"></i>
+                                    支持txt、docx、doc格式的文档
+                                </li>
+                                <li class="mb-2">
+                                    <i class="bi bi-3-circle-fill text-primary me-2"></i>
+                                    每个文件将被视为一篇独立的作文
+                                </li>
+                                <li class="mb-2">
+                                    <i class="bi bi-4-circle-fill text-primary me-2"></i>
+                                    建议每次批量上传不超过10个文件
+                                </li>
+                                <li class="mb-2">
+                                    <i class="bi bi-5-circle-fill text-primary me-2"></i>
+                                    评分标准采用广东省中考作文评分标准
+                                </li>
+                                <li class="mb-2">
+                                    <i class="bi bi-6-circle-fill text-primary me-2"></i>
+                                    AI批改评分调用deepseeek-R1大模型
+                                </li>
+                                <li>
+                                    <i class="bi bi-7-circle-fill text-primary me-2"></i>
+                                    图片识别调用阿里qwen-v1-plus-latest大模型
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <!-- 上传成功提示 -->
+                    {% if success_message %}
+                    <div class="alert alert-success mt-4" role="alert">
+                        <i class="bi bi-check-circle-fill me-2"></i>
+                        全部作文已上传成功，请在我的作文中查看批改进度。
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            
+        </div>
+    </div>
+    
+    <!-- 加载中模态框 -->
+    <div class="loading-modal" id="loadingModal">
+        <div class="loading-content">
+            <div class="spinner-border text-primary mb-3" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <h5>正在上传文件...</h5>
+            <p class="text-muted mb-0">请勿关闭页面</p>
+        </div>
+    </div>
+    
+    <!-- 页脚 -->
+    <footer class="footer py-3">
+        <div class="container">
+            <div class="text-center">
+                <p class="small mb-0">&copy; 2025 小园丁作文批改系统</p>
+            </div>
+        </div>
+    </footer>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const dropZone = document.getElementById('dropZone');
+            const fileInput = document.getElementById('files');
+            const fileList = document.getElementById('fileList');
+            const submitBtn = document.getElementById('submitBtn');
+            const uploadForm = document.getElementById('uploadForm');
+            const loadingModal = document.getElementById('loadingModal');
+            const resultsArea = document.getElementById('resultsArea');
+            const processingResults = document.getElementById('processingResults');
+            
+            // 获取剩余批改次数
+            const remainingInfo = {
+                total_remaining: parseInt("{{ remaining_info.total_remaining if remaining_info else 0 }}"),
+                daily_remaining: parseInt("{{ remaining_info.daily_remaining if remaining_info else 0 }}")
+            };
+            
+            let selectedFiles = [];
+            
+            // 文件限制配置
+            const FILE_CONFIG = {
+                maxFileSize: 5 * 1024 * 1024, // 5MB
+                allowedTypes: ['text/plain', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+                allowedExtensions: ['txt', 'doc', 'docx']
+            };
+            
+            // 验证单个文件
+            function validateFile(file) {
+                // 检查文件大小
+                if (file.size > FILE_CONFIG.maxFileSize) {
+                    return {
+                        valid: false,
+                        error: `文件 ${file.name} 超过大小限制（5MB）`
+                    };
+                }
+                
+                // 检查文件类型
+                const extension = file.name.split('.').pop().toLowerCase();
+                if (!FILE_CONFIG.allowedExtensions.includes(extension)) {
+                    return {
+                        valid: false,
+                        error: `文件 ${file.name} 格式不支持（仅支持 txt, doc, docx）`
+                    };
+                }
+                
+                // 检查MIME类型
+                if (!FILE_CONFIG.allowedTypes.includes(file.type)) {
+                    return {
+                        valid: false,
+                        error: `文件 ${file.name} 类型不正确`
+                    };
+                }
+                
+                return { valid: true };
+            }
+            
+            // 阻止默认的拖放行为
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                dropZone.addEventListener(eventName, preventDefaults, false);
+                document.body.addEventListener(eventName, preventDefaults, false);
+            });
+            
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            
+            // 高亮拖放区域
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropZone.addEventListener(eventName, highlight, false);
+            });
+            
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropZone.addEventListener(eventName, unhighlight, false);
+            });
+            
+            function highlight(e) {
+                dropZone.classList.add('dragover');
+            }
+            
+            function unhighlight(e) {
+                dropZone.classList.remove('dragover');
+            }
+            
+            // 处理文件拖放
+            dropZone.addEventListener('drop', handleDrop, false);
+            
+            function handleDrop(e) {
+                const dt = e.dataTransfer;
+                const files = dt.files;
+                handleFiles(files);
+            }
+            
+            // 处理文件选择
+            fileInput.addEventListener('change', function(e) {
+                handleFiles(this.files);
+            });
+            
+            function handleFiles(files) {
+                if (files.length > 10) {
+                    alert('一次最多只能上传10个文件');
+                    return;
+                }
+                
+                // 检查剩余批改次数
+                if (files.length > remainingInfo.total_remaining) {
+                    alert(`您的剩余批改次数不足，当前剩余${remainingInfo.total_remaining}次，需要${files.length}次`);
+                    return;
+                }
+                
+                if (files.length > remainingInfo.daily_remaining) {
+                    alert(`您今日的剩余批改次数不足，当前剩余${remainingInfo.daily_remaining}次，需要${files.length}次`);
+                    return;
+                }
+                
+                // 验证所有文件
+                const validFiles = [];
+                const errors = [];
+                
+                Array.from(files).forEach(file => {
+                    const validation = validateFile(file);
+                    if (validation.valid) {
+                        validFiles.push(file);
+                    } else {
+                        errors.push(validation.error);
+                    }
+                });
+                
+                if (errors.length > 0) {
+                    alert('文件验证失败：\n' + errors.join('\n'));
+                    return;
+                }
+                
+                selectedFiles = validFiles;
+                updateFileList();
+                submitBtn.disabled = selectedFiles.length === 0;
+            }
+            
+            // 更新文件列表显示
+            function updateFileList() {
+                fileList.innerHTML = '';
+                selectedFiles.forEach((file, index) => {
+                    const fileItem = document.createElement('div');
+                    fileItem.className = 'file-item';
+                    
+                    // 格式化文件大小
+                    const fileSize = file.size < 1024 * 1024 
+                        ? Math.round(file.size / 1024) + ' KB'
+                        : Math.round(file.size / (1024 * 1024) * 10) / 10 + ' MB';
+                    
+                    fileItem.innerHTML = `
+                        <i class="bi bi-file-text file-icon"></i>
+                        <div class="file-info">
+                            <div class="file-name">${file.name}</div>
+                            <small class="text-muted">${fileSize}</small>
+                        </div>
+                        <span class="file-status status-pending">待处理</span>
+                        <i class="bi bi-x-circle remove-file" onclick="removeFile(${index})"></i>
+                    `;
+                    fileList.appendChild(fileItem);
+                });
+                
+                // 更新提示信息
+                if (selectedFiles.length > 0) {
+                    const remainingAfterUpload = remainingInfo.total_remaining - selectedFiles.length;
+                    const dailyRemainingAfterUpload = remainingInfo.daily_remaining - selectedFiles.length;
+                    
+                    const infoDiv = document.createElement('div');
+                    infoDiv.className = 'alert alert-info mt-3';
+                    infoDiv.innerHTML = `
+                        <i class="bi bi-info-circle me-2"></i>
+                        上传这些文件将消耗 ${selectedFiles.length} 次批改次数
+                        <br>
+                        <small class="text-muted">
+                            上传后剩余：总计 ${remainingAfterUpload} 次，今日 ${dailyRemainingAfterUpload} 次
+                        </small>
+                    `;
+                    fileList.appendChild(infoDiv);
+                }
+            }
+            
+            window.removeFile = function(index) {
+                selectedFiles.splice(index, 1);
+                updateFileList();
+                submitBtn.disabled = selectedFiles.length === 0;
+            };
+            
+            // 任务状态监控
+            async function monitorTasks(taskIds) {
+                const checkInterval = 3000; // 3秒检查一次
+                const maxAttempts = 20; // 最多检查20次（1分钟）
+                let attempts = 0;
+                
+                const checkTasks = async () => {
+                    try {
+                        const response = await fetch('/api/tasks/status', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({ task_ids: taskIds })
+                        });
+                        
+                        const result = await response.json();
+                        
+                        if (result.success) {
+                            // 更新任务状态显示
+                            result.tasks.forEach(task => {
+                                const resultItem = document.querySelector(`[data-task-id="${task.id}"]`);
+                                if (resultItem) {
+                                    const statusSpan = resultItem.querySelector('.file-status');
+                                    if (statusSpan) {
+                                        let statusClass = '';
+                                        let statusText = '';
+                                        
+                                        switch(task.status) {
+                                            case 'PENDING':
+                                                statusClass = 'status-pending';
+                                                statusText = '等待处理';
+                                                break;
+                                            case 'STARTED':
+                                                statusClass = 'status-processing';
+                                                statusText = '处理中';
+                                                break;
+                                            case 'SUCCESS':
+                                                statusClass = 'status-success';
+                                                statusText = '完成';
+                                                break;
+                                            case 'FAILURE':
+                                                statusClass = 'status-error';
+                                                statusText = '失败';
+                                                break;
+                                            default:
+                                                statusClass = 'status-pending';
+                                                statusText = '未知状态';
+                                        }
+                                        
+                                        statusSpan.className = `file-status ${statusClass}`;
+                                        statusSpan.textContent = statusText;
+                                        
+                                        if (task.error) {
+                                            const errorSpan = document.createElement('span');
+                                            errorSpan.className = 'text-danger ms-2';
+                                            errorSpan.textContent = task.error;
+                                            resultItem.appendChild(errorSpan);
+                                        }
+                                    }
+                                }
+                            });
+                            
+                            // 检查是否所有任务都已完成
+                            const allCompleted = result.tasks.every(task => 
+                                ['SUCCESS', 'FAILURE'].includes(task.status)
+                            );
+                            
+                            if (allCompleted || attempts >= maxAttempts) {
+                                return;
+                            }
+                        }
+                        
+                        attempts++;
+                        if (attempts < maxAttempts) {
+                            setTimeout(checkTasks, checkInterval);
+                        }
+                    } catch (error) {
+                        console.error('监控任务状态时出错:', error);
+                    }
+                };
+                
+                // 开始监控
+                checkTasks();
+            }
+            
+            // 处理表单提交
+            uploadForm.addEventListener('submit', async function(e) {
+                e.preventDefault();
+                
+                if (selectedFiles.length === 0) {
+                    alert('请选择要上传的文件');
+                    return;
+                }
+                
+                // 再次检查剩余次数和文件有效性
+                if (selectedFiles.length > remainingInfo.total_remaining) {
+                    alert(`您的剩余批改次数不足，当前剩余${remainingInfo.total_remaining}次，需要${selectedFiles.length}次`);
+                    return;
+                }
+                
+                if (selectedFiles.length > remainingInfo.daily_remaining) {
+                    alert(`您今日的剩余批改次数不足，当前剩余${remainingInfo.daily_remaining}次，需要${selectedFiles.length}次`);
+                    return;
+                }
+                
+                const invalidFiles = selectedFiles.filter(file => !validateFile(file).valid);
+                if (invalidFiles.length > 0) {
+                    alert('部分文件不符合要求，请重新选择');
+                    return;
+                }
+                
+                loadingModal.style.display = 'block';
+                resultsArea.style.display = 'block';
+                processingResults.innerHTML = '';
+                
+                const formData = new FormData();
+                selectedFiles.forEach(file => {
+                    formData.append('files[]', file);
+                });
+                
+                try {
+                    const response = await fetch(uploadForm.action, {
+                    method: 'POST',
+                    body: formData
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        // 更新剩余次数
+                        remainingInfo.total_remaining -= result.results.filter(f => f.status === 'success').length;
+                        remainingInfo.daily_remaining -= result.results.filter(f => f.status === 'success').length;
+                        
+                        // 显示处理结果
+                        result.results.forEach(file => {
+                            const resultItem = document.createElement('div');
+                            resultItem.className = 'file-item';
+                            resultItem.setAttribute('data-task-id', file.task_id);
+                            
+                            let statusClass = '';
+                            let statusText = '';
+                            
+                            switch(file.status) {
+                                case 'processing':
+                                    statusClass = 'status-processing';
+                                    statusText = '处理中';
+                                    break;
+                                case 'success':
+                                    statusClass = 'status-success';
+                                    statusText = '成功';
+                                    break;
+                                case 'error':
+                                    statusClass = 'status-error';
+                                    statusText = '失败';
+                                    break;
+                                default:
+                                    statusClass = 'status-pending';
+                                    statusText = '待处理';
+                            }
+                            
+                            resultItem.innerHTML = `
+                                <i class="bi bi-file-text file-icon"></i>
+                                <span class="file-name">${file.filename}</span>
+                                <span class="file-status ${statusClass}">${statusText}</span>
+                                ${file.error ? `<span class="text-danger ms-2">${file.error}</span>` : ''}
+                            `;
+                            
+                            processingResults.appendChild(resultItem);
+                        });
+                        
+                        // 开始监控任务状态
+                        const taskIds = result.results
+                            .filter(f => f.task_id)
+                            .map(f => f.task_id);
+                            
+                        if (taskIds.length > 0) {
+                            monitorTasks(taskIds);
+                        }
+                        
+                        // 清空选择的文件
+                        selectedFiles = [];
+                        updateFileList();
+                        submitBtn.disabled = true;
+                        
+                        // 更新页面上显示的剩余次数
+                        const totalRemainingElement = document.querySelector('[data-remaining="total"]');
+                        const dailyRemainingElement = document.querySelector('[data-remaining="daily"]');
+                        if (totalRemainingElement) totalRemainingElement.textContent = remainingInfo.total_remaining;
+                        if (dailyRemainingElement) dailyRemainingElement.textContent = remainingInfo.daily_remaining;
+                    } else {
+                        alert(result.error || '上传失败，请重试');
+                    }
+                } catch (error) {
+                    console.error('Upload error:', error);
+                    alert('上传过程中发生错误，请重试');
+                } finally {
+                    loadingModal.style.display = 'none';
+                }
+            });
+        });
+    </script>
+</body>
+</html> 

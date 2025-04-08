@@ -1,0 +1,221 @@
+{% extends "admin/layout.html" %}
+
+{% block title %}系统设置 - 管理后台{% endblock %}
+
+{% block content %}
+<div class="admin-title">
+    <i class="bi bi-gear"></i> 系统设置
+</div>
+
+<div class="row">
+    <!-- 会员权益配置 -->
+    <div class="col-lg-6">
+        <div class="card mb-4">
+            <div class="card-header">会员权益配置</div>
+            <div class="card-body">
+                <form action="{{ url_for('admin.config') }}" method="post">
+                    <h5 class="mb-3">免费用户</h5>
+                    <div class="row g-3 mb-4">
+                        <div class="col-md-6">
+                            <label for="free_essays" class="form-label">基础批改次数</label>
+                            <input type="number" class="form-control" id="free_essays" name="free_essays" value="{{ config.free_essays }}" min="0" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="free_daily_limit" class="form-label">每日可用次数</label>
+                            <input type="number" class="form-control" id="free_daily_limit" name="free_daily_limit" value="{{ config.free_daily_limit }}" min="0" required>
+                        </div>
+                    </div>
+                    
+                    <h5 class="mb-3">普通会员</h5>
+                    <div class="row g-3 mb-4">
+                        <div class="col-md-6">
+                            <label for="regular_monthly_essays" class="form-label">每月批改次数</label>
+                            <input type="number" class="form-control" id="regular_monthly_essays" name="regular_monthly_essays" value="{{ config.regular_monthly_essays }}" min="0" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="regular_daily_essays" class="form-label">每日可用次数</label>
+                            <input type="number" class="form-control" id="regular_daily_essays" name="regular_daily_essays" value="{{ config.regular_daily_essays }}" min="0" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="regular_price" class="form-label">会员价格(元/月)</label>
+                            <input type="number" class="form-control" id="regular_price" name="regular_price" value="{{ config.regular_price }}" min="0" step="0.01" required>
+                        </div>
+                    </div>
+                    
+                    <h5 class="mb-3">高级会员</h5>
+                    <div class="row g-3 mb-4">
+                        <div class="col-md-6">
+                            <label for="premium_monthly_essays" class="form-label">每月批改次数</label>
+                            <input type="number" class="form-control" id="premium_monthly_essays" name="premium_monthly_essays" value="{{ config.premium_monthly_essays }}" min="0" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="premium_daily_essays" class="form-label">每日可用次数</label>
+                            <input type="number" class="form-control" id="premium_daily_essays" name="premium_daily_essays" value="{{ config.premium_daily_essays }}" min="0" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="premium_price" class="form-label">会员价格(元/月)</label>
+                            <input type="number" class="form-control" id="premium_price" name="premium_price" value="{{ config.premium_price }}" min="0" step="0.01" required>
+                        </div>
+                    </div>
+                    
+                    <h5 class="mb-3">注册奖励</h5>
+                    <div class="row g-3 mb-4">
+                        <div class="col-md-6">
+                            <label for="registration_bonus" class="form-label">注册奖励次数</label>
+                            <input type="number" class="form-control" id="registration_bonus" name="registration_bonus" value="{{ config.registration_bonus }}" min="0" required>
+                        </div>
+                    </div>
+                    
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary">保存会员配置</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 系统配置 -->
+    <div class="col-lg-6">
+        <div class="card mb-4">
+            <div class="card-header">系统基本配置</div>
+            <div class="card-body">
+                <form action="{{ url_for('admin.config') }}" method="post">
+                    <div class="mb-3">
+                        <label for="site_title" class="form-label">网站标题</label>
+                        <input type="text" class="form-control" id="site_title" name="site_title" value="{{ config.site_title|default('小园丁作文批改系统') }}">
+                    </div>
+                    <div class="mb-3">
+                        <label for="site_description" class="form-label">网站描述</label>
+                        <textarea class="form-control" id="site_description" name="site_description" rows="3">{{ config.site_description|default('AI驱动的智能作文批改系统') }}</textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label for="contact_email" class="form-label">联系邮箱</label>
+                        <input type="email" class="form-control" id="contact_email" name="contact_email" value="{{ config.contact_email|default('support@example.com') }}">
+                    </div>
+                    <div class="mb-3">
+                        <label for="maintenance_mode" class="form-label">系统状态</label>
+                        <select class="form-select" id="maintenance_mode" name="maintenance_mode">
+                            <option value="0" {% if config.maintenance_mode == '0' %}selected{% endif %}>正常运行</option>
+                            <option value="1" {% if config.maintenance_mode == '1' %}selected{% endif %}>维护模式</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="version" class="form-label">系统版本</label>
+                        <input type="text" class="form-control" id="version" value="v2.0" disabled>
+                    </div>
+                    
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary">保存系统配置</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        <!-- 数据库管理 -->
+        <div class="card mb-4">
+            <div class="card-header">数据库操作</div>
+            <div class="card-body">
+                <div class="d-grid gap-2">
+                    <button id="backupDbBtn" type="button" class="btn btn-warning">
+                        <i class="bi bi-download"></i> 备份数据库
+                    </button>
+                    <button id="clearTempFilesBtn" type="button" class="btn btn-secondary">
+                        <i class="bi bi-trash"></i> 清理临时文件
+                    </button>
+                </div>
+                <div class="alert alert-info mt-3">
+                    上次备份时间: {{ backup_info.last_backup|default('从未备份') }}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- AI服务配置 -->
+<div class="card mb-4">
+    <div class="card-header">AI评分服务配置</div>
+    <div class="card-body">
+        <form action="{{ url_for('admin.config') }}" method="post">
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <label for="ai_service_status" class="form-label">AI服务状态</label>
+                    <select class="form-select" id="ai_service_status" name="ai_service_status">
+                        <option value="1" {% if config.ai_service_status == '1' %}selected{% endif %}>启用</option>
+                        <option value="0" {% if config.ai_service_status == '0' %}selected{% endif %}>禁用</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label for="max_tokens" class="form-label">最大Token数</label>
+                    <input type="number" class="form-control" id="max_tokens" name="max_tokens" value="{{ config.max_tokens|default(4096) }}">
+                </div>
+                <div class="col-md-3">
+                    <label for="temperature" class="form-label">温度参数</label>
+                    <input type="number" class="form-control" id="temperature" name="temperature" value="{{ config.temperature|default(0.7) }}" min="0" max="1" step="0.1">
+                </div>
+                <div class="col-md-3">
+                    <label for="model_name" class="form-label">模型选择</label>
+                    <select class="form-select" id="model_name" name="model_name">
+                        <option value="gpt-3.5-turbo" {% if config.model_name == 'gpt-3.5-turbo' %}selected{% endif %}>GPT-3.5-Turbo</option>
+                        <option value="gpt-4" {% if config.model_name == 'gpt-4' %}selected{% endif %}>GPT-4</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="d-grid mt-3">
+                <button type="submit" class="btn btn-primary">保存AI配置</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // 备份数据库
+    document.getElementById('backupDbBtn').addEventListener('click', function() {
+        if (confirm('确定要备份数据库吗？')) {
+            fetch('{{ url_for('admin.config') }}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('数据库备份成功: ' + data.message);
+                    location.reload();
+                } else {
+                    alert('备份失败: ' + data.message);
+                }
+            })
+            .catch(error => {
+                alert('操作失败: ' + error);
+            });
+        }
+    });
+    
+    // 清理临时文件
+    document.getElementById('clearTempFilesBtn').addEventListener('click', function() {
+        if (confirm('确定要清理临时文件吗？')) {
+            fetch('{{ url_for('admin.config') }}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('清理成功: ' + data.message);
+                } else {
+                    alert('清理失败: ' + data.message);
+                }
+            })
+            .catch(error => {
+                alert('操作失败: ' + error);
+            });
+        }
+    });
+</script>
+{% endblock %} 

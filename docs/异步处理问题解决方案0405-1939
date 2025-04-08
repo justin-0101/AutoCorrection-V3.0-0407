@@ -1,0 +1,143 @@
+根据项目处于开发测试阶段的特性，我建议采用 **根治性解决方案**，从数据模型设计、任务处理机制到错误恢复进行全面重构。以下是分阶段的彻底解决方案：
+
+---
+
+### **一、数据模型重构（核心基础）**
+1. **规范化Essay模型**
+```python
+class EssaySourceType(enum.Enum):  # 使用枚举严格约束取值
+    UPLOAD = 'upload'
+    PASTE = 'paste'
+    API = 'api'
+
+class Essay(db.Model):
+    source_type = db.Column(db.Enum(EssaySourceType), 
+                      nullable=False, 
+                      default=EssaySourceType.UPLOAD,
+                      comment='内容来源类型')  # 添加数据库注释
+```
+
+2. **创建数据迁移脚本**
+```bash
+flask db migrate -m "add enum source_type to essay"
+flask db upgrade
+```
+
+3. **添加模型验证逻辑**
+```python
+@validates('source_type')
+def validate_source_type(self, key, value):
+    if not isinstance(value, EssaySourceType):
+        raise ValueError(f"Invalid source_type: {value}")
+    return value
+```
+
+---
+
+### **二、异步任务系统改造**
+1. **任务序列化加固**
+```python
+@celery.task(bind=True, 
+             max_retries=3,
+             autoretry_for=(AttributeError,),
+             retry_backoff=True)
+def process_correction(self, essay_id):
+    essay = Essay.query.get_or_404(essay_id)
+    # 强制类型检查
+    if not hasattr(essay, 'source_type'):
+        self.retry(exc=AttributeError('source_type missing'))
+```
+
+2. **独立任务日志**
+```python
+# 在celery配置中添加
+worker_redirect_stdouts = False
+worker_hijack_root_logger = False
+```
+
+3. **测试用同步模式**
+```python
+# config.py
+class TestingConfig:
+    CELERY_TASK_ALWAYS_EAGER = True  # 测试环境下同步执行任务
+```
+
+---
+
+### **三、依赖注入系统升级**
+1. **服务容器自动化注册**
+```python
+# 使用类装饰器自动注册服务
+def auto_register(service_name):
+    def decorator(cls):
+        ServiceContainer.register(service_name, cls())
+        return cls
+    return decorator
+
+@auto_register('ai_client_factory')
+class AIClientFactory:
+    ...
+```
+
+2. **依赖验证中间件**
+```python
+def check_dependencies():
+    required_services = ['ai_client_factory', ...]
+    missing = [s for s in required_services if not ServiceContainer.has(s)]
+    if missing:
+        raise RuntimeError(f"Missing services: {missing}")
+```
+
+---
+
+### **四、测试保障体系**
+1. **模型测试套件**
+```python
+def test_essay_source_type_validation():
+    # 测试非法值拦截
+    with pytest.raises(ValueError):
+        Essay(source_type='invalid_type')
+```
+
+2. **任务失败模拟测试**
+```python
+def test_correction_task_retry(mocker):
+    mocker.patch.object(Essay, 'source_type', new=None)
+    result = process_correction.delay(1).get()
+    assert result.status == 'RETRY'
+```
+
+3. **集成测试场景**
+```gherkin
+Feature: 异步批改流程
+  Scenario: 缺少source_type的异常处理
+    Given 存在未设置source_type的Essay
+    When 触发批改任务
+    Then 系统应自动重试3次
+    And 最终记录任务失败状态
+```
+
+---
+
+### **五、实施路线图**
+1. **第一阶段（1天）**
+   - 完成模型重构和迁移
+   - 实现基础的任务重试机制
+
+2. **第二阶段（2天）**
+   - 部署依赖注入验证系统
+   - 构建自动化测试流水线
+
+3. **第三阶段（1天）**
+   - 执行全量回归测试
+   - 编写技术文档（包括故障恢复手册）
+
+---
+
+### **关键优势**
+1. **类型安全**：通过Enum彻底解决字段值不规范问题
+2. **自愈能力**：任务自动重试+依赖预检查机制
+3. **测试友好**：同步任务模式+模拟异常测试
+4. **可观测性**：独立任务日志+完善监控指标
+
+建议在实施过程中使用 **feature flag** 控制新老逻辑切换，便于回滚。是否需要我针对某个具体环节提供更详细的实现示例？

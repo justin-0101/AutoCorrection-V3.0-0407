@@ -1,0 +1,59 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+import sqlite3
+
+def get_user_info(username):
+    """获取用户信息"""
+    try:
+        conn = sqlite3.connect('instance/essay_correction.db')
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT user_id, username, user_type, essays_remaining, essays_monthly_limit, 
+                   essays_daily_limit, essays_daily_used, essays_total_used, 
+                   membership_expiry, vip_status
+            FROM users 
+            WHERE username = ?
+        """, (username,))
+        
+        user_data = cursor.fetchone()
+        conn.close()
+        
+        if user_data:
+            return {
+                'user_id': user_data[0],
+                'username': user_data[1],
+                'user_type': user_data[2],
+                'essays_remaining': user_data[3],
+                'essays_monthly_limit': user_data[4],
+                'essays_daily_limit': user_data[5],
+                'essays_daily_used': user_data[6],
+                'essays_total_used': user_data[7],
+                'membership_expiry': user_data[8],
+                'vip_status': user_data[9]
+            }
+        else:
+            return None
+    except Exception as e:
+        print(f"查询用户信息出错: {e}")
+        return None
+
+if __name__ == "__main__":
+    # 查询 juschen 用户
+    user_info = get_user_info("juschen")
+    
+    if user_info:
+        print("==== juschen 用户信息 ====")
+        print(f"用户ID: {user_info['user_id']}")
+        print(f"用户名: {user_info['username']}")
+        print(f"用户类型: {user_info['user_type']}")
+        print(f"剩余批改次数: {user_info['essays_remaining']}")
+        print(f"月度限制: {user_info['essays_monthly_limit']}")
+        print(f"每日限制: {user_info['essays_daily_limit']}")
+        print(f"已用(每日): {user_info['essays_daily_used']}")
+        print(f"已用(总计): {user_info['essays_total_used']}")
+        print(f"会员到期日: {user_info['membership_expiry']}")
+        print(f"VIP状态: {user_info['vip_status']}")
+    else:
+        print("未找到用户 juschen 的信息") 

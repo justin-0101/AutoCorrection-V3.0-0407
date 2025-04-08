@@ -1,0 +1,329 @@
+{% extends "admin/layout.html" %}
+
+{% block title %}用户管理 - 管理后台{% endblock %}
+
+{% block content %}
+<div class="admin-title d-flex justify-content-between align-items-center">
+    <div>
+        <i class="bi bi-people"></i> 用户管理
+    </div>
+    <div>
+        <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addUserModal">
+            <i class="bi bi-person-plus"></i> 添加用户
+        </button>
+    </div>
+</div>
+
+<!-- 搜索和过滤 -->
+<div class="card mb-4">
+    <div class="card-body">
+        <form action="{{ url_for('admin.users') }}" method="get" class="row g-3 align-items-end">
+            <div class="col-md-3">
+                <label for="search" class="form-label">关键词搜索</label>
+                <input type="text" class="form-control" id="search" name="search" value="{{ request.args.get('search', '') }}" placeholder="用户名/邮箱">
+            </div>
+            <div class="col-md-2">
+                <label for="user_type" class="form-label">用户类型</label>
+                <select class="form-select" id="user_type" name="user_type">
+                    <option value="">全部</option>
+                    <option value="free" {% if request.args.get('user_type') == 'free' %}selected{% endif %}>免费用户</option>
+                    <option value="regular" {% if request.args.get('user_type') == 'regular' %}selected{% endif %}>普通会员</option>
+                    <option value="premium" {% if request.args.get('user_type') == 'premium' %}selected{% endif %}>高级会员</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label for="role" class="form-label">角色</label>
+                <select class="form-select" id="role" name="role">
+                    <option value="">全部</option>
+                    <option value="user" {% if request.args.get('role') == 'user' %}selected{% endif %}>普通用户</option>
+                    <option value="admin" {% if request.args.get('role') == 'admin' %}selected{% endif %}>管理员</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label for="status" class="form-label">状态</label>
+                <select class="form-select" id="status" name="status">
+                    <option value="">全部</option>
+                    <option value="1" {% if request.args.get('status') == '1' %}selected{% endif %}>正常</option>
+                    <option value="0" {% if request.args.get('status') == '0' %}selected{% endif %}>禁用</option>
+                </select>
+            </div>
+            <div class="col-md-3 d-flex">
+                <button type="submit" class="btn btn-primary me-2">
+                    <i class="bi bi-search"></i> 搜索
+                </button>
+                <a href="{{ url_for('admin.users') }}" class="btn btn-outline-secondary">
+                    <i class="bi bi-arrow-counterclockwise"></i> 重置
+                </a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 用户列表 -->
+<div class="card">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>用户名</th>
+                        <th>邮箱</th>
+                        <th>用户类型</th>
+                        <th>角色</th>
+                        <th>注册时间</th>
+                        <th>上次登录</th>
+                        <th>批改次数</th>
+                        <th>状态</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for user in users %}
+                    <tr>
+                        <td>{{ user.id }}</td>
+                        <td>{{ user.username }}</td>
+                        <td>{{ user.email }}</td>
+                        <td>
+                            {% if user.user_type == 'free' %}
+                            <span class="badge bg-secondary">免费用户</span>
+                            {% elif user.user_type == 'regular' %}
+                            <span class="badge bg-primary">普通会员</span>
+                            {% elif user.user_type == 'premium' %}
+                            <span class="badge bg-warning">高级会员</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if user.role == 'admin' %}
+                            <span class="badge bg-danger">管理员</span>
+                            {% else %}
+                            <span class="badge bg-info">普通用户</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ user.created_at }}</td>
+                        <td>{{ user.last_login|default('-') }}</td>
+                        <td>
+                            {% if user.profile %}
+                                每月限制: {{ user.profile.essay_monthly_limit }}<br>
+                                已使用: {{ user.profile.essay_monthly_used }}
+                            {% else %}
+                                未设置
+                            {% endif %}
+                        </td>
+                        <td>
+                            <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#editModal{{ user.id }}">
+                                修改批改次数
+                            </button>
+                            
+                            <!-- 修改批改次数的模态框 -->
+                            <div class="modal fade" id="editModal{{ user.id }}" tabindex="-1" aria-labelledby="editModalLabel{{ user.id }}" aria-hidden="true">
+                                <div class="modal-dialog">
+                                    <div class="modal-content">
+                                        <div class="modal-header">
+                                            <h5 class="modal-title" id="editModalLabel{{ user.id }}">修改用户批改次数 - {{ user.username }}</h5>
+                                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                        </div>
+                                        <form action="{{ url_for('admin.users') }}" method="POST">
+                                            <div class="modal-body">
+                                                {{ form.csrf_token }}
+                                                {{ form.user_id(value=user.id) }}
+                                                <div class="mb-3">
+                                                    <label class="form-label">每月批改限制</label>
+                                                    <input type="number" class="form-control {% if form.monthly_limit.errors %}is-invalid{% endif %}" 
+                                                           name="monthly_limit" 
+                                                           value="{{ user.profile.essay_monthly_limit if user.profile else 3 }}" 
+                                                           required min="0">
+                                                    {% if form.monthly_limit.errors %}
+                                                    <div class="invalid-feedback">
+                                                        {% for error in form.monthly_limit.errors %}
+                                                        <span>{{ error }}</span>
+                                                        {% endfor %}
+                                                    </div>
+                                                    {% endif %}
+                                                </div>
+                                                <div class="mb-3">
+                                                    <label class="form-label">当月已使用次数</label>
+                                                    <input type="number" class="form-control {% if form.monthly_used.errors %}is-invalid{% endif %}" 
+                                                           name="monthly_used" 
+                                                           value="{{ user.profile.essay_monthly_used if user.profile else 0 }}" 
+                                                           required min="0">
+                                                    {% if form.monthly_used.errors %}
+                                                    <div class="invalid-feedback">
+                                                        {% for error in form.monthly_used.errors %}
+                                                        <span>{{ error }}</span>
+                                                        {% endfor %}
+                                                    </div>
+                                                    {% endif %}
+                                                </div>
+                                                {% with messages = get_flashed_messages(with_categories=true) %}
+                                                    {% if messages %}
+                                                        {% for category, message in messages %}
+                                                            <div class="alert alert-{{ category }}">{{ message }}</div>
+                                                        {% endfor %}
+                                                    {% endif %}
+                                                {% endwith %}
+                                            </div>
+                                            <div class="modal-footer">
+                                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                                                <button type="submit" class="btn btn-primary">保存更改</button>
+                                            </div>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                        </td>
+                        <td>
+                            {% if user.is_active %}
+                            <span class="badge bg-success">正常</span>
+                            {% else %}
+                            <span class="badge bg-danger">禁用</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div class="btn-group" role="group">
+                                <a href="{{ url_for('admin.users') }}" class="btn btn-sm btn-outline-primary">
+                                    <i class="bi bi-pencil"></i>
+                                </a>
+                                {% if user.role != 'admin' or session.get('user_id') != user.id %}
+                                <button type="button" class="btn btn-sm btn-outline-danger" 
+                                        data-bs-toggle="modal" data-bs-target="#deleteUserModal" 
+                                        data-user-id="{{ user.id }}" 
+                                        data-user-name="{{ user.username }}">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- 分页 -->
+        {% if pagination.pages > 1 %}
+        <nav aria-label="Page navigation">
+            <ul class="pagination justify-content-center">
+                <li class="page-item {{ 'disabled' if pagination.current_page == 1 else '' }}">
+                    <a class="page-link" href="{{ url_for('admin.users', page=pagination.current_page-1, search=request.args.get('search', ''), user_type=request.args.get('user_type', ''), role=request.args.get('role', ''), status=request.args.get('status', '')) }}">上一页</a>
+                </li>
+                
+                {% set start_page = [1, pagination.current_page - 2]|max %}
+                {% set end_page = [pagination.pages, pagination.current_page + 2]|min %}
+                
+                {% if start_page > 1 %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ url_for('admin.users', page=1, search=request.args.get('search', ''), user_type=request.args.get('user_type', ''), role=request.args.get('role', ''), status=request.args.get('status', '')) }}">1</a>
+                </li>
+                {% if start_page > 2 %}
+                <li class="page-item disabled"><span class="page-link">...</span></li>
+                {% endif %}
+                {% endif %}
+                
+                {% for page in range(start_page, end_page + 1) %}
+                <li class="page-item {{ 'active' if page == pagination.current_page else '' }}">
+                    <a class="page-link" href="{{ url_for('admin.users', page=page, search=request.args.get('search', ''), user_type=request.args.get('user_type', ''), role=request.args.get('role', ''), status=request.args.get('status', '')) }}">{{ page }}</a>
+                </li>
+                {% endfor %}
+                
+                {% if end_page < pagination.pages %}
+                {% if end_page < pagination.pages - 1 %}
+                <li class="page-item disabled"><span class="page-link">...</span></li>
+                {% endif %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ url_for('admin.users', page=pagination.pages, search=request.args.get('search', ''), user_type=request.args.get('user_type', ''), role=request.args.get('role', ''), status=request.args.get('status', '')) }}">{{ pagination.pages }}</a>
+                </li>
+                {% endif %}
+                
+                <li class="page-item {{ 'disabled' if pagination.current_page == pagination.pages else '' }}">
+                    <a class="page-link" href="{{ url_for('admin.users', page=pagination.current_page+1, search=request.args.get('search', ''), user_type=request.args.get('user_type', ''), role=request.args.get('role', ''), status=request.args.get('status', '')) }}">下一页</a>
+                </li>
+            </ul>
+        </nav>
+        {% endif %}
+    </div>
+</div>
+
+<!-- 添加用户模态框 -->
+<div class="modal fade" id="addUserModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">添加新用户</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form action="{{ url_for('admin.users') }}" method="post">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="username" class="form-label">用户名</label>
+                        <input type="text" class="form-control" id="username" name="username" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="email" class="form-label">邮箱</label>
+                        <input type="email" class="form-control" id="email" name="email" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="password" class="form-label">密码</label>
+                        <input type="password" class="form-control" id="password" name="password" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="user_type" class="form-label">用户类型</label>
+                        <select class="form-select" id="add_user_type" name="user_type">
+                            <option value="free">免费用户</option>
+                            <option value="regular">普通会员</option>
+                            <option value="premium">高级会员</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="role" class="form-label">角色</label>
+                        <select class="form-select" id="add_role" name="role">
+                            <option value="user">普通用户</option>
+                            <option value="admin">管理员</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-primary">添加</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 删除用户确认模态框 -->
+<div class="modal fade" id="deleteUserModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">确认删除用户</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>您确定要删除用户 <strong id="deleteUserName"></strong> 吗？此操作不可恢复。</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <form action="{{ url_for('admin.users') }}" method="post" id="deleteUserForm">
+                    <input type="hidden" name="user_id" id="deleteUserId">
+                    <button type="submit" class="btn btn-danger">删除</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // 删除用户模态框事件处理
+    document.getElementById('deleteUserModal').addEventListener('show.bs.modal', function (event) {
+        var button = event.relatedTarget;
+        var userId = button.getAttribute('data-user-id');
+        var userName = button.getAttribute('data-user-name');
+        
+        document.getElementById('deleteUserId').value = userId;
+        document.getElementById('deleteUserName').textContent = userName;
+    });
+</script>
+{% endblock %} 

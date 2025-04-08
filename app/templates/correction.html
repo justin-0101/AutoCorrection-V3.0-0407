@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>作文批改 - 小园丁作文批改</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .navbar-brand {
+            font-weight: bold;
+        }
+        .main-content {
+            flex: 1;
+        }
+        .footer {
+            background-color: #212529;
+            color: rgba(255,255,255,0.6);
+            padding: 20px 0;
+            margin-top: auto;
+        }
+        .footer-link {
+            color: rgba(255,255,255,0.6);
+            text-decoration: none;
+        }
+        .footer-link:hover {
+            color: white;
+        }
+        #loadingSpinner {
+            display: none;
+        }
+        .progress {
+            height: 5px;
+        }
+        .membership-info {
+            background-color: #f1f8ff;
+            border-left: 4px solid #0d6efd;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+        }
+        .membership-badge {
+            padding: 5px 10px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: bold;
+        }
+        .badge-free {
+            background-color: #6c757d;
+            color: white;
+        }
+        .badge-regular {
+            background-color: #198754;
+            color: white;
+        }
+        .badge-premium {
+            background-color: #ffc107;
+            color: black;
+        }
+    </style>
+</head>
+<body>
+    <!-- 导航栏 -->
+    {% include 'navbar.html' %}
+    
+    <div class="main-content py-5">
+        <div class="container">
+            <h2 class="mb-4">作文批改</h2>
+            
+            <div class="row">
+                <div class="col-lg-8 mx-auto">
+                    <!-- 会员信息展示 -->
+                    {% if remaining_info %}
+                    <div class="membership-info mb-4">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <div>
+                                <h5 class="mb-0">您的批改次数</h5>
+                            </div>
+                            <span class="membership-badge 
+                                {% if remaining_info.user_type == 'free' %}badge-free
+                                {% elif remaining_info.user_type == 'regular' %}badge-regular
+                                {% elif remaining_info.user_type == 'premium' %}badge-premium{% endif %}">
+                                {{ '免费用户' if remaining_info.user_type == 'free' else
+                                   '普通会员' if remaining_info.user_type == 'regular' else
+                                   '高级会员' if remaining_info.user_type == 'premium' else
+                                   '未知' }}
+                            </span>
+                        </div>
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <strong>总剩余次数:</strong> 
+                                <span>{{ remaining_info.total_remaining }}</span>
+                            </div>
+                            <div>
+                                <strong>今日剩余:</strong> 
+                                <span>{{ remaining_info.daily_remaining }}</span>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+                    
+                    <div class="card shadow-sm mb-4">
+                        <div class="card-header bg-white">
+                            <h4 class="mb-0">提交作文批改</h4>
+                        </div>
+                        <div class="card-body">
+                            {% with messages = get_flashed_messages(with_categories=true) %}
+                                {% if messages %}
+                                    {% for category, message in messages %}
+                                        <div class="alert alert-{{ category }}">{{ message }}</div>
+                                    {% endfor %}
+                                {% endif %}
+                            {% endwith %}
+
+                            <!-- 上传成功提示 -->
+                            {% if success_message %}
+                            <div class="alert alert-success">
+                                <i class="bi bi-check-circle-fill me-2"></i>
+                                文件上传成功，正在批改中，请在我的作文中查看进度
+                            </div>
+                            {% endif %}
+
+                            <form id="essayForm" method="post" action="{{ url_for('main.correction') }}" enctype="multipart/form-data">
+                                <div class="mb-3">
+                                    <label for="subject" class="form-label">作文标题</label>
+                                    <input type="text" class="form-control" id="subject" name="subject">
+                                    <div class="form-text">标题不是必选项</div>
+                                </div>
+                                
+                                <!-- 添加隐藏的source_type字段 -->
+                                <input type="hidden" id="source_type" name="source_type" value="upload">
+                                
+                                <div class="mb-4">
+                                    <div class="upload-area p-5 text-center border rounded bg-light">
+                                        <i class="bi bi-cloud-upload fs-1 text-primary mb-3"></i>
+                                        <h5>拖拽文件到此处或点击选择文件</h5>
+                                        <input type="file" class="form-control mt-3" id="file" name="file" accept=".txt,.doc,.docx" required>
+                                        <div class="form-text">支持 .txt, .doc, .docx 格式</div>
+                                    </div>
+                                </div>
+
+                                <div class="d-grid gap-2">
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="bi bi-check-circle me-1"></i> 提交批改
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                    
+                    <!-- 说明内容 -->
+                    <div class="card shadow-sm mt-4">
+                        <div class="card-header bg-white">
+                            <h5 class="mb-0">说明</h5>
+                        </div>
+                        <div class="card-body">
+                            <ul class="list-unstyled mb-0">
+                                <li class="mb-2">
+                                    <i class="bi bi-check-circle-fill text-success me-2"></i>
+                                    评分标准采用广东省中考作文评分标准
+                                </li>
+                                <li class="mb-2">
+                                    <i class="bi bi-check-circle-fill text-success me-2"></i>
+                                    AI批改评分调用deepseeek-R1大模型
+                                </li>
+                                <li>
+                                    <i class="bi bi-check-circle-fill text-success me-2"></i>
+                                    图片识别调用阿里qwen-v1-plus-latest大模型
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                    
+                    <!-- 加载动画 -->
+                    <div id="loadingSpinner" class="text-center p-5">
+                        <div class="spinner-border text-primary mb-3" role="status"></div>
+                        <h5>正在批改中，请稍候...</h5>
+                        <div class="progress mt-3">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 100%"></div>
+                        </div>
+                        <p id="processingStatus" class="d-none mt-3">
+                            <span class="badge bg-info">处理中</span>
+                            <span id="statusText">正在处理您的作文...</span>
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 页脚 -->
+    <footer class="footer py-3">
+        <div class="container">
+            <div class="text-center">
+                <p class="small mb-0">&copy; 2025 小园丁作文批改系统</p>
+            </div>
+        </div>
+    </footer>
+    
+    <!-- JavaScript -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/correction.js') }}"></script>
+</body>
+</html> 

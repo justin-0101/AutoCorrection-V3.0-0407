@@ -1,0 +1,283 @@
+"""
+AI服务模块
+提供AI批改和分析功能
+"""
+
+import requests
+import json
+import logging
+import time
+from typing import Dict, List, Any, Optional, Tuple
+import os
+
+from config.ai_config import AI_CONFIG, SCORING_RULES, ERROR_TYPES
+
+# 获取logger
+logger = logging.getLogger(__name__)
+
+class AIService:
+    """AI服务类，提供作文批改功能"""
+    
+    def __init__(self, config=None):
+        """初始化AI服务
+        
+        Args:
+            config: AI配置，默认使用AI_CONFIG
+        """
+        self.config = config or AI_CONFIG
+        self.api_key = self.config['API_KEY']
+        self.base_url = self.config['BASE_URL']
+        self.model = self.config['MODEL']
+        self.timeout = self.config['TIMEOUT']
+    
+    def correct_essay(self, essay_text: str, title: str = None, grade: str = None) -> Dict:
+        """批改作文
+        
+        Args:
+            essay_text: 作文内容
+            title: 作文标题
+            grade: 作文适用年级（如高一、初二等）
+            
+        Returns:
+            Dict: 批改结果
+        """
+        start_time = time.time()
+        logger.info(f"开始批改作文: {title or '无标题'}")
+        
+        # 构建批改系统提示词
+        system_prompt = self.config['CORRECTION_SYSTEM_PROMPT']
+        
+        if grade:
+            system_prompt += f"\n请按照{grade}水平对作文进行批改。"
+        
+        # 构建批改用户提示词
+        user_prompt = f"""请帮我批改以下作文，并返回JSON格式的结果。
+
+作文标题: {title or "无标题"}
+
+作文内容:
+{essay_text}
+
+请按照以下JSON格式返回批改结果:
+{{
+    "score": {{
+        "total": 90,  // 总分（满分100）
+        "content": 90,  // 内容分（满分100）
+        "language": 90,  // 语言分（满分100）
+        "structure": 90,  // 结构分（满分100） 
+        "writing": 90  // 书写分（满分100）
+    }},
+    "feedback": {{
+        "overall": "总体评价内容...",
+        "content": "内容评价...",
+        "language": "语言评价...",
+        "structure": "结构评价...",
+        "writing": "书写评价..."
+    }},
+    "errors": [
+        {{
+            "type": "错误类型",  // 如grammar, spelling等
+            "original": "原文中的词",
+            "correction": "修改",
+            "explanation": "解释"
+        }}
+    ],
+    "improvement_suggestions": [
+        "改进建议1",
+        "改进建议2"
+    ],
+    "corrected_text": "[完整修改后的文章]",
+    "word_count": 250  // 字数统计
+}}
+
+注意: 
+1. 只需要JSON格式输出
+2. 请根据实际问题提供详细解释
+3. 错误类型可从以下选择: grammar, spelling, punctuation, word_choice, verb_tense, subject_verb_agreement, article, preposition, pronoun, word_order, redundancy, missing_word, collocation
+4. 分数划分建议: 90-100分（优秀）, 80-89分（良好）, 70-79分（一般）, 60-69分（及格）, 0-59分（不及格）
+5. 只需要纯粹输出不含任何引号或占位符的JSON内容"""
+
+        try:
+            # 调用AI接口
+            response = self._call_ai_api(system_prompt, user_prompt)
+            process_time = time.time() - start_time
+            logger.info(f"AI接口调用完成，耗时: {process_time:.2f}秒")
+            
+            # 解析返回结果
+            result = self._parse_correction_result(response, essay_text)
+            result['success'] = True
+            result['process_time'] = process_time
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"批改作文失败: {str(e)}", exc_info=True)
+            return {
+                'success': False,
+                'error': str(e),
+                'error_type': type(e).__name__
+            }
+    
+    def _call_ai_api(self, system_prompt: str, user_prompt: str) -> str:
+        """调用AI API
+        
+        Args:
+            system_prompt: 系统提示词
+            user_prompt: 用户提示词
+            
+        Returns:
+            str: API返回的文本内容
+        """
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}"
+        }
+        
+        # 准备请求数据
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            "temperature": self.config.get('TEMPERATURE', 0.2),
+            "max_tokens": self.config.get('MAX_TOKENS', 4000)
+        }
+        
+        try:
+            # 发送请求
+            response = requests.post(
+                f"{self.base_url}/chat/completions", 
+                headers=headers, 
+                json=payload,
+                timeout=self.timeout
+            )
+            
+            # 检查响应状态
+            response.raise_for_status()
+            
+            # 解析响应
+            data = response.json()
+            
+            # 提取生成的文本
+            completion_text = data['choices'][0]['message']['content']
+            return completion_text
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"AI API请求失败: {str(e)}")
+            raise Exception(f"AI服务请求失败: {str(e)}")
+    
+    def _parse_correction_result(self, response_text: str, original_text: str) -> Dict:
+        """解析批改结果
+        
+        Args:
+            response_text: API返回的文本内容
+            original_text: 原始作文内容
+            
+        Returns:
+            Dict: 解析后的批改结果
+        """
+        try:
+            # 尝试直接解析JSON
+            try:
+                result = json.loads(response_text)
+            except json.JSONDecodeError:
+                # 如果直接解析失败，尝试提取JSON部分
+                json_match = response_text.strip()
+                if json_match.startswith('```json'):
+                    json_match = json_match.replace('```json', '').replace('```', '')
+                elif json_match.startswith('```'):
+                    json_match = json_match.replace('```', '')
+                
+                result = json.loads(json_match.strip())
+            
+            # 确保结果包含所有必要字段
+            if not isinstance(result, dict):
+                raise ValueError("解析结果不是有效的字典")
+                
+            # 添加字数统计（如果API未返回）
+            if 'word_count' not in result:
+                result['word_count'] = len(original_text)
+                
+            # 确保分数转换为整数
+            if 'score' in result:
+                for key, value in result['score'].items():
+                    if isinstance(value, str):
+                        try:
+                            result['score'][key] = int(value)
+                        except ValueError:
+                            result['score'][key] = 0
+            
+            # 返回处理后的结果
+            return result
+            
+        except Exception as e:
+            logger.error(f"解析批改结果失败: {str(e)}", exc_info=True)
+            raise Exception(f"解析批改结果失败: {str(e)}")
+    
+    def analyze_essay(self, essay_text: str, title: str = None) -> Dict:
+        """分析作文内容
+        
+        Args:
+            essay_text: 作文内容
+            title: 作文标题
+            
+        Returns:
+            Dict: 分析结果
+        """
+        logger.info(f"开始分析作文: {title or '无标题'}")
+        
+        try:
+            # 构建分析提示词
+            system_prompt = self.config['ANALYSIS_SYSTEM_PROMPT']
+            user_prompt = f"""请对以下作文进行深度分析，并以JSON格式返回分析结果。
+
+作文标题: {title or "无标题"}
+
+作文内容:
+{essay_text}
+
+请按照以下JSON格式返回分析结果:
+{{
+    "theme": "主题分析",
+    "keywords": ["关键词1", "关键词2", "..."],
+    "sentiment": "情感倾向", 
+    "complexity": "复杂度分析",
+    "style": "写作风格",
+    "strengths": ["优点1", "优点2", "..."],
+    "weaknesses": ["缺点1", "缺点2", "..."],
+    "summary": "总结"
+}}
+
+请只返回JSON格式结果，不要添加任何前缀说明。"""
+
+            # 调用AI接口
+            response = self._call_ai_api(system_prompt, user_prompt)
+            
+            # 解析返回结果
+            try:
+                result = json.loads(response)
+            except json.JSONDecodeError:
+                # 尝试提取JSON部分
+                try:
+                    json_match = response.strip()
+                    if json_match.startswith('```json'):
+                        json_match = json_match.replace('```json', '').replace('```', '')
+                    elif json_match.startswith('```'):
+                        json_match = json_match.replace('```', '')
+                    
+                    result = json.loads(json_match.strip())
+                except:
+                    raise ValueError("无法解析AI返回的结果为有效JSON")
+            
+            result['success'] = True
+            return result
+            
+        except Exception as e:
+            logger.error(f"分析作文失败: {str(e)}", exc_info=True)
+            return {
+                'success': False,
+                'error': str(e),
+                'error_type': type(e).__name__
+            }
+

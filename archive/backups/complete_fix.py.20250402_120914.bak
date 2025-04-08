@@ -1,0 +1,102 @@
+"""
+彻底修复app.py中的try-except结构问题，特别是针对第1010行
+"""
+
+def fix_try_except_structure():
+    try:
+        # 读取app.py文件
+        with open('app.py', 'r', encoding='utf-8') as file:
+            content = file.read()
+        
+        # 定位问题区域
+        problem_section = """                ))
+            conn.commit()
+            logger.info(f"已更新数据库中的评分结果, ID={essay_id}")
+                
+            return redirect(url_for('results'))
+                
+            except Exception as e:"""
+        
+        # 修正后的代码
+        fixed_section = """                ))
+                conn.commit()
+                logger.info(f"已更新数据库中的评分结果, ID={essay_id}")
+                
+                return redirect(url_for('results'))
+                
+            except Exception as e:"""
+        
+        # 替换问题区域
+        if problem_section in content:
+            fixed_content = content.replace(problem_section, fixed_section)
+            print("找到并修复了try-except结构问题。")
+        else:
+            # 如果无法精确匹配，则尝试其他方法
+            print("无法精确定位问题区域，尝试更广泛的修复...")
+            
+            # 尝试查找conn.commit()部分并修复整个区域
+            lines = content.split('\n')
+            fixed_lines = []
+            i = 0
+            in_problem_area = False
+            try_found = False
+            
+            while i < len(lines):
+                line = lines[i]
+                
+                # 检测问题区域开始
+                if 'essay_id' in line and '))' in line and not in_problem_area:
+                    in_problem_area = True
+                    fixed_lines.append(line)
+                    i += 1
+                    continue
+                
+                # 修复问题区域
+                if in_problem_area:
+                    # 检测conn.commit()行
+                    if 'conn.commit()' in line:
+                        # 确保缩进正确(16个空格/4个缩进单位）
+                        fixed_lines.append(' ' * 16 + 'conn.commit()')
+                        i += 1
+                        continue
+                    
+                    # 检测logger.info行
+                    elif 'logger.info' in line and '已更新数据库中的评分结果' in line:
+                        fixed_lines.append(' ' * 16 + line.strip())
+                        i += 1
+                        continue
+                    
+                    # 检测return行
+                    elif 'return redirect' in line and 'results' in line:
+                        fixed_lines.append(' ' * 16 + line.strip())
+                        in_problem_area = False
+                        i += 1
+                        continue
+                    
+                    # 检测except行
+                    elif 'except Exception' in line:
+                        # 确保except缩进正确(12个空格/3个缩进单位)
+                        fixed_lines.append(' ' * 12 + line.strip())
+                        in_problem_area = False
+                        i += 1
+                        continue
+                
+                # 其他行保持不变
+                fixed_lines.append(line)
+                i += 1
+            
+            fixed_content = '\n'.join(fixed_lines)
+            print("完成了更广泛的try-except结构修复。")
+        
+        # 写回文件
+        with open('app.py', 'w', encoding='utf-8') as file:
+            file.write(fixed_content)
+        
+        print("成功修复app.py文件中的try-except结构问题!")
+        return True
+    except Exception as e:
+        print(f"修复过程中出错: {str(e)}")
+        return False
+
+if __name__ == "__main__":
+    fix_try_except_structure() 

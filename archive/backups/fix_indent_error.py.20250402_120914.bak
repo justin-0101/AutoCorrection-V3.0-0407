@@ -1,0 +1,45 @@
+"""
+修复app.py文件中的缩进错误
+"""
+
+def fix_indentation_error():
+    try:
+        # 读取app.py文件
+        with open('app.py', 'r', encoding='utf-8') as file:
+            lines = file.readlines()
+        
+        # 修复错误的缩进
+        fixed_lines = []
+        in_error_area = False
+        
+        for i, line in enumerate(lines):
+            # 标记进入错误区域
+            if 'essay_id' in line and '))' in line and i >= 1000 and i <= 1020:
+                in_error_area = True
+                fixed_lines.append(line)
+                continue
+            
+            # 修复错误区域内的缩进
+            if in_error_area and (line.strip().startswith('conn.commit()') or line.strip().startswith('logger.info')):
+                # 去除前导空格，然后添加正确的缩进 (4个空格 * 3层级 = 12个空格)
+                fixed_line = ' ' * 12 + line.lstrip()
+                fixed_lines.append(fixed_line)
+                
+                # 如果修复了logger.info行，则结束错误区域的处理
+                if 'logger.info' in line:
+                    in_error_area = False
+            else:
+                fixed_lines.append(line)
+        
+        # 写回文件
+        with open('app.py', 'w', encoding='utf-8') as file:
+            file.writelines(fixed_lines)
+        
+        print("成功修复app.py文件中的缩进错误!")
+        return True
+    except Exception as e:
+        print(f"修复过程中出错: {str(e)}")
+        return False
+
+if __name__ == "__main__":
+    fix_indentation_error() 

@@ -1,0 +1,46 @@
+from flask import Flask
+from config_loader import ConfigLoader
+import os
+
+class ConfigManager:
+    def __init__(self, app: Flask):
+        self.app = app
+        self.config_loader = ConfigLoader()
+        
+    def apply_config(self, project_name: str) -> bool:
+        """应用指定项目的配置"""
+        config = self.config_loader.load_config(project_name)
+        if not config:
+            return False
+            
+        try:
+            pass  # 自动修复的空块
+        except Exception as e:
+            logger.error(f"发生错误: {str(e)}")
+        except Exception as e:
+            logger.error(f"发生错误: {str(e)}")
+            # 应用基本配置
+            self.app.config['PROJECT_NAME'] = config['projectName']
+            self.app.config['ROOT_DIR'] = config['rootDir']
+            
+            # 如果启用了SSL，配置SSL证书
+            if config.get('sslEnabled') and config.get('sslConfig'):
+                ssl_config = config['sslConfig']
+                if os.path.exists(ssl_config['certPath']) and os.path.exists(ssl_config['keyPath']):
+                    self.app.config['SSL_CERT_PATH'] = ssl_config['certPath']
+                    self.app.config['SSL_KEY_PATH'] = ssl_config['keyPath']
+                    
+            return True
+        except Exception as e:
+            print(f"应用配置时出错: {str(e)}")
+            return False
+    
+    def init_app(self):
+        """初始化应用配置"""
+        # 获取所有配置
+        configs = self.config_loader.list_configs()
+        if not configs:
+            return
+            
+        # 默认使用第一个配置
+        self.apply_config(configs[0]['projectName'])

@@ -1,0 +1,670 @@
+from flask import Flask, render_template, request, jsonify
+import asyncio
+import math
+import json
+import os
+import tempfile
+import base64
+from werkzeug.utils import secure_filename
+import docx2txt
+import PyPDF2
+from PIL import Image
+import pytesseract
+from test_article import *
+from llm_func import *
+from utils import *
+import requests
+from dotenv import load_dotenv
+
+# 加载环境变量
+load_dotenv()
+
+app = Flask(__name__)
+
+# 使用全局变量保存API模式选择
+use_mock_api = False
+use_ai_ocr = True  # 设置为True使用AI OCR，False使用本地Tesseract
+
+# OCR配置
+OCR_PROVIDER = "qwen"  # 可选: "baidu" 或 "qwen"
+
+# 百度千帆API配置
+QIANFAN_AK = os.getenv("QIANFAN_AK")
+QIANFAN_SK = os.getenv("QIANFAN_SK")
+
+# 阿里千问API配置
+DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY")
+DASHSCOPE_MODEL = os.getenv("DASHSCOPE_MODEL", "qwen2.5-vl-3b-instruct")  # 默认使用qwen2.5-vl-3b-instruct
+
+@app.route('/')
+def index():
+    """渲染主页面"""
+    return render_template('index.html', 
+                        subjects=[
+                            {"id": "subject_1", "text": subject_1},
+                            {"id": "subject_2", "text": subject_2},
+                            {"id": "subject_3", "text": subject_3}
+                        ],
+                        sample_articles=[
+                            {"id": "article_1", "text": article_1},
+                            {"id": "article_2", "text": article_2}, 
+                            {"id": "article_3", "text": article_3}
+                        ],
+                        use_mock_api=use_mock_api)
+
+@app.route('/test')
+def test_page():
+    """渲染测试上传页面"""
+    return render_template('test_upload.html')
+
+@app.route('/toggle_mock', methods=['POST'])
+def toggle_mock():
+    """切换API模式（真实/模拟）"""
+    global use_mock_api
+    use_mock_api = not use_mock_api
+    return jsonify({"success": True, "mock_mode": use_mock_api})
+
+@app.route('/correct', methods=['POST'])
+def correct_essay():
+    """处理作文批改请求"""
+    temp_file = None
+    try:
+    except Exception as e:
+        logger.error(f"发生错误: {str(e)}")
+        print(f"接收到的请求数据: {request.form}")
+        print(f"接收到的文件: {request.files}")
+        
+        subject = request.form.get('subject')
+        article = request.form.get('article')
+        uploaded_file = request.files.get('file')
+        
+        print(f"提取的主题: {subject}")
+        print(f"提取的文章内容长度: {len(article) if article else 0}")
+        
+        # 处理上传文件
+        if uploaded_file and uploaded_file.filename != '':
+            original_filename = uploaded_file.filename
+            safe_filename = secure_filename(original_filename)
+            file_ext = os.path.splitext(original_filename)[1].lower()
+            
+            print(f"接收到文件: {original_filename}, 安全文件名: {safe_filename}, 扩展名: {file_ext}")
+            
+            # 创建临时文件来处理上传的文件
+            temp_file = tempfile.NamedTemporaryFile(delete=False)
+            uploaded_file.save(temp_file.name)
+            temp_file_path = temp_file.name
+            temp_file.close()  # 确保关闭文件句柄
+            print(f"创建临时文件: {temp_file_path}")
+            
+            # 根据文件类型提取文本
+            if file_ext == '.docx':
+                print("处理DOCX文件...")
+                article = extract_text_from_docx(temp_file_path)
+            elif file_ext == '.pdf':
+                print("处理PDF文件...")
+                article = extract_text_from_pdf(temp_file_path)
+            elif file_ext == '.txt':
+                print("处理TXT文件...")
+                article = extract_text_from_txt(temp_file_path)
+            elif file_ext in ['.jpg', '.jpeg']:
+                print("处理图片文件...")
+                article = extract_text_from_image(temp_file_path)
+            else:
+                print(f"不支持的文件格式: {file_ext}")
+                raise Exception(f"不支持的文件格式: {file_ext}。支持的格式有: .txt, .docx, .pdf, .jpg, .jpeg")
+            
+            print(f"从文件中提取的文本长度: {len(article) if article else 0}")
+            
+            # 删除临时文件
+            try:
+            except Exception as e:
+                logger.error(f"发生错误: {str(e)}")
+                if os.path.exists(temp_file_path):
+                    os.unlink(temp_file_path)
+                    print(f"临时文件已删除")
+            except Exception as e:
+                print(f"删除临时文件出错: {e}")
+                # 继续执行不终止
+        
+        # 检查是否至少有一个输入源：手动输入或文件上传
+        if not article:
+            return jsonify({"error": "未能获取到作文内容。请输入作文或上传正确格式的文件。"}), 400
+            
+        # 如果没有提供题目但上传了文件，使用默认题目或文件名作为题目
+        if not subject and uploaded_file and uploaded_file.filename != '':
+            subject = f"从文件中提取的作文 - {uploaded_file.filename}"
+        elif not subject:
+            # 如果没有标题，则使用内容的前20个字符
+            subject = f"未命名作文 - {article[:20]}..."
+            
+        # 异步运行批改任务
+        result = asyncio.run(process_correction(subject, article))
+        return jsonify(result)
+    except Exception as e:
+        # 确保临时文件被删除
+        if temp_file and os.path.exists(temp_file.name):
+            try:
+            except Exception as e:
+                logger.error(f"发生错误: {str(e)}")
+                os.unlink(temp_file.name)
+            except:
+                pass
+        return jsonify({"error": str(e)}), 500
+
+# 文件处理函数
+def extract_text_from_docx(file_path):
+    """从Word文档中提取文本"""
+    try:
+    except Exception as e:
+        logger.error(f"发生错误: {str(e)}")
+        text = docx2txt.process(file_path)
+        return text
+    except Exception as e:
+        print(f"从Word文档中提取文本出错: {e}")
+        return ""
+
+def extract_text_from_pdf(file_path):
+    """从PDF文件中提取文本"""
+    try:
+    except Exception as e:
+        logger.error(f"发生错误: {str(e)}")
+        text = ""
+        with open(file_path, 'rb') as file:
+            pdf_reader = PyPDF2.PdfReader(file)
+            for page_num in range(len(pdf_reader.pages)):
+                page_text = pdf_reader.pages[page_num].extract_text()
+                text += page_text
+        
+        # 检查是否成功提取到文本，文本过少可能表示这是扫描型PDF
+        if len(text.strip()) < 100:  # 如果提取的文本少于100个字符，尝试OCR
+            print("PDF文本内容很少，可能是扫描型PDF，尝试OCR处理...")
+            
+            # 尝试将PDF页面转换为图像并进行OCR
+            try:
+            except Exception as e:
+                logger.error(f"发生错误: {str(e)}")
+                # 动态导入pdf2image，避免强制依赖
+                from pdf2image import convert_from_path
+                
+                # 转换PDF为图像
+                pages = convert_from_path(file_path)
+                
+                # 清除之前提取的文本
+                text = ""
+                
+                # 对每个页面进行OCR处理
+                for i, page in enumerate(pages):
+                    # 保存临时图像文件
+                    temp_img_path = f"{file_path}_page_{i}.jpg"
+                    page.save(temp_img_path, "JPEG")
+                    
+                    # 提取文本
+                    try:
+                    except Exception as e:
+                        logger.error(f"发生错误: {str(e)}")
+                        page_text = extract_text_from_image(temp_img_path)
+                        text += page_text + "\n\n"
+                    finally:
+                        # 删除临时图像文件
+                        if os.path.exists(temp_img_path):
+                            try:
+                            except Exception as e:
+                                logger.error(f"发生错误: {str(e)}")
+                                os.remove(temp_img_path)
+                            except Exception as e:
+                                print(f"删除临时图像文件出错: {e}")
+                
+                if text.strip():
+                    return text
+                else:
+                    raise Exception("无法从PDF中提取文本")
+                    
+            except ImportError:
+                # 如果pdf2image模块未安装
+                raise Exception("处理扫描型PDF需要安装pdf2image和poppler。请参考README安装相关依赖。")
+                
+            except Exception as ocr_error:
+                print(f"PDF OCR处理出错: {ocr_error}")
+                if text.strip():
+                    # 如果有一些文本，尽管很少，还是返回它
+                    return text
+                else:
+                    # 否则抛出异常
+                    raise Exception(f"无法从PDF中提取文本: {ocr_error}")
+        
+        return text
+    except Exception as e:
+        print(f"从PDF文件中提取文本出错: {e}")
+        raise Exception(f"从PDF文件中提取文本出错: {e}")
+
+def extract_text_from_image(file_path):
+    """从图片中提取文本（使用OCR）"""
+    temp_jpeg_path = None
+    try:
+    except Exception as e:
+        logger.error(f"发生错误: {str(e)}")
+        print(f"开始OCR处理图片: {file_path}")
+        # 检查并处理图像格式
+        try:
+        except Exception as e:
+            logger.error(f"发生错误: {str(e)}")
+            image = Image.open(file_path)
+            print(f"图像已加载，模式: {image.mode}, 尺寸: {image.size}")
+            
+            # 一定要转换图像为RGB模式（确保JPEG兼容）
+            if image.mode != 'RGB':
+                print(f"转换图像从 {image.mode} 到 RGB 模式")
+                image = image.convert('RGB')
+            
+            # 在处理前保存为标准格式
+            temp_jpeg_path = f"{file_path}_temp.jpg"
+            image.save(temp_jpeg_path, 'JPEG', quality=95)
+            image.close()  # 确保关闭图像文件
+            print(f"已创建临时JPEG文件: {temp_jpeg_path}")
+            
+            # 使用处理后的图像
+            working_file_path = temp_jpeg_path
+            
+        except Exception as img_error:
+            print(f"图像预处理出错: {img_error}")
+            # 继续尝试使用原始图像
+            working_file_path = file_path
+        
+        # 一定用千问OCR
+        if DASHSCOPE_API_KEY:
+            print("使用阿里千问OCR进行文本识别")
+            try:
+            except Exception as e:
+                logger.error(f"发生错误: {str(e)}")
+                result = extract_text_from_image_qwen(working_file_path)
+                
+                # 清理临时文件
+                if temp_jpeg_path and os.path.exists(temp_jpeg_path):
+                    try:
+                    except Exception as e:
+                        logger.error(f"发生错误: {str(e)}")
+                        os.remove(temp_jpeg_path)
+                        print(f"已删除临时JPEG文件: {temp_jpeg_path}")
+                    except Exception as e:
+                        print(f"删除临时JPEG文件出错: {e}")
+                
+                print(f"千问OCR提取成功，文本长度: {len(result)}")
+                return result
+                
+            except Exception as ai_error:
+                print(f"千问OCR处理出错详情: {ai_error}")
+                # 这里不再尝试使用Tesseract，而是直接报告错误
+                raise Exception(f"无法识别图片文字: {ai_error}")
+        else:
+            raise Exception("未配置千问API密钥，无法使用千问AI OCR功能")
+            
+    except Exception as e:
+        # 清理临时文件
+        if temp_jpeg_path and os.path.exists(temp_jpeg_path):
+            try:
+            except Exception as e:
+                logger.error(f"发生错误: {str(e)}")
+                os.remove(temp_jpeg_path)
+                print(f"已删除临时JPEG文件: {temp_jpeg_path}")
+            except Exception as e:
+                print(f"删除临时JPEG文件出错: {e}")
+                
+        print(f"从图片中提取文本出错: {e}")
+        raise Exception(f"处理图片文件时出错: {e}")
+
+def extract_text_from_image_baidu(file_path):
+    """使用百度千帆API进行OCR识别"""
+    if not QIANFAN_AK or not QIANFAN_SK:
+        raise Exception("未配置百度千帆API密钥，无法使用百度AI OCR功能")
+    
+    # 获取访问令牌
+    token_url = f"https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&client_id={QIANFAN_AK}&client_secret={QIANFAN_SK}"
+    response = requests.post(token_url)
+    if response.status_code != 200:
+        raise Exception(f"获取百度千帆API令牌失败: {response.text}")
+    
+    access_token = response.json()["access_token"]
+    
+    # 准备图片数据
+    with open(file_path, "rb") as f:
+        image_data = base64.b64encode(f.read()).decode("utf-8")
+    
+    # 调用通用文字识别API
+    ocr_url = f"https://aip.baidubce.com/rest/2.0/ocr/v1/general_basic?access_token={access_token}"
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    data = {"image": image_data}
+    
+    response = requests.post(ocr_url, headers=headers, data=data)
+    if response.status_code != 200:
+        raise Exception(f"百度千帆OCR API调用失败: {response.text}")
+    
+    result = response.json()
+    if "error_code" in result:
+        raise Exception(f"百度千帆OCR API错误: {result}")
+    
+    # 提取识别的文本
+    words_result = result.get("words_result", [])
+    text = "\n".join([item["words"] for item in words_result])
+    
+    return text
+
+def extract_text_from_image_qwen(file_path):
+    """使用阿里千问-VL模型进行OCR识别"""
+    if not DASHSCOPE_API_KEY:
+        raise Exception("未配置千问API密钥，无法使用千问AI OCR功能")
+    
+    # 准备图片数据
+    try:
+    except Exception as e:
+        logger.error(f"发生错误: {str(e)}")
+        print(f"准备读取图片文件: {file_path}")
+        with open(file_path, "rb") as f:
+            image_content = f.read()
+        
+        print(f"图片文件大小: {len(image_content)/1024:.2f} KB")
+        
+        # 转换图片为base64格式
+        image_base64 = base64.b64encode(image_content).decode('utf-8')
+        print("已完成图片转Base64编码")
+        
+        # 调用千问VL模型API
+        url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {DASHSCOPE_API_KEY}"
+        }
+        
+        # 简化请求体，直接要求OCR
+        payload = {
+            "model": DASHSCOPE_MODEL,  # 使用环境变量中配置的模型
+            "input": {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"image": f"data:image/jpeg;base64,{image_base64}"},
+                            {"text": "这是一张文字图片。请帮我识别图片中的所有文字并原样输出，不要添加任何解释或说明。"}
+                        ]
+                    }
+                ]
+            },
+            "parameters": {
+                "result_format": "message",
+                "max_tokens": 2000,
+                "temperature": 0.01,
+                "top_p": 0.8
+            }
+        }
+        
+        # 发送请求，添加超时和重试
+        print(f"调用千问OCR API，模型: {DASHSCOPE_MODEL}")
+        print(f"请求URL: {url}")
+        
+        # 添加重试逻辑
+        max_retries = 3
+        retry_delay = 2  # 秒
+        
+        for attempt in range(max_retries):
+            try:
+            except Exception as e:
+                logger.error(f"发生错误: {str(e)}")
+                print(f"尝试发送请求 (尝试 {attempt+1}/{max_retries})...")
+                # 添加超时参数
+                response = requests.post(url, headers=headers, json=payload, timeout=(15, 180))  # 增加超时时间
+                print(f"请求已发送，状态码: {response.status_code}")
+                
+                if response.status_code != 200:
+                    print(f"千问OCR API调用失败 (尝试 {attempt+1}/{max_retries}): 状态码 {response.status_code}")
+                    print(f"错误响应: {response.text}")
+                    
+                    if attempt < max_retries - 1:
+                        print(f"将在 {retry_delay} 秒后重试...")
+                        import time
+                        time.sleep(retry_delay)
+                        retry_delay *= 2  # 指数退避
+                        continue
+                    else:
+                        raise Exception(f"千问OCR API调用失败，状态码: {response.status_code}，错误: {response.text}")
+                
+                result = response.json()
+                print("千问OCR API调用成功")
+                
+                # 提取生成的文本
+                if 'output' not in result or 'choices' not in result.get('output', {}):
+                    print(f"OCR响应格式异常: {result}")
+                    raise Exception("千问OCR响应格式异常，未能找到输出内容")
+                
+                content = result.get("output", {}).get("choices", [{}])[0].get("message", {}).get("content", "")
+                if not content or not content.strip():
+                    print("OCR识别未返回文本内容")
+                    raise Exception("千问OCR未返回有效文本内容")
+                    
+                print(f"成功提取OCR文本，长度: {len(content)}")
+                return content
+                
+            except requests.exceptions.ConnectionError as e:
+                print(f"网络连接错误 (尝试 {attempt+1}/{max_retries}): {str(e)}")
+                
+                if attempt < max_retries - 1:
+                    print(f"将在 {retry_delay} 秒后重试...")
+                    import time
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # 指数退避
+                else:
+                    print("达到最大重试次数，放弃请求")
+                    raise Exception(f"千问OCR API请求连接错误: {str(e)}")
+                    
+            except requests.exceptions.Timeout as e:
+                print(f"请求超时 (尝试 {attempt+1}/{max_retries}): {str(e)}")
+                
+                if attempt < max_retries - 1:
+                    print(f"将在 {retry_delay} 秒后重试...")
+                    import time
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # 指数退避
+                else:
+                    print("达到最大重试次数，放弃请求")
+                    raise Exception(f"千问OCR API请求超时: {str(e)}")
+                    
+            except requests.exceptions.RequestException as e:
+                print(f"请求异常 (尝试 {attempt+1}/{max_retries}): {str(e)}")
+                
+                if attempt < max_retries - 1:
+                    print(f"将在 {retry_delay} 秒后重试...")
+                    import time
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # 指数退避
+                else:
+                    print("达到最大重试次数，放弃请求")
+                    raise Exception(f"千问OCR API请求异常: {str(e)}")
+    except Exception as e:
+        print(f"千问OCR处理过程中发生错误: {str(e)}")
+        raise Exception(f"千问OCR处理失败: {str(e)}")
+
+# 添加TXT文件处理函数
+def extract_text_from_txt(file_path):
+    """从TXT文本文件中提取文本"""
+    try:
+    except Exception as e:
+        logger.error(f"发生错误: {str(e)}")
+        # 尝试以UTF-8编码读取
+        try:
+        except Exception as e:
+            logger.error(f"发生错误: {str(e)}")
+            with open(file_path, 'r', encoding='utf-8') as file:
+                text = file.read()
+            return text
+        except UnicodeDecodeError:
+            # 如果UTF-8失败，尝试GBK编码（中文Windows常用）
+            with open(file_path, 'r', encoding='gbk') as file:
+                text = file.read()
+            return text
+    except Exception as e:
+        print(f"从TXT文件中提取文本出错: {e}")
+        raise Exception(f"从TXT文件中提取文本出错: {e}")
+
+async def process_correction(subject, article):
+    """执行作文批改流程"""
+    n_words = count_chinese_characters(article)
+    upper_limit, deduct_by_words = words_count_handler(n_words)
+
+    if use_mock_api:
+        # 使用模拟数据
+        results = await asyncio.gather(
+            mock_handler_spell_error(article),
+            mock_handler_content_analysis(subject, article),
+            mock_handler_express_analysis(subject, article)
+        )
+    else:
+        # 使用真实API
+        results = await asyncio.gather(
+            handler_spell_error(article),
+            handler_content_analysis(subject, article),
+            handler_express_analysis(subject, article)
+        )
+    
+    results_spell = results[0]
+    results_content = results[1]
+    results_express = results[2]
+
+    factor = upper_limit / 60
+    mark = math.ceil(factor * (int(results_express["表达文采得分"]) + int(results_content["内容主旨得分"]) + int(
+        (20 - int(results_spell["错别字扣分"])))))
+    detail = {"错别字解析": results_spell["解析"], "内容主旨解析": results_content["解析"], "表达文采解析": results_express["解析"]}
+    
+    if use_mock_api:
+        summary = await mock_handler_summary(detail)
+    else:
+        summary = await handler_summary(detail)
+
+    return {
+        "words_count": n_words,
+        "spell_error_score": results_spell['错别字扣分'],
+        "spell_error_analysis": results_spell['解析'],
+        "content_score": results_content['内容主旨得分'],
+        "content_analysis": results_content['解析'],
+        "expression_score": results_express['表达文采得分'],
+        "expression_analysis": results_express['解析'],
+        "total_score": mark,
+        "summary": summary
+    }
+
+# 模拟API处理函数
+async def mock_handler_spell_error(article: str):
+    return {
+        "错别字扣分": "0",
+        "解析": "未发现任何错别字，本项不扣分。"
+    }
+
+async def mock_handler_content_analysis(subject: str, article: str):
+    return {
+        "内容主旨得分": "18",
+        "解析": {
+            "主旨解析": "文章紧扣主题，论述清晰，主旨明确。",
+            "论点解析": "文章论点清晰，层层递进，紧扣主题。",
+            "论据解析": "文章论据充实，举例恰当，论证有力。",
+            "思想情感解析": "文章思想积极健康，情感真挚。"
+        }
+    }
+
+async def mock_handler_express_analysis(subject: str, article: str):
+    return {
+        "表达文采得分": "17",
+        "解析": {
+            "论证手法解析": "文章运用了多种论证方法，论证有力。",
+            "引经据典解析": "文章适当引用了典故和名言，增强了文章的说服力。",
+            "修辞手法解析": "文章运用了比喻、排比等修辞手法，语言生动形象。"
+        }
+    }
+
+async def mock_handler_summary(detail: dict):
+    return """总评：
+本篇作文立意明确，主题突出，内容充实，表达流畅。在内容方面，文章主旨鲜明，论点清晰，论据充分，思想健康。在表达方面，文章运用了多种修辞手法，语言生动形象，表达得体。
+建议：
+1. 可以增加一些具体事例，使论据更加丰富；
+2. 可以进一步丰富修辞手法的运用，使表达更加生动。
+总体而言，这是一篇很好的文章，主题突出，论证有力，表达得体。"""
+
+@app.route('/test_upload', methods=['POST'])
+def test_upload():
+    """测试文件上传功能"""
+    result = {
+        'status': 'received',
+        'form_data': {},
+        'file_info': None,
+        'file_content': None
+    }
+    
+    # 记录表单数据
+    for key in request.form:
+        result['form_data'][key] = request.form[key]
+    
+    # 处理文件
+    if 'file' not in request.files:
+        result['error'] = "No file part in the request"
+        return jsonify(result), 400
+        
+    file = request.files['file']
+    
+    if file.filename == '':
+        result['error'] = "No file selected"
+        return jsonify(result), 400
+        
+    if file:
+        original_filename = file.filename
+        safe_filename = secure_filename(original_filename)
+        file_ext = os.path.splitext(original_filename)[1].lower()
+        
+        result['file_info'] = {
+            'original_filename': original_filename,
+            'safe_filename': safe_filename,
+            'extension': file_ext,
+            'content_type': file.content_type
+        }
+        
+        # 保存临时文件
+        temp_file = tempfile.NamedTemporaryFile(delete=False)
+        file.save(temp_file.name)
+        temp_path = temp_file.name
+        temp_file.close()
+        
+        # 尝试读取文件内容
+        try:
+        except Exception as e:
+            logger.error(f"发生错误: {str(e)}")
+            if file_ext == '.txt':
+                try:
+                except Exception as e:
+                    logger.error(f"发生错误: {str(e)}")
+                    with open(temp_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                except UnicodeDecodeError:
+                    with open(temp_path, 'r', encoding='gbk') as f:
+                        content = f.read()
+                result['file_content'] = content[:500] + ('...' if len(content) > 500 else '')
+            elif file_ext == '.docx':
+                content = docx2txt.process(temp_path)
+                result['file_content'] = content[:500] + ('...' if len(content) > 500 else '')
+            else:
+                result['file_content'] = "File content not displayed for this type"
+        except Exception as e:
+            result['error'] = f"Error reading file: {str(e)}"
+        finally:
+            # 删除临时文件
+            try:
+            except Exception as e:
+                logger.error(f"发生错误: {str(e)}")
+                os.unlink(temp_path)
+            except:
+                pass
+    
+    return jsonify(result)
+
+if __name__ == '__main__':
+    # 创建templates和static目录（如果不存在）
+    os.makedirs('templates', exist_ok=True)
+    os.makedirs('static', exist_ok=True)
+    # 启动Flask应用，使用0.0.0.0让外部网络可访问
+    print("作文自动批改系统服务启动中...")
+    print("访问地址：http://127.0.0.1:5000 或 http://[您的IP地址]:5000")
+    app.run(debug=True, host='0.0.0.0', port=5000) 

@@ -1,0 +1,679 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+用户认证模块
+处理用户注册、登录、邮箱验证等功能
+"""
+
+import sqlite3
+import random
+import string
+from datetime import datetime, timedelta
+from werkzeug.security import generate_password_hash, check_password_hash
+from flask import session, request
+import re
+import logging
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import os
+from functools import wraps
+import time
+
+# 配置日志
+logging.basicConfig(level=logging.INFO, 
+                format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger('user_auth')
+
+# 创建实例目录
+INSTANCE_DIR = 'instance'
+if not os.path.exists(INSTANCE_DIR):
+    os.makedirs(INSTANCE_DIR)
+
+# 数据库路径
+DB_FILE = 'instance/essay_correction.db'
+
+# 邮件发送配置
+SMTP_SERVER = os.environ.get('SMTP_SERVER', 'smtp.example.com')
+SMTP_PORT = int(os.environ.get('SMTP_PORT', 587))
+SMTP_USERNAME = os.environ.get('SMTP_USERNAME', 'your_email@example.com')
+SMTP_PASSWORD = os.environ.get('SMTP_PASSWORD', 'your_password')
+SMTP_SENDER = os.environ.get('SMTP_SENDER', '小园丁作文批改<your_email@example.com>')
+USE_TLS = os.environ.get('SMTP_USE_TLS', 'True').lower() == 'true'
+
+# 正则表达式验证
+USERNAME_REGEX = re.compile(r'^[a-zA-Z0-9_]{3,20}$')
+EMAIL_REGEX = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
+
+# 验证码有效期（分钟）
+CODE_EXPIRY_MINUTES = 10
+
+# 邮件发送间隔限制（秒）
+EMAIL_LIMIT_SECONDS = 60  # 1分钟
+
+class User:
+    """用户类，用于管理用户登录状态"""
+    
+    def __init__(self, user_id, username, email, role='user'):
+        self.id = user_id
+        self.username = username
+        self.email = email
+        self.role = role
+        self.is_authenticated = True
+        self.is_active = True
+        self.is_anonymous = False
+    
+    def get_id(self):
+        return str(self.id)
+    
+    @staticmethod
+    def get(user_id):
+        """根据用户ID获取用户对象"""
+        conn = sqlite3.connect(DB_FILE)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
+        user_data = cursor.fetchone()
+        conn.close()
+        
+        if user_data:
+            try:
+                role = user_data['role']
+            except (IndexError, KeyError):
+                role = 'user'  # 默认角色
+            
+            return User(
+                user_id=user_data['user_id'],
+                username=user_data['username'],
+                email=user_data['email'],
+                role=role
+            )
+        return None
+    
+    @staticmethod
+    def find_by_email(email):
+        """根据邮箱查找用户"""
+        conn = sqlite3.connect(DB_FILE)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT * FROM users WHERE email = ?", (email,))
+        user_data = cursor.fetchone()
+        conn.close()
+        
+        if user_data:
+            try:
+                role = user_data['role']
+            except (IndexError, KeyError):
+                role = 'user'  # 默认角色
+            
+            return User(
+                user_id=user_data['user_id'],
+                username=user_data['username'],
+                email=user_data['email'],
+                role=role
+            )
+        return None
+
+def generate_verification_code(length=6):
+    """生成数字验证码"""
+    return ''.join(random.choices(string.digits, k=length))
+
+def send_email(to_email, subject, body):
+    """发送电子邮件"""
+    try:
+        # 创建邮件
+        msg = MIMEMultipart()
+        msg['From'] = SMTP_SENDER
+        msg['To'] = to_email
+        msg['Subject'] = subject
+        
+        # 添加邮件正文
+        msg.attach(MIMEText(body, 'plain', 'utf-8'))
+        
+        # 连接到SMTP服务器
+        if USE_TLS:
+            server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+            server.starttls()  # 启用TLS加密
+        else:
+            server = smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT)
+        
+        # 登录
+        server.login(SMTP_USERNAME, SMTP_PASSWORD)
+        
+        # 发送邮件
+        server.sendmail(SMTP_SENDER, to_email, msg.as_string())
+        
+        # 关闭连接
+        server.quit()
+        
+        logger.info(f"发送验证码邮件到 {to_email} 成功")
+        return True
+    except Exception as e:
+        logger.error(f"发送邮件失败: {str(e)}")
+        return False
+
+def send_verification_email(email, code, purpose='registration'):
+    """发送验证码邮件"""
+    purposes = {
+        'registration': '注册账号',
+        'password_reset': '重置密码',
+        'login': '登录验证'
+    }
+    
+    purpose_text = purposes.get(purpose, '验证')
+    
+    subject = f'【小园丁作文批改】{purpose_text}验证码'
+    
+    if purpose == 'registration':
+        body = f'''
+您好！
+
+感谢您注册小园丁作文批改系统。您的验证码是：
+
+{code}
+
+验证码有效期为15分钟。如果不是您本人操作，请忽略此邮件。
+
+小园丁作文批改系统
+'''
+    elif purpose == 'login':
+        body = f'''
+您好！
+
+您正在登录小园丁作文批改系统。您的登录验证码是：
+
+{code}
+
+验证码有效期为15分钟。如果不是您本人操作，请立即修改密码。
+
+小园丁作文批改系统
+'''
+    else:
+        body = f'''
+您好！
+
+您的验证码是：{code}
+用于：{purpose_text}
+有效期：15分钟
+
+小园丁作文批改系统
+'''
+    
+    return send_email(email, subject, body)
+
+def save_verification_code(email, code, purpose='registration'):
+    """保存验证码到数据库"""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    
+    # 设置过期时间为15分钟后
+    expires_at = (datetime.now() + timedelta(minutes=15)).strftime('%Y-%m-%d %H:%M:%S')
+    
+    # 先使旧验证码失效
+    c.execute("""
+        UPDATE verification_codes 
+        SET is_used = 1 
+        WHERE email = ? AND purpose = ? AND is_used = 0
+    """, (email, purpose))
+    
+    # 添加新验证码
+    c.execute("""
+        INSERT INTO verification_codes (email, code, purpose, expires_at) 
+        VALUES (?, ?, ?, ?)
+    """, (email, code, purpose, expires_at))
+    
+    conn.commit()
+    conn.close()
+    
+    return True
+
+def verify_code(email, code, purpose='registration'):
+    """验证验证码是否有效"""
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
+    c.execute("""
+        SELECT id FROM verification_codes 
+        WHERE email = ? AND code = ? AND purpose = ? 
+        AND is_used = 0 AND expires_at > ?
+        ORDER BY created_at DESC LIMIT 1
+    """, (email, code, purpose, now))
+    
+    result = c.fetchone()
+    
+    if result:
+        # 标记验证码为已使用
+        c.execute("UPDATE verification_codes SET is_used = 1 WHERE id = ?", (result['id'],))
+        conn.commit()
+        conn.close()
+        return True
+    
+    conn.close()
+    return False
+
+def check_email_verification_limit(email, purpose='registration', limit=3, period=300):
+    """检查邮箱验证码发送频率限制"""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    
+    # 计算时间段开始时间
+    time_start = (datetime.now() - timedelta(seconds=period)).strftime('%Y-%m-%d %H:%M:%S')
+    
+    # 查询指定时间段内发送的验证码数量
+    c.execute("""
+        SELECT COUNT(*) FROM verification_codes
+        WHERE email = ? AND purpose = ? AND created_at > ?
+    """, (email, purpose, time_start))
+    
+    count = c.fetchone()[0]
+    conn.close()
+    
+    return count < limit  # 如果小于限制，返回True
+
+def register_user(email, username, password, code=None):
+    """注册新用户"""
+    # 首先验证输入
+    if not email or not username or not password:
+        return False, "邮箱、用户名和密码不能为空"
+    
+    # 检查邮箱格式
+    if not EMAIL_REGEX.match(email):
+        return False, "邮箱格式不正确"
+    
+    # 检查用户名格式
+    if not USERNAME_REGEX.match(username):
+        return False, "用户名必须由3-20个字母、数字或下划线组成"
+    
+    # 检查密码强度
+    if len(password) < 6:
+        return False, "密码必须至少包含6个字符"
+    
+    # 暂时不需要验证码
+    # if code is None:
+    #     return False, "请先获取验证码"
+    
+    # 检查验证码是否正确
+    # if not verify_code(email, code, 'registration'):
+    #     return False, "验证码错误或已过期，请重新获取"
+    
+    # 检查邮箱是否已存在
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    
+    c.execute("SELECT 1 FROM users WHERE email = ?", (email,))
+    if c.fetchone():
+        conn.close()
+        return False, "该邮箱已被注册"
+    
+    # 检查用户名是否已存在
+    c.execute("SELECT 1 FROM users WHERE username = ?", (username,))
+    if c.fetchone():
+        conn.close()
+        return False, "该用户名已被使用"
+    
+    try:
+        # 获取网站配置
+        c.execute("SELECT config_name, config_value FROM website_config WHERE config_name IN ('free_essays', 'registration_bonus', 'regular_daily_essays')")
+        config = {}
+        for row in c.fetchall():
+            config[row[0]] = int(row[1])
+        
+        # 使用配置值或默认值
+        free_essays = config.get('free_essays', 10)
+        registration_bonus = config.get('registration_bonus', 3)
+        daily_limit = config.get('regular_daily_essays', 5)
+        
+        # 计算总可用次数 = 基础次数 + 注册奖励
+        total_essays = free_essays + registration_bonus
+        
+        # 创建用户
+        hashed_password = generate_password_hash(password)
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        today = datetime.now().strftime('%Y-%m-%d')
+        
+        # 新用户默认为免费用户
+        user_type = 'free'
+        
+        c.execute("""
+            INSERT INTO users (
+                username, email, password_hash, created_at, 
+                user_type, essays_remaining, essays_monthly_limit, essays_daily_limit, 
+                essays_daily_used, essays_total_used, daily_reset_date, membership_expiry,
+                registration_bonus_claimed, vip_status, is_active, role
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            username, email, hashed_password, now,
+            user_type, total_essays, free_essays, daily_limit,
+            0, 0, today, None,
+            1, 0, 1, 'user'
+        ))
+        
+        # 获取新用户ID
+        user_id = c.lastrowid
+        
+        # 创建用户资料（如果需要保留此表）
+        c.execute("""
+            INSERT INTO user_profiles (user_id, full_name)
+            VALUES (?, ?)
+        """, (user_id, username))
+        
+        # 提交事务
+        conn.commit()
+        
+        logger.info(f"新用户注册成功: {username} ({email}), 类型: {user_type}, 剩余次数: {total_essays}")
+        return True, "注册成功"
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"用户注册失败: {str(e)}")
+        return False, f"注册失败，请稍后重试: {str(e)}"
+    finally:
+        conn.close()
+
+def login_user_with_password(username_or_email, password):
+    """
+    使用用户名/邮箱和密码登录
+    
+    Args:
+        username_or_email: 用户名或邮箱
+        password: 密码
+        
+    Returns:
+        tuple: (success, message)
+            success: 布尔值，表示是否登录成功
+            message: 字符串，表示登录结果的详细信息
+    """
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        
+        # 先按邮箱查询
+        c.execute("SELECT * FROM users WHERE email = ?", (username_or_email,))
+        user_data = c.fetchone()
+        
+        # 如果没找到，按用户名查询
+        if not user_data:
+            c.execute("SELECT * FROM users WHERE username = ?", (username_or_email,))
+            user_data = c.fetchone()
+        
+        # 如果仍然没找到，返回失败
+        if not user_data:
+            return False, "用户不存在"
+        
+        # 转为字典格式以便访问字段
+        column_names = [description[0] for description in c.description]
+        user_dict = dict(zip(column_names, user_data))
+        
+        # 验证密码
+        if check_password_hash(user_dict['password_hash'], password):
+            # 更新最后登录时间
+            c.execute(
+                "UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE user_id = ?",
+                (user_dict['user_id'],)
+            )
+            
+            # 记录登录历史
+            user_ip = request.remote_addr if request else 'unknown'
+            user_agent = request.user_agent.string if request and request.user_agent else 'unknown'
+            
+            c.execute(
+                "INSERT INTO login_history (user_id, ip_address, user_agent) VALUES (?, ?, ?)",
+                (user_dict['user_id'], user_ip, user_agent)
+            )
+            
+            conn.commit()
+            
+            # 返回用户信息
+            logger.info(f"用户 {user_dict['username']} 登录成功")
+            return True, {
+                'id': user_dict['user_id'],  # 使用user_id字段
+                'user_id': user_dict['user_id'],  # 同时提供user_id键
+                'username': user_dict['username'],
+                'email': user_dict['email'],
+                'role': user_dict.get('role', 'user')
+            }
+        else:
+            logger.warning(f"用户 {username_or_email} 密码错误")
+            return False, "密码错误"
+    
+    except Exception as e:
+        logger.error(f"登录过程中出错: {e}")
+        return False, f"登录失败: {str(e)}"
+    
+    finally:
+        if conn:
+            conn.close()
+
+def login_user_with_code(email, code):
+    """使用邮箱和验证码登录"""
+    # 验证码验证
+    if not verify_code(email, code, 'login'):
+        return False, "验证码无效或已过期"
+    
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    
+    # 查询用户
+    c.execute("SELECT * FROM users WHERE email = ?", (email,))
+    user_data = c.fetchone()
+    
+    if not user_data:
+        conn.close()
+        return False, "该邮箱未注册"
+    
+    # 检查账号状态 - 兼容没有is_active字段的情况
+    is_active = user_data['is_active']
+    
+    if not is_active:
+        conn.close()
+        return False, "账号已被禁用"
+    
+    # 更新最后登录时间 - 注意检查user_id字段存在与否
+    user_id = user_data['user_id']  # 使用user_id字段
+    c.execute(
+        "UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE user_id = ?",
+        (user_id,)
+    )
+    
+    # 尝试记录登录历史，如果表不存在则忽略
+    ip = request.remote_addr if 'request' in globals() else 'unknown'
+    user_agent = request.user_agent.string if 'request' in globals() else 'unknown'
+    c.execute(
+        "INSERT INTO login_history (user_id, ip_address, user_agent) VALUES (?, ?, ?)",
+        (user_data['user_id'], ip, user_agent)
+    )
+    
+    conn.commit()
+    
+    # 构建用户对象
+    role = user_data['role']
+    
+    user = User(
+        user_id=user_data['user_id'],
+        username=user_data['username'],
+        email=user_data['email'],
+        role=role
+    )
+    
+    conn.close()
+    return True, user
+
+def update_user_profile(user_id, data):
+    """更新用户资料"""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    
+    try:
+        # 更新用户资料
+        c.execute("""
+            UPDATE user_profiles 
+            SET full_name = ?, school = ?, grade = ?
+            WHERE user_id = ?
+        """, (
+            data.get('full_name', ''),
+            data.get('school', ''),
+            data.get('grade', ''),
+            user_id
+        ))
+        
+        conn.commit()
+        conn.close()
+        return True, "资料更新成功"
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        logger.error(f"更新用户资料失败: {str(e)}")
+        return False, f"更新失败: {str(e)}"
+
+def change_password(user_id, current_password, new_password):
+    """修改用户密码"""
+    if len(new_password) < 6:
+        return False, "新密码长度不能少于6个字符"
+    
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    
+    # 获取当前用户信息
+    c.execute("SELECT password_hash FROM users WHERE user_id = ?", (user_id,))
+    user_data = c.fetchone()
+    
+    if not user_data:
+        conn.close()
+        return False, "用户不存在"
+    
+    # 验证当前密码
+    if not check_password_hash(user_data['password_hash'], current_password):
+        conn.close()
+        return False, "当前密码错误"
+    
+    # 更新密码
+    new_password_hash = generate_password_hash(new_password)
+    c.execute(
+        "UPDATE users SET password_hash = ? WHERE user_id = ?",
+        (new_password_hash, user_id)
+    )
+    
+    conn.commit()
+    conn.close()
+    return True, "密码修改成功"
+
+def reset_password_with_code(email, code, new_password):
+    """使用验证码重置密码"""
+    if len(new_password) < 6:
+        return False, "新密码长度不能少于6个字符"
+    
+    # 验证码验证
+    if not verify_code(email, code, 'password_reset'):
+        return False, "验证码无效或已过期"
+    
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    
+    # 更新密码
+    new_password_hash = generate_password_hash(new_password)
+    c.execute(
+        "UPDATE users SET password_hash = ? WHERE email = ?",
+        (new_password_hash, email)
+    )
+    
+    if c.rowcount == 0:
+        conn.close()
+        return False, "该邮箱未注册"
+    
+    conn.commit()
+    conn.close()
+    return True, "密码重置成功"
+
+def reset_password_without_code(email, new_password):
+    """直接重置密码（不需要验证码）"""
+    if len(new_password) < 6:
+        return False, "新密码长度不能少于6个字符"
+    
+    # 检查邮箱是否存在
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    
+    c.execute("SELECT user_id FROM users WHERE email = ?", (email,))
+    user = c.fetchone()
+    
+    if not user:
+        conn.close()
+        return False, "该邮箱未注册"
+    
+    # 更新密码
+    new_password_hash = generate_password_hash(new_password)
+    c.execute(
+        "UPDATE users SET password_hash = ? WHERE email = ?",
+        (new_password_hash, email)
+    )
+    
+    conn.commit()
+    conn.close()
+    return True, "密码重置成功"
+
+def get_user_profile(user_id):
+    """获取用户资料"""
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    
+    c.execute("""
+        SELECT u.username, u.email, u.created_at, u.last_login, u.role,
+            p.full_name, p.school, p.grade, p.avatar_path
+        FROM users u
+        LEFT JOIN user_profiles p ON u.user_id = p.user_id
+        WHERE u.user_id = ?
+    """, (user_id,))
+    
+    profile = c.fetchone()
+    conn.close()
+    
+    if profile:
+        return dict(profile)
+    
+    return None
+
+def is_logged_in():
+    """检查是否已登录"""
+    return 'user_id' in session
+
+def get_current_user():
+    """获取当前登录用户信息"""
+    if 'user_id' not in session:
+        return None
+    
+    user_id = session['user_id']
+    return User.get(user_id)
+
+def login_required(view_func):
+    """登录验证装饰器"""
+    @wraps(view_func)
+    def wrapper(*args, **kwargs):
+        if not is_logged_in():
+            # 如果用户未登录，重定向到登录页面
+            from flask import redirect, url_for, request
+            return redirect(url_for('login', next=request.url))
+        return view_func(*args, **kwargs)
+    return wrapper
+
+def role_required(role):
+    """角色验证装饰器"""
+    def decorator(view_func):
+        @wraps(view_func)
+        def wrapper(*args, **kwargs):
+            user = get_current_user()
+            if not user or user.role != role:
+                # 如果用户没有所需角色，返回403错误
+                from flask import abort
+                abort(403)
+            return view_func(*args, **kwargs)
+        return wrapper
+    return decorator 

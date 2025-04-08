@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ER图</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #f5f5f5;
+            font-family: 'Microsoft YaHei', sans-serif;
+        }
+        #mermaid-diagram {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            max-width: 100%;
+            overflow: auto;
+        }
+    </style>
+</head>
+<body>
+    <div id="mermaid-diagram" class="mermaid">
+        erDiagram
+            角色 ||--o{ 授权 : "1:n"
+            授权 }o--|| 用户 : "n:1"
+            角色 ||--o{ 分配 : "1:n"
+            分配 }o--|| 菜单 : "n:1"
+            菜单 ||--o{ 使用 : "1:n"
+            使用 }o--|| 用户 : "n:1"
+
+            角色 {
+                string 角色名
+                string 级别
+            }
+
+            用户 {
+                string 用户名
+                string 姓名
+                string 联系方式
+                string 密码
+            }
+
+            菜单 {
+                string 菜单名
+                string 路径
+                string 子系统
+                string 父节点
+                int 顺序
+                string 权限
+            }
+    </div>
+    <script>
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'default',
+            er: {
+                useMaxWidth: true
+            }
+        });
+    </script>
+</body>
+</html>

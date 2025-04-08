@@ -1,0 +1,56 @@
+import sqlite3
+from flask import Flask, session, redirect
+
+app = Flask(__name__)
+app.secret_key = 'test_key'  # 这只是测试用的密钥
+
+def fix_user_session():
+    print("=== 检查用户session问题 ===")
+    
+    try:
+    except Exception as e:
+        logger.error(f"发生错误: {str(e)}")
+        # 连接数据库
+        conn = sqlite3.connect('instance/essay_correction.db')
+        cursor = conn.cursor()
+        
+        # 检查juschen账户信息
+        cursor.execute("SELECT user_id, username, role FROM users WHERE username = 'juschen'")
+        user = cursor.fetchone()
+        
+        if user:
+            user_id, username, role = user
+            print(f"数据库中用户信息: ID={user_id}, 用户名={username}, 角色={role}")
+            
+            if role != 'admin':
+                # 更新为管理员角色
+                cursor.execute("UPDATE users SET role = 'admin' WHERE username = 'juschen'")
+                conn.commit()
+                print("已将juschen用户角色更新为admin")
+            else:
+                print("juschen用户已是管理员角色")
+                
+            # 测试与Flask应用的交互部分
+            print("\n要解决session问题，需要执行以下操作：")
+            print("1. 确保完全退出登录")
+            print("2. 使用juschen账户重新登录")
+            print("3. 登录后访问: http://127.0.0.1:5000/admin/dashboard")
+            print("\n技术说明:")
+            print("- 登录时会设置session['role']为用户的角色")
+            print("- 管理员权限装饰器使用session中的role值进行判断")
+            print("- 如果登录后role值没正确设置，请检查登录代码")
+            
+        else:
+            print("未找到juschen用户")
+            
+        # 关闭连接
+        conn.close()
+        
+    except Exception as e:
+        print(f"执行过程中出现错误: {e}")
+    
+    print("\n=== 检查完成 ===")
+    print("如果以上操作不能解决问题，请尝试编辑user_auth.py中的登录代码，确保正确设置session['role']")
+
+if __name__ == "__main__":
+    fix_user_session() 

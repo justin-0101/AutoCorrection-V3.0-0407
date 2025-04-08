@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}管理后台 - 小园丁作文批改系统{% endblock %}</title>
+    
+    <!-- 使用CDN加载Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- 使用CDN加载Bootstrap Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <!-- 自定义CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='admin/css/admin.css') }}">
+    
+    <style>
+        /* 图标字体回退 */
+        .bi-speedometer2::before { content: "📊"; }
+        .bi-people::before { content: "👥"; }
+        .bi-bar-chart::before { content: "📈"; }
+        .bi-cart::before { content: "🛒"; }
+        .bi-gear::before { content: "⚙️"; }
+        .bi-file-text::before { content: "📄"; }
+        .bi-house::before { content: "🏠"; }
+        .bi-person::before { content: "👤"; }
+        .bi-box-arrow-right::before { content: "🚪"; }
+        .bi-person-circle::before { content: "👤"; }
+        .bi-pencil::before { content: "✏️"; }
+        .bi-file-earmark-text::before { content: "📝"; }
+        
+        body {
+            font-family: "Microsoft YaHei", sans-serif;
+            background-color: #f8f9fa;
+        }
+        .sidebar {
+            background-color: #212529;
+            min-height: calc(100vh - 56px);
+            position: sticky;
+            top: 56px;
+        }
+        .sidebar .nav-link {
+            color: rgba(255, 255, 255, 0.8);
+            padding: 0.75rem 1.25rem;
+            font-size: 0.9rem;
+        }
+        .sidebar .nav-link:hover {
+            color: #fff;
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+        .sidebar .nav-link.active {
+            color: #fff;
+            background-color: #0d6efd;
+        }
+        .sidebar .nav-link i {
+            margin-right: 0.5rem;
+        }
+        .admin-content {
+            padding: 1.5rem;
+        }
+        .card {
+            margin-bottom: 1.5rem;
+            border: none;
+            box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+        }
+        .card-header {
+            background-color: #fff;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.125);
+            font-weight: 500;
+        }
+        .admin-title {
+            font-size: 1.5rem;
+            margin-bottom: 1.5rem;
+            font-weight: 600;
+        }
+        .stat-card {
+            text-align: center;
+            padding: 1.5rem;
+        }
+        .stat-card .stat-value {
+            font-size: 2rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+        .stat-card .stat-label {
+            color: #6c757d;
+            font-size: 0.9rem;
+        }
+        .nav-item .dropdown-menu {
+            background-color: #343a40;
+            border: none;
+        }
+        .nav-item .dropdown-item {
+            color: rgba(255, 255, 255, 0.8);
+        }
+        .nav-item .dropdown-item:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+            color: #fff;
+        }
+        
+        /* 添加基本的Bootstrap样式 */
+        .container-fluid {
+            width: 100%;
+            padding-right: 15px;
+            padding-left: 15px;
+            margin-right: auto;
+            margin-left: auto;
+        }
+        .row {
+            display: flex;
+            flex-wrap: wrap;
+            margin-right: -15px;
+            margin-left: -15px;
+        }
+        .col-md-3, .col-lg-2 {
+            position: relative;
+            width: 100%;
+            padding-right: 15px;
+            padding-left: 15px;
+        }
+        @media (min-width: 768px) {
+            .col-md-3 {
+                flex: 0 0 25%;
+                max-width: 25%;
+            }
+        }
+        @media (min-width: 992px) {
+            .col-lg-2 {
+                flex: 0 0 16.666667%;
+                max-width: 16.666667%;
+            }
+            .col-lg-10 {
+                flex: 0 0 83.333333%;
+                max-width: 83.333333%;
+            }
+        }
+        .col-md-9, .col-lg-10 {
+            position: relative;
+            width: 100%;
+            padding-right: 15px;
+            padding-left: 15px;
+        }
+        @media (min-width: 768px) {
+            .col-md-9 {
+                flex: 0 0 75%;
+                max-width: 75%;
+            }
+        }
+        
+        .navbar {
+            position: relative;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.5rem 1rem;
+        }
+        .navbar-dark {
+            background-color: #343a40;
+            color: white;
+        }
+        .navbar-brand {
+            color: white;
+            text-decoration: none;
+            font-size: 1.25rem;
+        }
+        .nav {
+            display: flex;
+            flex-direction: column;
+            padding-left: 0;
+            margin-bottom: 0;
+            list-style: none;
+        }
+        .nav-link {
+            display: block;
+            padding: 0.5rem 1rem;
+            text-decoration: none;
+        }
+        .alert {
+            position: relative;
+            padding: 0.75rem 1.25rem;
+            margin-bottom: 1rem;
+            border: 1px solid transparent;
+            border-radius: 0.25rem;
+        }
+        .alert-info {
+            color: #0c5460;
+            background-color: #d1ecf1;
+            border-color: #bee5eb;
+        }
+        .alert-danger {
+            color: #721c24;
+            background-color: #f8d7da;
+            border-color: #f5c6cb;
+        }
+        .alert-warning {
+            color: #856404;
+            background-color: #fff3cd;
+            border-color: #ffeeba;
+        }
+        .alert-success {
+            color: #155724;
+            background-color: #d4edda;
+            border-color: #c3e6cb;
+        }
+    </style>
+    {% block head_extra %}{% endblock %}
+</head>
+<body>
+    <!-- 顶部导航栏 -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="{{ url_for('admin.index') }}">管理后台</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('main.index') }}" target="_blank">
+                            <i class="bi bi-house"></i> 网站首页
+                        </a>
+                    </li>
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown">
+                            <i class="bi bi-person-circle"></i> {{ session.get('username', '管理员') }}
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="navbarDropdown">
+                            <li><a class="dropdown-item" href="{{ url_for('main.profile') }}"><i class="bi bi-person"></i> 个人资料</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ url_for('main.logout') }}"><i class="bi bi-box-arrow-right"></i> 退出登录</a></li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid">
+        <div class="row">
+            <!-- 侧边栏 -->
+            <div class="col-md-3 col-lg-2 sidebar">
+                <div class="py-4">
+                    <ul class="nav flex-column">
+                        <li class="nav-item">
+                            <a class="nav-link {{ 'active' if active_page == 'dashboard' }}" href="{{ url_for('admin.index') }}">
+                                <i class="bi bi-speedometer2"></i> 控制台
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {{ 'active' if active_page == 'users' }}" href="{{ url_for('admin.users') }}">
+                                <i class="bi bi-people"></i> 用户管理
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {{ 'active' if active_page == 'stats' }}" href="{{ url_for('admin.stats') }}">
+                                <i class="bi bi-bar-chart"></i> 数据统计
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {{ 'active' if active_page == 'orders' }}" href="{{ url_for('admin.membership') }}">
+                                <i class="bi bi-cart"></i> 订单管理
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {{ 'active' if active_page == 'config' }}" href="{{ url_for('admin.config') }}">
+                                <i class="bi bi-gear"></i> 系统设置
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {{ 'active' if active_page == 'logs' }}" href="{{ url_for('admin.stats') }}">
+                                <i class="bi bi-file-text"></i> 日志查看
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- 主内容区 -->
+            <div class="col-md-9 col-lg-10 ms-sm-auto admin-content">
+                <!-- 调试信息 -->
+                {% if debug_info %}
+                <div class="alert alert-info">
+                    <p><strong>DEBUG信息 - 当前页面:</strong> {{ active_page|default('未设置') }}</p>
+                    <p><strong>路由信息:</strong> {{ request.endpoint }}</p>
+                    <p><strong>模板名称:</strong> {{ self._TemplateReference__context.name }}</p>
+                    <p><strong>用户信息:</strong> {{ session.get('username', '未登录') }} ({{ session.get('role', 'none') }})</p>
+                    <p><strong>请求路径:</strong> {{ request.path }}</p>
+                    <p><strong>请求方法:</strong> {{ request.method }}</p>
+                    <p><strong>所有已定义的变量:</strong> {{ self._TemplateReference__context.get_all().keys() }}</p>
+                </div>
+                {% endif %}
+                
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="alert alert-{{ category }}">{{ message }}</div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+                
+                {% block content %}{% endblock %}
+            </div>
+        </div>
+    </div>
+    
+    <!-- Toast消息容器 -->
+    <div class="toast-container position-fixed bottom-0 end-0 p-3">
+        <div id="liveToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="toast-header">
+                <strong class="me-auto">系统通知</strong>
+                <small>刚刚</small>
+                <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
+            </div>
+            <div class="toast-body">
+                消息内容
+            </div>
+        </div>
+    </div>
+
+    <!-- 先加载jQuery，后加载Bootstrap -->
+    <script src="https://cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.min.js"></script>
+    <script>
+    // 确保jQuery加载成功
+    if (typeof jQuery === 'undefined') {
+        console.error('jQuery未能正确加载！');
+    } else {
+        console.log('jQuery已成功加载 v' + jQuery.fn.jquery);
+    }
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- 加载Chart.js用于图表 -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.0/dist/chart.min.js"></script>
+    
+    <!-- 加载管理后台JS -->
+    <script src="{{ url_for('static', filename='admin/js/admin.js') }}"></script>
+    
+    {% block scripts %}{% endblock %}
+</body>
+</html> 

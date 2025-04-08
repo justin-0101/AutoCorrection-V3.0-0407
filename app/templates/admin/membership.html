@@ -1,0 +1,275 @@
+{% extends "admin/layout.html" %}
+
+{% block title %}订单管理 - 管理后台{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <h1 class="admin-title">订单管理</h1>
+    
+    <!-- 统计卡片 -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card stat-card">
+                <div class="stat-value" id="total-orders">0</div>
+                <div class="stat-label">总订单数</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card stat-card">
+                <div class="stat-value" id="monthly-orders">0</div>
+                <div class="stat-label">本月订单</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card stat-card">
+                <div class="stat-value" id="total-revenue">¥0</div>
+                <div class="stat-label">总收入</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card stat-card">
+                <div class="stat-value" id="monthly-revenue">¥0</div>
+                <div class="stat-label">本月收入</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 订单列表 -->
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">订单列表</h5>
+            <div class="d-flex gap-2">
+                <input type="text" class="form-control" id="search-input" placeholder="搜索订单...">
+                <select class="form-select" id="status-filter">
+                    <option value="">全部状态</option>
+                    <option value="pending">待支付</option>
+                    <option value="completed">已完成</option>
+                    <option value="cancelled">已取消</option>
+                    <option value="refunded">已退款</option>
+                </select>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>订单号</th>
+                            <th>用户</th>
+                            <th>会员套餐</th>
+                            <th>金额</th>
+                            <th>支付方式</th>
+                            <th>状态</th>
+                            <th>创建时间</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="orders-table-body">
+                        <!-- 订单数据将通过JavaScript动态加载 -->
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- 分页控件 -->
+            <nav aria-label="订单列表分页" class="mt-3">
+                <ul class="pagination justify-content-center" id="pagination">
+                    <!-- 分页按钮将通过JavaScript动态生成 -->
+                </ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+<!-- 订单详情模态框 -->
+<div class="modal fade" id="orderDetailModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">订单详情</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <p><strong>订单号：</strong><span id="detail-order-id"></span></p>
+                        <p><strong>用户：</strong><span id="detail-user"></span></p>
+                        <p><strong>会员套餐：</strong><span id="detail-plan"></span></p>
+                        <p><strong>订单金额：</strong><span id="detail-amount"></span></p>
+                    </div>
+                    <div class="col-md-6">
+                        <p><strong>支付方式：</strong><span id="detail-payment"></span></p>
+                        <p><strong>订单状态：</strong><span id="detail-status"></span></p>
+                        <p><strong>创建时间：</strong><span id="detail-created"></span></p>
+                        <p><strong>更新时间：</strong><span id="detail-updated"></span></p>
+                    </div>
+                </div>
+                <hr>
+                <h6>订单日志</h6>
+                <div class="order-logs" id="detail-logs">
+                    <!-- 订单日志将通过JavaScript动态加载 -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                <button type="button" class="btn btn-primary" id="process-order-btn">处理订单</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// 页面加载完成后初始化
+document.addEventListener('DOMContentLoaded', () => {
+    // 加载订单数据
+    loadOrders();
+    
+    // 绑定搜索和筛选事件
+    document.getElementById('search-input').addEventListener('input', debounce(loadOrders, 500));
+    document.getElementById('status-filter').addEventListener('change', loadOrders);
+});
+
+// 加载订单数据
+async function loadOrders(page = 1) {
+    try {
+        const searchQuery = document.getElementById('search-input').value;
+        const statusFilter = document.getElementById('status-filter').value;
+        
+        const response = await fetch(`/api/v1/admin/memberships?page=${page}&search=${searchQuery}&status=${statusFilter}`);
+        if (!response.ok) throw new Error('Failed to load orders');
+        
+        const data = await response.json();
+        renderOrders(data.orders);
+        renderPagination(data.pagination);
+        updateStats(data.stats);
+    } catch (error) {
+        console.error('Error loading orders:', error);
+        showMessage('加载订单数据失败', 'error');
+    }
+}
+
+// 渲染订单列表
+function renderOrders(orders) {
+    const tbody = document.getElementById('orders-table-body');
+    tbody.innerHTML = orders.map(order => `
+        <tr>
+            <td>${order.order_id}</td>
+            <td>${order.user_name}</td>
+            <td>${order.plan_name}</td>
+            <td>¥${order.amount}</td>
+            <td>${order.payment_method}</td>
+            <td><span class="badge bg-${getStatusBadgeClass(order.status)}">${order.status}</span></td>
+            <td>${formatDate(order.created_at)}</td>
+            <td>
+                <button class="btn btn-sm btn-primary" onclick="showOrderDetail('${order.order_id}')">
+                    详情
+                </button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+// 获取状态对应的样式类
+function getStatusBadgeClass(status) {
+    const statusMap = {
+        'pending': 'warning',
+        'completed': 'success',
+        'cancelled': 'danger',
+        'refunded': 'info'
+    };
+    return statusMap[status] || 'secondary';
+}
+
+// 格式化日期
+function formatDate(dateString) {
+    return new Date(dateString).toLocaleString('zh-CN');
+}
+
+// 防抖函数
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+// 显示订单详情
+async function showOrderDetail(orderId) {
+    try {
+        const response = await fetch(`/api/v1/admin/memberships/${orderId}`);
+        if (!response.ok) throw new Error('Failed to load order details');
+        
+        const order = await response.json();
+        
+        // 填充模态框数据
+        document.getElementById('detail-order-id').textContent = order.order_id;
+        document.getElementById('detail-user').textContent = order.user_name;
+        document.getElementById('detail-plan').textContent = order.plan_name;
+        document.getElementById('detail-amount').textContent = `¥${order.amount}`;
+        document.getElementById('detail-payment').textContent = order.payment_method;
+        document.getElementById('detail-status').textContent = order.status;
+        document.getElementById('detail-created').textContent = formatDate(order.created_at);
+        document.getElementById('detail-updated').textContent = formatDate(order.updated_at);
+        
+        // 渲染订单日志
+        document.getElementById('detail-logs').innerHTML = order.logs.map(log => `
+            <div class="log-entry">
+                <small class="text-muted">${formatDate(log.timestamp)}</small>
+                <p class="mb-1">${log.message}</p>
+            </div>
+        `).join('');
+        
+        // 显示模态框
+        const modal = new bootstrap.Modal(document.getElementById('orderDetailModal'));
+        modal.show();
+    } catch (error) {
+        console.error('Error loading order details:', error);
+        showMessage('加载订单详情失败', 'error');
+    }
+}
+
+// 更新统计数据
+function updateStats(stats) {
+    document.getElementById('total-orders').textContent = stats.total_orders;
+    document.getElementById('monthly-orders').textContent = stats.monthly_orders;
+    document.getElementById('total-revenue').textContent = `¥${stats.total_revenue}`;
+    document.getElementById('monthly-revenue').textContent = `¥${stats.monthly_revenue}`;
+}
+
+// 渲染分页控件
+function renderPagination(pagination) {
+    const paginationEl = document.getElementById('pagination');
+    
+    let html = '';
+    if (pagination.total_pages > 1) {
+        html += `
+            <li class="page-item ${pagination.current_page === 1 ? 'disabled' : ''}">
+                <a class="page-link" href="#" onclick="loadOrders(${pagination.current_page - 1})">上一页</a>
+            </li>
+        `;
+        
+        for (let i = 1; i <= pagination.total_pages; i++) {
+            html += `
+                <li class="page-item ${pagination.current_page === i ? 'active' : ''}">
+                    <a class="page-link" href="#" onclick="loadOrders(${i})">${i}</a>
+                </li>
+            `;
+        }
+        
+        html += `
+            <li class="page-item ${pagination.current_page === pagination.total_pages ? 'disabled' : ''}">
+                <a class="page-link" href="#" onclick="loadOrders(${pagination.current_page + 1})">下一页</a>
+            </li>
+        `;
+    }
+    
+    paginationEl.innerHTML = html;
+}
+</script>
+{% endblock %}

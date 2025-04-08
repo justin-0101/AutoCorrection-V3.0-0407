@@ -1,0 +1,235 @@
+{% extends "admin/layout.html" %}
+
+{% block title %}订单管理 - 管理后台{% endblock %}
+
+{% block head_extra %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="admin-title">
+    <i class="bi bi-currency-yen"></i> 订单管理
+</div>
+
+<!-- 统计概览 -->
+<div class="row mb-4">
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="stat-card bg-success bg-opacity-10">
+                <div class="stat-value text-success">¥{{ '%.2f'|format(stats.total_income) }}</div>
+                <div class="stat-label">总收入</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="stat-card bg-primary bg-opacity-10">
+                <div class="stat-value text-primary">{{ stats.order_count }}</div>
+                <div class="stat-label">订单总数</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 月度收入图表 -->
+<div class="card mb-4">
+    <div class="card-header">
+        <i class="bi bi-graph-up"></i> 月度收入统计
+    </div>
+    <div class="card-body">
+        <canvas id="monthlyIncomeChart" height="250"></canvas>
+    </div>
+</div>
+
+<!-- 订单筛选 -->
+<div class="card mb-4">
+    <div class="card-body">
+        <form action="{{ url_for('admin.membership') }}" method="get" class="row g-3 align-items-end">
+            <div class="col-md-3">
+                <label for="status" class="form-label">订单状态</label>
+                <select class="form-select" id="status" name="status">
+                    <option value="">全部</option>
+                    <option value="completed" {% if request.args.get('status') == 'completed' %}selected{% endif %}>已完成</option>
+                    <option value="pending" {% if request.args.get('status') == 'pending' %}selected{% endif %}>处理中</option>
+                    <option value="failed" {% if request.args.get('status') == 'failed' %}selected{% endif %}>失败</option>
+                </select>
+            </div>
+            <div class="col-md-3 d-flex">
+                <button type="submit" class="btn btn-primary me-2">
+                    <i class="bi bi-search"></i> 筛选
+                </button>
+                <a href="{{ url_for('admin.membership') }}" class="btn btn-outline-secondary">
+                    <i class="bi bi-arrow-counterclockwise"></i> 重置
+                </a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 订单列表 -->
+<div class="card">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th>订单号</th>
+                        <th>用户</th>
+                        <th>会员类型</th>
+                        <th>金额(元)</th>
+                        <th>状态</th>
+                        <th>创建时间</th>
+                        <th>支付时间</th>
+                        <th>过期时间</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for order in orders %}
+                    <tr>
+                        <td>{{ order.order_number }}</td>
+                        <td>
+                            <a href="{{ url_for('admin.users') }}">
+                                {{ order.username }}
+                            </a>
+                        </td>
+                        <td>
+                            {% if order.membership_type == 'regular' %}
+                            <span class="badge bg-primary">普通会员</span>
+                            {% elif order.membership_type == 'premium' %}
+                            <span class="badge bg-warning">高级会员</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ '%.2f'|format(order.amount) }}</td>
+                        <td>
+                            {% if order.payment_status == 'completed' %}
+                            <span class="badge bg-success">已完成</span>
+                            {% elif order.payment_status == 'pending' %}
+                            <span class="badge bg-warning">处理中</span>
+                            {% else %}
+                            <span class="badge bg-danger">失败</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ order.created_at }}</td>
+                        <td>{{ order.paid_at|default('-') }}</td>
+                        <td>{{ order.expiry_date|default('-') }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- 分页 -->
+        {% if pagination.pages > 1 %}
+        <nav aria-label="Page navigation">
+            <ul class="pagination justify-content-center">
+                <li class="page-item {{ 'disabled' if pagination.current_page == 1 else '' }}">
+                    <a class="page-link" href="{{ url_for('admin.membership', page=pagination.current_page-1, status=request.args.get('status', '')) }}">上一页</a>
+                </li>
+                
+                {% set start_page = [1, pagination.current_page - 2]|max %}
+                {% set end_page = [pagination.pages, pagination.current_page + 2]|min %}
+                
+                {% if start_page > 1 %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ url_for('admin.membership', page=1, status=request.args.get('status', '')) }}">1</a>
+                </li>
+                {% if start_page > 2 %}
+                <li class="page-item disabled"><span class="page-link">...</span></li>
+                {% endif %}
+                {% endif %}
+                
+                {% for page in range(start_page, end_page + 1) %}
+                <li class="page-item {{ 'active' if page == pagination.current_page else '' }}">
+                    <a class="page-link" href="{{ url_for('admin.membership', page=page, status=request.args.get('status', '')) }}">{{ page }}</a>
+                </li>
+                {% endfor %}
+                
+                {% if end_page < pagination.pages %}
+                {% if end_page < pagination.pages - 1 %}
+                <li class="page-item disabled"><span class="page-link">...</span></li>
+                {% endif %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ url_for('admin.membership', page=pagination.pages, status=request.args.get('status', '')) }}">{{ pagination.pages }}</a>
+                </li>
+                {% endif %}
+                
+                <li class="page-item {{ 'disabled' if pagination.current_page == pagination.pages else '' }}">
+                    <a class="page-link" href="{{ url_for('admin.membership', page=pagination.current_page+1, status=request.args.get('status', '')) }}">下一页</a>
+                </li>
+            </ul>
+        </nav>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // 月度收入图表
+        const monthlyData = {{ stats.monthly_income|tojson }};
+        const months = monthlyData.map(item => item[0]);
+        const incomes = monthlyData.map(item => item[1]);
+        const counts = monthlyData.map(item => item[2]);
+        
+        new Chart(document.getElementById('monthlyIncomeChart'), {
+            type: 'bar',
+            data: {
+                labels: months,
+                datasets: [
+                    {
+                        label: '月收入(元)',
+                        data: incomes,
+                        backgroundColor: 'rgba(75, 192, 192, 0.5)',
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        borderWidth: 1,
+                        yAxisID: 'y'
+                    },
+                    {
+                        label: '订单数量',
+                        data: counts,
+                        type: 'line',
+                        fill: false,
+                        backgroundColor: 'rgba(54, 162, 235, 0.5)',
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        borderWidth: 2,
+                        tension: 0.1,
+                        yAxisID: 'y1'
+                    }
+                ]
+            },
+            options: {
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        position: 'left',
+                        title: {
+                            display: true,
+                            text: '收入(元)'
+                        }
+                    },
+                    y1: {
+                        beginAtZero: true,
+                        position: 'right',
+                        grid: {
+                            drawOnChartArea: false
+                        },
+                        title: {
+                            display: true,
+                            text: '订单数量'
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'top'
+                    }
+                },
+                responsive: true,
+                maintainAspectRatio: false
+            }
+        });
+    });
+</script>
+{% endblock %} 

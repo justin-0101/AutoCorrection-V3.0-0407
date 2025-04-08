@@ -1,0 +1,103 @@
+"""
+从备份中恢复缺失的路由并添加到当前的app.py文件中
+"""
+
+def restore_missing_routes():
+    try:
+    except Exception as e:
+        logger.error(f"发生错误: {str(e)}")
+        routes_to_restore = [
+            {'name': 'correction', 'route': "@app.route('/correction'", 'function': 'def correction():'},
+            {'name': 'results', 'route': "@app.route('/results'", 'function': 'def results():'},
+            {'name': 'view_result', 'route': "@app.route('/results/'", 'function': 'def view_result('}
+        ]
+        
+        # 读取备份文件
+        with open('backup/app.py', 'r', encoding='utf-8') as file:
+            backup_lines = file.readlines()
+        
+        # 读取当前app.py文件
+        with open('app.py', 'r', encoding='utf-8') as file:
+            current_lines = file.readlines()
+        
+        # 查找一个合适的插入位置
+        insert_idx = -1
+        for i, line in enumerate(current_lines):
+            if "@app.route('/order_history')" in line:
+                insert_idx = i
+                break
+                
+        if insert_idx == -1:
+            # 如果找不到order_history路由，尝试找另一个路由作为参考点
+            for i, line in enumerate(current_lines):
+                if "@app.route('/admin/dashboard')" in line:
+                    insert_idx = i
+                    break
+        
+        if insert_idx == -1:
+            print("在当前app.py文件中找不到合适的插入位置！")
+            return False
+        
+        # 构建恢复的路由代码
+        all_restored_routes = []
+        
+        for route_info in routes_to_restore:
+            start_idx = -1
+            end_idx = -1
+            
+            # 检查当前文件中是否已存在该路由
+            route_exists = False
+            for line in current_lines:
+                if route_info['route'] in line:
+                    route_exists = True
+                    break
+            
+            if route_exists:
+                print(f"路由 {route_info['name']} 已经存在于当前文件中，跳过...")
+                continue
+            
+            # 在备份文件中找到路由的开始
+            for i, line in enumerate(backup_lines):
+                if route_info['route'] in line and route_info['function'] in backup_lines[i+1]:
+                    start_idx = i
+                    break
+            
+            if start_idx == -1:
+                print(f"在备份文件中找不到 {route_info['name']} 路由！")
+                continue
+                
+            # 找到路由的结束（下一个路由的开始）
+            for i in range(start_idx + 1, len(backup_lines)):
+                if "@app.route" in backup_lines[i] and not backup_lines[i].strip().startswith("#") and not route_info['route'] in backup_lines[i]:
+                    end_idx = i - 1
+                    break
+                    
+            if end_idx == -1:
+                print(f"找不到 {route_info['name']} 路由的结束位置！")
+                continue
+                
+            # 提取完整的路由代码
+            route_code = backup_lines[start_idx:end_idx+1]
+            all_restored_routes.extend(route_code)
+            print(f"已找到 {route_info['name']} 路由，从行 {start_idx} 到 {end_idx}")
+        
+        # 如果没有找到要恢复的路由，就退出
+        if not all_restored_routes:
+            print("没有找到需要恢复的路由！")
+            return False
+        
+        # 插入所有恢复的路由
+        updated_lines = current_lines[:insert_idx] + all_restored_routes + current_lines[insert_idx:]
+        
+        # 写回app.py文件
+        with open('app.py', 'w', encoding='utf-8') as file:
+            file.writelines(updated_lines)
+        
+        print(f"成功恢复缺失的路由! 总共恢复了 {len(all_restored_routes)} 行代码")
+        return True
+    except Exception as e:
+        print(f"恢复过程中出错: {str(e)}")
+        return False
+
+if __name__ == "__main__":
+    restore_missing_routes() 

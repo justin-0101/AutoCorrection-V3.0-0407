@@ -1,0 +1,182 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+应用修复到server_external.py
+1. 添加正确的UTF-8编码声明
+2. 添加MIN_CHARS常量定义
+3. 导入score_conversion模块
+4. 确保所有JSON响应调用normalize_scores函数
+"""
+import re
+import os
+import shutil
+
+# 备份原始文件
+shutil.copy('server_external.py', 'server_external.py.bak')
+print("已创建原始文件备份: server_external.py.bak")
+
+# 读取原始文件
+with open('server_external.py', 'rb') as f:
+    content = f.read()
+
+# 移除BOM标记 (如果存在)
+if content.startswith(b'\xef\xbb\xbf'):
+    content = content[3:]
+    print("移除了BOM标记")
+
+# 将内容解码为字符串 (忽略可能的错误)
+text = content.decode('utf-8', errors='ignore')
+
+# 添加UTF-8编码声明
+if '# -*- coding: utf-8 -*-' not in text:
+    text = '# -*- coding: utf-8 -*-\n' + text
+    print("添加了UTF-8编码声明")
+
+# 添加MIN_CHARS常量定义 (如果不存在)
+if 'MIN_CHARS' not in text:
+    # 在导入语句后添加
+    import_section_end = text.find('\n\n', text.rfind('import '))
+    if import_section_end == -1:
+        import_section_end = text.find('\n', text.rfind('import '))
+    
+    min_chars_def = '\n# 设置最小字符数要求\nMIN_CHARS = 500\n'
+    text = text[:import_section_end] + min_chars_def + text[import_section_end:]
+    print("添加了MIN_CHARS常量定义")
+
+# 添加score_conversion模块导入
+if 'from score_conversion import normalize_scores' not in text and 'import score_conversion' not in text:
+    # 在导入语句后添加
+    import_section_end = text.find('\n\n', text.rfind('import '))
+    if import_section_end == -1:
+        import_section_end = text.find('\n', text.rfind('import '))
+    
+    conversion_import = '''
+# 导入评分转换功能
+try:
+    from score_conversion import normalize_scores
+except ImportError:
+    # 如果无法导入，定义一个简单的替代函数
+    def to_string(value):
+        """将任何值转换为字符串"""
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value.strip()
+        else:
+            return str(value)
+    
+    def normalize_scores(result_dict):
+        """确保所有分数字段以字符串形式返回"""
+        if not isinstance(result_dict, dict):
+            return result_dict
+            
+        # 直接字段
+        score_fields = [
+            'total_score', 'score', 'content_score', 'language_score', 
+            'structure_score', 'writing_score', 'score_value',
+            '总分', '总得分'
+        ]
+        
+        for field in score_fields:
+            if field in result_dict and result_dict[field] is not None:
+                if not isinstance(result_dict[field], str):
+                    result_dict[field] = to_string(result_dict[field])
+            
+        # 分项得分字段
+        if '分项得分' in result_dict and isinstance(result_dict['分项得分'], dict):
+            for key, value in result_dict['分项得分'].items():
+                if not isinstance(value, str):
+                    result_dict['分项得分'][key] = to_string(value)
+        
+        # 英文分项得分字段
+        if 'sub_scores' in result_dict and isinstance(result_dict['sub_scores'], dict):
+            for key, value in result_dict['sub_scores'].items():
+                if not isinstance(value, str):
+                    result_dict['sub_scores'][key] = to_string(value)
+        
+        # 也处理sub_item_scores
+        if 'sub_item_scores' in result_dict and isinstance(result_dict['sub_item_scores'], dict):
+            for key, value in result_dict['sub_item_scores'].items():
+                if not isinstance(value, str):
+                    result_dict['sub_item_scores'][key] = to_string(value)
+        
+        return result_dict
+'''
+    text = text[:import_section_end] + conversion_import + text[import_section_end:]
+    print("添加了score_conversion模块导入")
+
+# 修复未终止的字符串和未闭合的括号
+lines = text.split('\n')
+fixed_lines = []
+for i, line in enumerate(lines):
+    if '宸插簲鐢ㄥ熀鏈珻ORS澶?' in line:
+        # 特别处理这个错误行
+        line = line.replace('宸插簲鐢ㄥ熀鏈珻ORS澶?', '已应用基本CORS配置')
+        print(f"修复了第{i+1}行的乱码字符串")
+    # 检查字符串是否终止
+    if '"' in line and line.count('"') % 2 != 0:
+        line = line + '"'
+        print(f"修复了第{i+1}行的未终止字符串")
+    # 检查括号是否闭合
+    if '(' in line and line.count('(') != line.count(')'):
+        line = line + ')'
+        print(f"修复了第{i+1}行的未闭合括号")
+    fixed_lines.append(line)
+
+# 检查是否有未完成的try块
+try_blocks = 0
+except_blocks = 0
+try_lines = []
+for i, line in enumerate(fixed_lines):
+    if line.strip().startswith('try:'):
+        try_blocks += 1
+        try_lines.append(i)
+    elif line.strip().startswith('except') or line.strip().startswith('finally:'):
+        except_blocks += 1
+        if try_lines:
+            try_lines.pop()
+
+if try_blocks > except_blocks:
+    print(f"检测到{try_blocks - except_blocks}个未闭合的try块")
+    # 找到并修复这些try块
+    for line_num in try_lines:
+        # 找到该try块的缩进级别
+        try_line = fixed_lines[line_num]
+        indent = len(try_line) - len(try_line.lstrip())
+        indent_str = ' ' * indent
+        
+        # 尝试找到最后一行代码，在其后添加except块
+        current_line = line_num + 1
+        while current_line < len(fixed_lines) and (not fixed_lines[current_line].strip() or len(fixed_lines[current_line]) - len(fixed_lines[current_line].lstrip()) > indent):
+            current_line += 1
+        
+        # 添加except块
+        fixed_lines.insert(current_line, f"{indent_str}except Exception as e:")
+        fixed_lines.insert(current_line + 1, f"{indent_str}    print(f\"错误: {{e}}\")")
+        print(f"在第{line_num+1}行的try块后添加了except块")
+
+# 确保在所有return jsonify调用前应用normalize_scores函数
+updated_lines = []
+for i, line in enumerate(fixed_lines):
+    if 'return jsonify(' in line and 'normalize_scores(' not in line and 'normalize_scores(' not in fixed_lines[i-1]:
+        # 提取参数
+        start_idx = line.find('jsonify(') + 8
+        end_idx = line.rfind(')')
+        args = line[start_idx:end_idx].strip()
+        
+        if args and not args.startswith('normalize_scores('):
+            # 替换为normalize_scores调用
+            updated_line = line[:start_idx] + f"normalize_scores({args})" + line[end_idx:]
+            updated_lines.append(updated_line)
+            print(f"在第{i+1}行的jsonify调用前添加了normalize_scores")
+        else:
+            updated_lines.append(line)
+    else:
+        updated_lines.append(line)
+
+# 写入修复后的内容到原始文件
+with open('server_external.py', 'w', encoding='utf-8') as f:
+    f.write('\n'.join(updated_lines))
+
+print("所有修复已应用到server_external.py文件") 

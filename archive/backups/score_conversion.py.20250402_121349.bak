@@ -1,0 +1,75 @@
+# -*- coding: utf-8 -*-
+"""
+分数转换模块
+用于确保所有分数字段都以字符串形式返回
+"""
+
+def to_string(value):
+    """将任何值转换为字符串"""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    else:
+        return str(value)
+
+def normalize_scores(result_dict):
+    """确保所有分数字段以字符串形式返回"""
+    if not isinstance(result_dict, dict):
+        return result_dict
+        
+    # 直接字段
+    score_fields = [
+        'total_score', 'score', 'content_score', 'language_score', 
+        'structure_score', 'writing_score', 'score_value',
+        '总分', '总得分'
+    ]
+    
+    for field in score_fields:
+        if field in result_dict and result_dict[field] is not None:
+            if not isinstance(result_dict[field], str):
+                result_dict[field] = to_string(result_dict[field])
+        
+    # 分项得分字段
+    if '分项得分' in result_dict and isinstance(result_dict['分项得分'], dict):
+        for key, value in result_dict['分项得分'].items():
+            if not isinstance(value, str):
+                result_dict['分项得分'][key] = to_string(value)
+    
+    # 英文分项得分字段
+    if 'sub_scores' in result_dict and isinstance(result_dict['sub_scores'], dict):
+        for key, value in result_dict['sub_scores'].items():
+            if not isinstance(value, str):
+                result_dict['sub_scores'][key] = to_string(value)
+    
+    # 也处理sub_item_scores
+    if 'sub_item_scores' in result_dict and isinstance(result_dict['sub_item_scores'], dict):
+        for key, value in result_dict['sub_item_scores'].items():
+            if not isinstance(value, str):
+                result_dict['sub_item_scores'][key] = to_string(value)
+    
+    return result_dict
+
+# 用于测试
+if __name__ == "__main__":
+    # 示例数据
+    test_data = {
+        'total_score': 45,
+        'content_score': 22,
+        'language_score': 17,
+        'structure_score': 8.5,
+        'writing_score': 4.5,
+        '分项得分': {
+            '内容主旨': 22,
+            '语言文采': 17,
+            '文章结构': 8.5,
+            '文面书写': 4.5
+        }
+    }
+    
+    # 转换
+    result = normalize_scores(test_data)
+    
+    # 打印结果
+    import json
+    print(json.dumps(result, ensure_ascii=False, indent=2)) 

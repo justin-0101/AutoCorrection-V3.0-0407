@@ -1,0 +1,97 @@
+# -*- coding: utf-8 -*-
+"""
+这个文件包含对服务器评分函数的修复补丁
+"""
+
+def str_score(value):
+    """将任何类型的评分值转换为字符串"""
+    if isinstance(value, str):
+        return value.strip()
+    else:
+        return str(value)
+
+def safe_extract_scores(ai_correction):
+    """
+    安全地从AI返回的评分结果中提取分数，确保所有分数都是字符串形式
+    """
+    # 提取总分
+    total_score = "0"
+    if '总得分' in ai_correction:
+        total_score = str_score(ai_correction['总得分'])
+    
+    # 提取等级
+    level = 'C'
+    if '等级评定' in ai_correction:
+        level = ai_correction['等级评定']
+        if '-' in level:
+            level = level.split('-')[0]
+    
+    # 安全处理分项得分
+    content_score = "0"
+    language_score = "0"
+    structure_score = "0"
+    writing_score = "0"
+    
+    if '分项得分' in ai_correction and isinstance(ai_correction['分项得分'], dict):
+        分项得分 = ai_correction['分项得分']
+        
+        # 内容主旨得分
+        if '内容主旨' in 分项得分:
+            content_score = str_score(分项得分['内容主旨'])
+        
+        # 语言文采得分
+        if '语言文采' in 分项得分:
+            language_score = str_score(分项得分['语言文采'])
+        
+        # 文章结构得分
+        if '文章结构' in 分项得分:
+            structure_score = str_score(分项得分['文章结构'])
+        
+        # 文面书写得分
+        if '文面书写' in 分项得分:
+            writing_score = str_score(分项得分['文面书写'])
+    
+    # 构建结果对象
+    return {
+        "total_score": total_score,
+        "level": level,
+        "content_score": content_score,
+        "language_score": language_score,
+        "structure_score": structure_score,
+        "writing_score": writing_score
+    }
+
+def get_string_prompt_template():
+    """
+    返回一个使用字符串形式的分数值的提示模板
+    """
+    return """
+    必须以JSON格式返回结果，结构如下：
+    {
+    "总得分": "45",
+    "等级评定": "A-优秀",
+    "分项得分": {
+        "内容主旨": "22",
+        "语言文采": "17",
+        "文章结构": "8.5",
+        "文面书写": "4.5"
+    },
+    "扣分项": {
+        "错别字分析": [
+        {"错误": "错别字", "位置": "位置", "正确写法": "正确写法", "上下文": "上下文"}
+        ],
+        "其他扣分": []
+    },
+    "加分项": [],
+    "作文优点": [],
+    "作文不足": [],
+    "改进建议": [],
+    "文采与表达分析": {
+        "句式分析": "",
+        "用词分析": "",
+        "过渡衔接": "",
+        "修辞手法": ""
+    },
+    "总体评价": ""
+    }
+    """ 

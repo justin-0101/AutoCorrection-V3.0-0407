@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>用户注册 - 小园丁作文批改</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .navbar-brand {
+            font-weight: bold;
+        }
+        .main-content {
+            flex: 1;
+        }
+        .footer {
+            background-color: #212529;
+            color: rgba(255,255,255,0.6);
+            padding: 20px 0;
+            margin-top: auto;
+        }
+        .footer-link {
+            color: rgba(255,255,255,0.6);
+            text-decoration: none;
+        }
+        .footer-link:hover {
+            color: white;
+        }
+        .auth-card {
+            max-width: 600px;
+            margin: 0 auto;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .auth-header {
+            background-color: #0d6efd;
+            color: white;
+            font-size: 1.5rem;
+            padding: 1rem;
+            text-align: center;
+            font-weight: bold;
+        }
+        .auth-footer {
+            text-align: center;
+            padding: 1rem;
+            background-color: #f8f9fa;
+            border-top: 1px solid #dee2e6;
+        }
+    </style>
+</head>
+<body>
+    <!-- 导航栏 -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="{{ url_for('index') }}">小园丁作文批改</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('index') }}">首页</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+    
+    <div class="main-content py-5">
+        <div class="container">
+            <div class="card auth-card">
+                <div class="auth-header">用户注册</div>
+                <div class="card-body">
+                    {% with messages = get_flashed_messages(with_categories=true) %}
+                        {% if messages %}
+                            {% for category, message in messages %}
+                                <div class="alert alert-{{ category }}">{{ message }}</div>
+                            {% endfor %}
+                        {% endif %}
+                    {% endwith %}
+                    
+                    <form method="post" action="{{ url_for('register') }}" class="needs-validation" novalidate>
+                        <div class="mb-3">
+                            <label for="email" class="form-label">邮箱</label>
+                            <input type="email" class="form-control" id="email" name="email" required>
+                            <div class="invalid-feedback">请输入有效的邮箱地址</div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="username" class="form-label">用户名</label>
+                            <input type="text" class="form-control" id="username" name="username" required>
+                            <div class="invalid-feedback">请输入用户名</div>
+                            <div class="form-text">用户名只能包含字母、数字和下划线，长度3-20个字符</div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="password" class="form-label">密码</label>
+                            <input type="password" class="form-control" id="password" name="password" required>
+                            <div class="invalid-feedback">请输入密码</div>
+                            <div class="form-text">密码长度不能少于6个字符</div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="password2" class="form-label">确认密码</label>
+                            <input type="password" class="form-control" id="password2" name="password2" required>
+                            <div class="invalid-feedback">请再次输入密码</div>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-primary w-100">注册</button>
+                    </form>
+                </div>
+                <div class="auth-footer">
+                    已有账号？<a href="{{ url_for('login') }}">立即登录</a>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 页脚 -->
+    <footer class="footer py-3">
+        <div class="container">
+            <div class="text-center">
+                <p class="small mb-0">&copy; 2025 小园丁作文批改系统</p>
+            </div>
+        </div>
+    </footer>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 表单验证
+        document.addEventListener('DOMContentLoaded', function() {
+            const form = document.querySelector('form');
+            const passwordInput = document.getElementById('password');
+            const password2Input = document.getElementById('password2');
+            
+            form.addEventListener('submit', function(event) {
+                if (!form.checkValidity()) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                }
+                
+                // 检查两次密码是否一致
+                if (passwordInput.value !== password2Input.value) {
+                    event.preventDefault();
+                    alert('两次输入的密码不一致');
+                    return;
+                }
+                
+                form.classList.add('was-validated');
+            });
+        });
+    </script>
+</body>
+</html> 

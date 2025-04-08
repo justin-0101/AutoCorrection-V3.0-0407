@@ -1,0 +1,74 @@
+"""
+从备份中恢复correction路由并添加到当前的app.py文件中
+"""
+
+def restore_correction_route():
+    try:
+    except Exception as e:
+        logger.error(f"发生错误: {str(e)}")
+        # 从备份文件中读取correction路由
+        with open('backup/app.py', 'r', encoding='utf-8') as file:
+            backup_lines = file.readlines()
+        
+        # 寻找correction路由的开始和结束
+        start_idx = -1
+        end_idx = -1
+        for i, line in enumerate(backup_lines):
+            if "@app.route('/correction'" in line:
+                start_idx = i
+                break
+        
+        if start_idx == -1:
+            print("在备份文件中找不到correction路由！")
+            return False
+            
+        # 找到路由的结束（下一个路由的开始）
+        for i in range(start_idx + 1, len(backup_lines)):
+            if "@app.route" in backup_lines[i] and not backup_lines[i].strip().startswith("#"):
+                end_idx = i - 1
+                break
+                
+        if end_idx == -1:
+            print("找不到correction路由的结束位置！")
+            return False
+            
+        # 提取完整的correction路由代码
+        correction_route = backup_lines[start_idx:end_idx+1]
+        
+        # 读取当前app.py文件
+        with open('app.py', 'r', encoding='utf-8') as file:
+            current_lines = file.readlines()
+        
+        # 找到一个适当的位置来插入路由（例如在order_history路由之前）
+        insert_idx = -1
+        for i, line in enumerate(current_lines):
+            if "@app.route('/order_history')" in line:
+                insert_idx = i
+                break
+                
+        if insert_idx == -1:
+            # 如果找不到order_history路由，尝试找另一个路由作为参考点
+            for i, line in enumerate(current_lines):
+                if "@app.route('/admin/dashboard')" in line:
+                    insert_idx = i
+                    break
+        
+        if insert_idx == -1:
+            print("在当前app.py文件中找不到合适的插入位置！")
+            return False
+            
+        # 插入correction路由
+        updated_lines = current_lines[:insert_idx] + correction_route + current_lines[insert_idx:]
+        
+        # 写回app.py文件
+        with open('app.py', 'w', encoding='utf-8') as file:
+            file.writelines(updated_lines)
+        
+        print("成功恢复correction路由!")
+        return True
+    except Exception as e:
+        print(f"恢复过程中出错: {str(e)}")
+        return False
+
+if __name__ == "__main__":
+    restore_correction_route() 

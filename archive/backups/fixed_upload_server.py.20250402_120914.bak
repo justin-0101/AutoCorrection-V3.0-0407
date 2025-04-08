@@ -1,0 +1,265 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+from flask import Flask, render_template, request, jsonify, send_from_directory
+from flask_cors import CORS
+import os
+import json
+import logging
+import random
+import datetime
+import time
+import traceback
+
+# 设置常量
+MIN_CHARS = 500  # 恢复字数要求为500
+
+# 辅助函数：确保分数是字符串类型
+def to_string(value):
+    """将任何值转换为字符串"""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    else:
+        return str(value)
+
+# 辅助函数：标准化分数字段
+def normalize_scores(result):
+    """确保所有分数字段以字符串形式返回"""
+    if not isinstance(result, dict):
+        return result
+        
+    score_fields = [
+        'content_score', 'language_score', 'structure_score', 
+        'writing_score', 'total_score', '总分'
+    ]
+    
+    for field in score_fields:
+        if field in result and result[field] is not None:
+            result[field] = to_string(result[field])
+            
+    # 处理分项得分
+    if 'sub_item_scores' in result and isinstance(result['sub_item_scores'], dict):
+        for key, value in result['sub_item_scores'].items():
+            result['sub_item_scores'][key] = to_string(value)
+    
+    # 处理分项得分的中文版本
+    if '分项得分' in result and isinstance(result['分项得分'], dict):
+        for key, value in result['分项得分'].items():
+            result['分项得分'][key] = to_string(value)
+    
+    return result
+
+# 创建Flask应用
+app = Flask(__name__)
+CORS(app)
+print("已应用基本CORS配置")
+
+# 设置日志
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# 警告信息
+print("警告：未能加载python-docx库，将使用替代方法")
+
+@app.route('/')
+def index():
+    """首页路由 - 使用原始的前端模板"""
+    return render_template('index.html')
+
+@app.route('/test')
+def test():
+    """测试页面路由"""
+    return render_template('test_upload.html')
+
+@app.route('/correct', methods=['POST'])
+def correct():
+    """处理作文批改请求"""
+    try:
+        # 更灵活地获取数据，支持不同的内容类型
+        article = ""
+        logger.info(f"请求内容类型: {request.content_type}")
+        logger.info(f"表单数据: {request.form}")
+        logger.info(f"文件: {request.files}")
+        
+        # 优先处理文件上传
+        if request.files and len(request.files) > 0:
+            # 如果有文件上传
+            logger.info("检测到文件上传，优先处理")
+            for file_key in request.files:
+                file = request.files[file_key]
+                if not file.filename:
+                    continue
+                
+                logger.info(f"收到文件: {file.filename}")
+                # 尝试读取文件内容
+                try:
+                    if file.filename.endswith('.txt'):
+                        article = file.read().decode('utf-8')
+                    elif file.filename.endswith('.docx'):
+                        # 模拟从docx文件中提取文本
+                        logger.info("处理Word文档")
+                        article = """这是一篇从DOCX文件中提取的测试文章。
+                        
+文章的主要内容是关于人工智能的应用与发展。人工智能技术已经渗透到我们生活的方方面面，包括医疗、教育、金融等领域。
+在医疗领域，AI可以帮助医生进行疾病诊断，提高诊断的准确性和效率。在教育领域，AI可以根据学生的学习情况提供个性化的学习方案。
+在金融领域，AI可以分析市场数据，预测市场走势，帮助投资者做出更明智的决策。
+
+随着技术的不断发展，人工智能将会在更多领域发挥作用，为人类社会带来更多便利。然而，我们也要警惕人工智能可能带来的问题，
+比如隐私泄露、就业机会减少等。因此，在发展人工智能的同时，我们也要注重相关法律法规的建设，确保人工智能的发展朝着有利于人类社会的方向前进。
+
+总的来说，人工智能是一把双刃剑，它能带来便利，也可能带来问题。关键在于我们如何正确引导其发展方向，使其更好地为人类社会服务。"""
+                        logger.info(f"从Word文档提取的文本长度: {len(article)}")
+                    else:
+                        # 其他类型文件
+                        article = "收到未知类型文件，使用默认文本：\n\n" + "这是自动生成的文本内容。" * 20
+                    
+                    logger.info(f"从文件获取文章内容，长度: {len(article)}")
+                    break
+                except Exception as file_error:
+                    logger.error(f"读取文件错误: {str(file_error)}")
+                    logger.error(traceback.format_exc())
+        elif request.is_json:
+            # 如果是JSON格式
+            data = request.get_json()
+            article = data.get('article', '')
+            logger.info("收到JSON数据")
+        elif request.form:
+            # 如果是表单数据
+            if 'article' in request.form:
+                article = request.form.get('article', '')
+                logger.info("从表单获取article字段")
+            elif 'content' in request.form:
+                article = request.form.get('content', '')
+                logger.info("从表单获取content字段")
+            elif 'text' in request.form:
+                article = request.form.get('text', '')
+                logger.info("从表单获取text字段")
+            else:
+                # 检查表单中的所有字段
+                for key in request.form:
+                    if request.form[key]:
+                        logger.info(f"表单字段: {key} = {request.form[key][:100]}...")
+                        # 使用第一个非空值作为文章内容
+                        if len(request.form[key]) > 0:
+                            article = request.form[key]
+                            logger.info(f"使用表单字段 {key} 作为文章内容")
+                            break
+        elif request.data:
+            # 如果是原始数据，尝试解析为JSON
+            try:
+                data_str = request.data.decode('utf-8')
+                logger.info(f"收到原始数据: {data_str[:100]}...")
+                data = json.loads(data_str)
+                article = data.get('article', '')
+            except:
+                # 如果无法解析为JSON，直接使用原始数据
+                article = request.data.decode('utf-8')
+                logger.info("使用原始数据作为文章内容")
+        
+        # 记录最终获取的文章长度
+        logger.info(f"最终文章长度: {len(article)}")
+        
+        # 如果没有获取到内容，尝试使用测试文本
+        if not article:
+            article = """这是一篇演示文章，用于测试作文批改系统的功能。
+
+人工智能作为现代科技发展的重要方向，已经深入到我们生活的方方面面。从智能手机上的语音助手，到自动驾驶汽车，再到医疗诊断系统，人工智能正在改变着我们的生活方式和工作方式。"""
+            logger.info("使用测试文章内容")
+        
+        # 不再检查字数限制，任何长度的文章都可以批改
+        # 延迟1秒模拟处理时间
+        time.sleep(1)
+        
+        # 模拟AI评分结果
+        current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # 基础分数
+        content_score = 22
+        language_score = 17
+        structure_score = 8.5
+        writing_score = 4.5
+        
+        # 检查字数 - 不拒绝处理，但影响评分
+        word_count_sufficient = len(article) >= MIN_CHARS
+        word_count_comment = ""
+        word_count_weakness = []
+        
+        # 如果字数不足，扣分并添加相关评论
+        if not word_count_sufficient:
+            # 根据字数比例扣分
+            ratio = max(0.3, min(1.0, len(article) / MIN_CHARS))  # 至少保留30%的分数
+            content_score = round(content_score * ratio, 1)
+            language_score = round(language_score * ratio, 1)
+            # 结构和写作分数扣得少一些
+            structure_score = round(structure_score * (ratio + 0.2), 1)
+            writing_score = round(writing_score * (ratio + 0.2), 1)
+            
+            word_count_comment = f"文章长度不足，当前长度: {len(article)}字符，推荐长度: {MIN_CHARS}字符，影响了评分。"
+            word_count_weakness = ["文章长度不足最低要求"]
+        
+        # 计算总分
+        total_score = content_score + language_score + structure_score + writing_score
+        
+        # 标准化分数为整数或保留一位小数
+        content_score = round(content_score, 1)
+        language_score = round(language_score, 1)
+        structure_score = round(structure_score, 1)
+        writing_score = round(writing_score, 1)
+        total_score = round(total_score, 1)
+        
+        # 构建评分结果
+        result = {
+            "content_score": content_score,
+            "language_score": language_score,
+            "structure_score": structure_score,
+            "writing_score": writing_score,
+            "total_score": total_score,
+            "总分": total_score,
+            "comments": f"这是一篇结构清晰、论述合理的文章。({current_time}) {word_count_comment}",
+            "content_analysis": "文章主题明确，内容充实，但可以增加具体例子来支持论点。",
+            "structure_analysis": "文章结构清晰，逻辑连贯，有明确的开头、正文和结尾。",
+            "language_analysis": "语言表达流畅，但有一些句子可以更加精炼。",
+            "writing_analysis": "写作风格良好，但可以增加一些修辞手法来使文章更加生动。",
+            "strengths": ["观点明确", "论述清晰", "结构合理"],
+            "weaknesses": ["细节不足", "例子较少"] + word_count_weakness,
+            "suggestions": ["建议增加具体例子", "可以使用更多修辞手法", "适当精简部分句子"],
+            "level": "A" if word_count_sufficient else "B",  # 字数不足降低等级
+            "sub_item_scores": {
+                "论点": content_score,
+                "结构": language_score,
+                "语言": structure_score,
+                "文笔": writing_score
+            },
+            "分项得分": {
+                "论点": content_score,
+                "结构": language_score,
+                "语言": structure_score,
+                "文笔": writing_score
+            }
+        }
+        
+        # 确保所有分数返回为字符串类型
+        result = normalize_scores(result)
+        
+        return jsonify(result)
+    
+    except Exception as e:
+        logger.error(f"批改过程中出错: {str(e)}")
+        logger.error(traceback.format_exc())  # 记录完整的错误堆栈
+        error_result = {
+            "error": f"批改过程中出错: {str(e)}",
+            "content_score": "0",
+            "language_score": "0",
+            "structure_score": "0", 
+            "writing_score": "0",
+            "total_score": "0",
+            "comments": "服务器处理错误"
+        }
+        return jsonify(normalize_scores(error_result))
+
+if __name__ == '__main__':
+    print("作文批改系统服务启动...")
+    print("访问地址：http://127.0.0.1:5000")
+    app.run(host='0.0.0.0', debug=True) 

@@ -1,0 +1,222 @@
+{% extends "admin/layout.html" %}
+
+{% block title %}数据统计 - 管理后台{% endblock %}
+
+{% set active_page = 'stats' %}
+
+{% block head_extra %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="admin-title">
+    <i class="bi bi-bar-chart"></i> 数据统计
+</div>
+
+<!-- 统计概览 -->
+<div class="row mb-4">
+    <div class="col-lg-4">
+        <div class="card">
+            <div class="stat-card bg-primary bg-opacity-10">
+                <div class="stat-value text-primary">{{ stats.total_essays }}</div>
+                <div class="stat-label">总批改数量</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <div class="card">
+            <div class="stat-card bg-success bg-opacity-10">
+                <div class="stat-value text-success">{{ stats.avg_score }}</div>
+                <div class="stat-label">平均得分</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <div class="card">
+            <div class="stat-card bg-info bg-opacity-10">
+                <div class="stat-value text-info">{{ stats.avg_words }}</div>
+                <div class="stat-label">平均字数</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <!-- 批改数量趋势 -->
+    <div class="col-lg-6">
+        <div class="card mb-4">
+            <div class="card-header">
+                <i class="bi bi-graph-up"></i> 月度批改数量趋势
+            </div>
+            <div class="card-body">
+                <canvas id="monthlyChart" height="250"></canvas>
+                {% if not stats.monthly_stats or stats.monthly_stats|length == 0 %}
+                <div class="text-center mt-3 text-muted">
+                    <p>暂无数据</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <!-- 得分分布 -->
+    <div class="col-lg-6">
+        <div class="card mb-4">
+            <div class="card-header">
+                <i class="bi bi-pie-chart"></i> 得分分布
+            </div>
+            <div class="card-body">
+                <canvas id="scoreDistributionChart" height="250"></canvas>
+                {% if not stats.score_distribution or stats.score_distribution|length == 0 %}
+                <div class="text-center mt-3 text-muted">
+                    <p>暂无数据</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 详细数据表格 -->
+<div class="card mb-4">
+    <div class="card-header">
+        <i class="bi bi-table"></i> 月度统计数据
+    </div>
+    <div class="card-body">
+        {% if stats.monthly_stats and stats.monthly_stats|length > 0 %}
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>月份</th>
+                        <th>批改数量</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for month, count in stats.monthly_stats %}
+                    <tr>
+                        <td>{{ month }}</td>
+                        <td>{{ count }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-center p-4 text-muted">
+            <p>暂无统计数据</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<!-- 数据预处理 -->
+<script id="data-script" type="application/json">
+{
+    "monthlyData": {{ stats.monthly_stats|default([])|tojson|safe }},
+    "scoreData": {{ stats.score_distribution|default([])|tojson|safe }}
+}
+</script>
+
+<!-- 图表渲染 -->
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // 获取预处理的数据
+        var dataScript = document.getElementById('data-script');
+        var chartData = JSON.parse(dataScript.textContent);
+        var monthlyData = chartData.monthlyData || [];
+        var scoreData = chartData.scoreData || [];
+        
+        // 初始化月度数据图表
+        var monthlyChartElement = document.getElementById('monthlyChart');
+        if (monthlyChartElement && monthlyData.length > 0) {
+            var months = monthlyData.map(function(item) { return item[0]; });
+            var counts = monthlyData.map(function(item) { return item[1]; });
+            
+            new Chart(monthlyChartElement, {
+                type: 'line',
+                data: {
+                    labels: months,
+                    datasets: [{
+                        label: '批改数量',
+                        data: counts,
+                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        borderWidth: 2,
+                        tension: 0.1,
+                        fill: true
+                    }]
+                },
+                options: {
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: '批改数量'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: '月份'
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        }
+                    },
+                    responsive: true,
+                    maintainAspectRatio: false
+                }
+            });
+        }
+        
+        // 初始化得分分布图表
+        var scoreChartElement = document.getElementById('scoreDistributionChart');
+        if (scoreChartElement && scoreData.length > 0) {
+            var scoreRanges = scoreData.map(function(item) { return item[0]; });
+            var scoreCounts = scoreData.map(function(item) { return item[1]; });
+            
+            new Chart(scoreChartElement, {
+                type: 'pie',
+                data: {
+                    labels: scoreRanges,
+                    datasets: [{
+                        data: scoreCounts,
+                        backgroundColor: [
+                            'rgba(255, 99, 132, 0.7)',
+                            'rgba(255, 159, 64, 0.7)',
+                            'rgba(255, 205, 86, 0.7)',
+                            'rgba(75, 192, 192, 0.7)',
+                            'rgba(54, 162, 235, 0.7)'
+                        ],
+                        borderColor: [
+                            'rgb(255, 99, 132)',
+                            'rgb(255, 159, 64)',
+                            'rgb(255, 205, 86)',
+                            'rgb(75, 192, 192)',
+                            'rgb(54, 162, 235)'
+                        ],
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'right'
+                        }
+                    }
+                }
+            });
+        }
+    });
+</script>
+{% endblock %} 

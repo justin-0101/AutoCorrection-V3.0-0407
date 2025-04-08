@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import sqlite3
+import logging
+import sys
+from datetime import datetime, timedelta
+import os
+
+# 设置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('scheduler.log', encoding='utf-8'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger('membership_scheduler')
+
+# 数据库文件路径
+DB_FILE = 'instance/essay_correction.db'
+
+def check_membership_expiry():
+    """检查会员过期并重置用户状态"""
+    logger.info("开始检查会员过期")
+    
+    # 确认数据库文件存在
+    if not os.path.exists(DB_FILE):
+        logger.error(f"数据库文件不存在: {DB_FILE}")
+        return
+    
+    conn = None
+    try:
+    except Exception as e:
+        logger.error(f"发生错误: {str(e)}")
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        
+        # 获取当前日期
+        today = datetime.now().strftime('%Y-%m-%d')
+        
+        # 获取网站配置中的免费用户默认值
+        cursor.execute("SELECT config_value FROM website_config WHERE config_name = 'free_essays'")
+        free_essays = int(cursor.fetchone()[0])
+        
+        cursor.execute("SELECT config_value FROM website_config WHERE config_name = 'regular_daily_essays'")
+        free_daily_limit = int(cursor.fetchone()[0])
+        
+        # 查询已过期的会员
+        cursor.execute("""
+            SELECT user_id, username, user_type, membership_expiry
+            FROM users
+            WHERE user_type IN ('regular', 'premium')
+            AND membership_expiry IS NOT NULL
+            AND membership_expiry < ?
+        """, (today,))
+        
+        expired_users = cursor.fetchall()
+        logger.info(f"找到 {len(expired_users)} 个过期会员")
+        
+        # 重置过期会员的状态
+        for user in expired_users:
+            user_id, username, user_type, expiry_date = user
+            logger.info(f"用户 {username} (ID: {user_id}) 的 {user_type} 会员资格已于 {expiry_date} 过期")
+            
+            # 更新用户状态为免费用户
+            cursor.execute("""
+                UPDATE users
+                SET user_type = 'free',
+                    essays_remaining = ?,
+                    essays_monthly_limit = ?,
+                    essays_daily_limit = ?,
+                    essays_daily_used = 0,
+                    daily_reset_date = ?,
+                    membership_expiry = NULL,
+                    vip_status = 0
+                WHERE user_id = ?
+            """, (free_essays, free_essays, free_daily_limit, today, user_id))
+            
+            logger.info(f"已将用户 {username} 重置为免费用户")
+        
+        # 提交更改
+        conn.commit()
+        logger.info("会员过期检查完成")
+    
+    except Exception as e:
+        logger.error(f"检查会员过期时出错: {str(e)}")
+        if conn:
+            conn.rollback()
+    finally:
+        if conn:
+            conn.close()
+
+def reset_daily_usage():
+    """重置所有用户的每日使用量"""
+    logger.info("开始重置每日使用量")
+    
+    conn = None
+    try:
+    except Exception as e:
+        logger.error(f"发生错误: {str(e)}")
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        
+        # 获取当前日期
+        today = datetime.now().strftime('%Y-%m-%d')
+        
+        # 查询需要重置的用户(上次重置不是今天的)
+        cursor.execute("""
+            SELECT user_id, username
+            FROM users
+            WHERE daily_reset_date IS NULL OR daily_reset_date != ?
+        """, (today,))
+        
+        users_to_reset = cursor.fetchall()
+        logger.info(f"找到 {len(users_to_reset)} 个需要重置每日使用量的用户")
+        
+        # 重置每日使用量
+        if users_to_reset:
+            cursor.execute("""
+                UPDATE users
+                SET essays_daily_used = 0,
+                    daily_reset_date = ?
+                WHERE daily_reset_date IS NULL OR daily_reset_date != ?
+            """, (today, today))
+            
+            logger.info(f"已重置 {cursor.rowcount} 个用户的每日使用量")
+        
+        # 提交更改
+        conn.commit()
+        logger.info("每日使用量重置完成")
+    
+    except Exception as e:
+        logger.error(f"重置每日使用量时出错: {str(e)}")
+        if conn:
+            conn.rollback()
+    finally:
+        if conn:
+            conn.close()
+
+def reset_monthly_quota():
+    """重置会员的每月配额"""
+    logger.info("开始重置会员月度配额")
+    
+    conn = None
+    try:
+    except Exception as e:
+        logger.error(f"发生错误: {str(e)}")
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        
+        # 获取当前日期和月初日期
+        today = datetime.now().strftime('%Y-%m-%d')
+        first_day_of_month = datetime.now().replace(day=1).strftime('%Y-%m-%d')
+        
+        # 获取会员配额配置
+        cursor.execute("SELECT config_value FROM website_config WHERE config_name = 'regular_monthly_essays'")
+        regular_monthly = int(cursor.fetchone()[0])
+        
+        cursor.execute("SELECT config_value FROM website_config WHERE config_name = 'premium_monthly_essays'")
+        premium_monthly = int(cursor.fetchone()[0])
+        
+        # 如果今天是每月第一天，重置所有付费会员的配额
+        if today == first_day_of_month:
+            cursor.execute("""
+                UPDATE users
+                SET essays_remaining = CASE
+                    WHEN user_type = 'regular' THEN ?
+                    WHEN user_type = 'premium' THEN ?
+                    ELSE essays_remaining
+                END
+                WHERE user_type IN ('regular', 'premium')
+                AND membership_expiry >= ?
+            """, (regular_monthly, premium_monthly, today))
+            
+            logger.info(f"已重置 {cursor.rowcount} 个会员的月度配额")
+        
+        # 提交更改
+        conn.commit()
+        logger.info("会员月度配额重置完成")
+    
+    except Exception as e:
+        logger.error(f"重置会员月度配额时出错: {str(e)}")
+        if conn:
+            conn.rollback()
+    finally:
+        if conn:
+            conn.close()
+
+if __name__ == "__main__":
+    try:
+    except Exception as e:
+        logger.error(f"发生错误: {str(e)}")
+        check_membership_expiry()
+        reset_daily_usage()
+        reset_monthly_quota()
+        logger.info("所有任务执行完成")
+    except Exception as e:
+        logger.error(f"运行定时任务时出错: {str(e)}")
+        sys.exit(1)
+    
+    sys.exit(0) 

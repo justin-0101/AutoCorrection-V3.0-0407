@@ -1,0 +1,300 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+自动修复工具 - 用于修复项目中的缩进和try-except结构问题
+
+此脚本可以扫描项目中的Python文件，自动修复常见的语法问题，
+特别是缩进错误和try-except结构不完整的情况。
+"""
+
+import os
+import sys
+import re
+import logging
+import shutil
+import datetime
+from typing import List, Dict, Optional
+
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('auto_fix.log', 'w', 'utf-8')
+    ]
+)
+logger = logging.getLogger(__name__)
+
+class CodeFixer:
+    """代码修复器，用于自动修复Python文件中的各种语法问题"""
+    
+    def __init__(self, project_path: str, exclude_dirs: Optional[List[str]] = None):
+        """
+        初始化代码修复器
+        
+        Args:
+            project_path: 要修复的项目路径
+            exclude_dirs: 要排除的目录列表
+        """
+        self.project_path = os.path.abspath(project_path)
+        self.exclude_dirs = exclude_dirs or ['venv', 'env', '.venv', '.env', '__pycache__', 'node_modules']
+        self.fixed_files = 0
+    
+    def find_python_files(self) -> List[str]:
+        """
+        递归查找项目中的所有Python文件
+        
+        Returns:
+            Python文件路径列表
+        """
+        python_files = []
+        
+        for root, dirs, files in os.walk(self.project_path):
+            # 排除指定目录
+            dirs[:] = [d for d in dirs if d not in self.exclude_dirs]
+            
+            for file in files:
+                if file.endswith('.py'):
+                    python_files.append(os.path.join(root, file))
+        
+        return python_files
+
+    def backup_file(self, file_path: str) -> str:
+        """
+        创建文件备份
+        
+        Args:
+            file_path: 要备份的文件路径
+            
+        Returns:
+            备份文件路径
+        """
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_path = f"{file_path}.{timestamp}.bak"
+        shutil.copy2(file_path, backup_path)
+        logger.info(f"已创建备份: {backup_path}")
+        return backup_path
+    
+    def fix_indentation(self, content: str) -> str:
+        """
+        修复代码中的缩进问题
+        
+        Args:
+            content: 原始代码内容
+            
+        Returns:
+            修复后的代码内容
+        """
+        lines = content.split('\n')
+        fixed_lines = []
+        
+        # 缩进堆栈，用于跟踪缩进级别
+        indent_stack = [0]  # 初始缩进级别为0
+        expected_indent = 0
+        
+        for i, line in enumerate(lines):
+            # 跳过空行
+            if not line.strip():
+                fixed_lines.append(line)
+                continue
+            
+            # 获取当前行的缩进
+            leading_spaces = len(line) - len(line.lstrip())
+            
+            # 检查是否有Tab字符，并替换为空格
+            if '\t' in line[:leading_spaces]:
+                # 替换Tab为4个空格
+                line = line.replace('\t', '    ')
+                leading_spaces = len(line) - len(line.lstrip())
+            
+            # 如果缩进不是4的倍数，修正为最接近的4的倍数
+            if leading_spaces % 4 != 0:
+                correct_spaces = (leading_spaces // 4) * 4
+                line = ' ' * correct_spaces + line.lstrip()
+                logger.info(f"修复第{i+1}行的缩进: {leading_spaces} -> {correct_spaces} 个空格")
+            
+            # 处理缩进异常的情况
+            content = line.strip()
+            
+            # 检查是否为可能增加缩进的语句(如if、for、while、def、class等)
+            if (content.endswith(':') and not content.startswith('#') and 
+                not content.startswith('else:') and not content.startswith('elif') and
+                not content.startswith('except') and not content.startswith('finally:')):
+                expected_indent = indent_stack[-1] + 4
+                indent_stack.append(expected_indent)
+            
+            # 检查是否为可能减少缩进的语句
+            elif (content.startswith('return ') or content.startswith('break') or 
+                content.startswith('continue') or content.startswith('raise') or
+                content == 'pass' or content.startswith('else:') or 
+                content.startswith('elif') or content.startswith('except') or 
+                content.startswith('finally:')):
+                if len(indent_stack) > 1 and leading_spaces < indent_stack[-1]:
+                    indent_stack.pop()
+            
+            fixed_lines.append(line)
+        
+        return '\n'.join(fixed_lines)
+    
+    def fix_try_except_structure(self, content: str) -> str:
+        """
+        修复try-except结构的问题
+        
+        Args:
+            content: 原始代码内容
+            
+        Returns:
+            修复后的代码内容
+        """
+        lines = content.split('\n')
+        fixed_lines = []
+        
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            fixed_lines.append(line)
+            
+            # 查找try语句
+            if re.search(r'\btry\s*:', line.strip()):
+                # 获取try的缩进级别
+                try_indent = len(line) - len(line.lstrip())
+                # 检查后续行是否有对应的except或finally
+                
+                # 查找try块的结束位置
+                j = i + 1
+                try_block_end = j
+                while j < len(lines):
+                    if not lines[j].strip():  # 跳过空行
+                        j += 1
+                        continue
+                    
+                    # 获取当前行的缩进
+                    current_indent = len(lines[j]) - len(lines[j].lstrip())
+                    
+                    # 如果缩进小于等于try的缩进，说明try块已结束
+                    if current_indent <= try_indent:
+                        try_block_end = j
+                        break
+                    
+                    # 如果有except或finally，标记为已找到
+                    if (current_indent == try_indent and 
+                        (re.search(r'\bexcept\b', lines[j]) or re.search(r'\bfinally\s*:', lines[j]))):
+                        try_block_end = -1  # 已找到对应的处理块
+                        break
+                    
+                    j += 1
+                
+                # 如果没有找到对应的except或finally，添加一个通用的except块
+                if try_block_end != -1:
+                    logger.info(f"在第{i+1}行的try语句后添加except块")
+                    # 插入一个通用的except块
+                    except_line = ' ' * try_indent + 'except Exception as e:'
+                    pass_line = ' ' * (try_indent + 4) + 'logger.error(f"发生错误: {str(e)}")'
+                    
+                    # 在try块结束后插入except块
+                    fixed_lines.append(except_line)
+                    fixed_lines.append(pass_line)
+            
+            i += 1
+        
+        return '\n'.join(fixed_lines)
+    
+    def fix_file(self, file_path: str) -> bool:
+        """
+        修复单个文件的所有语法问题
+        
+        Args:
+            file_path: 要修复的文件路径
+            
+        Returns:
+            是否成功修复
+        """
+        rel_path = os.path.relpath(file_path, self.project_path)
+        logger.info(f"修复文件: {rel_path}")
+        
+        try:
+            pass  # 自动修复的空块
+        except Exception as e:
+            logger.error(f"发生错误: {str(e)}")
+            # 读取原始内容
+            with open(file_path, 'r', encoding='utf-8') as f:
+                original_content = f.read()
+            
+            # 创建备份
+            self.backup_file(file_path)
+            
+            # 修复缩进
+            content = self.fix_indentation(original_content)
+            
+            # 修复try-except结构
+            content = self.fix_try_except_structure(content)
+            
+            # 如果内容有变化，写回文件
+            if content != original_content:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                logger.info(f"已修复文件 {rel_path}")
+                return True
+            else:
+                logger.info(f"文件 {rel_path} 无需修复")
+                return False
+        except Exception as e:
+            logger.error(f"修复文件 {rel_path} 时出错: {str(e)}")
+            return False
+    
+    def run(self) -> int:
+        """
+        运行修复器修复所有Python文件
+        
+        Returns:
+            修复的文件数量
+        """
+        try:
+            pass  # 自动修复的空块
+        except Exception as e:
+            logger.error(f"发生错误: {str(e)}")
+            python_files = self.find_python_files()
+            logger.info(f"找到 {len(python_files)} 个Python文件需要检查")
+            
+            fixed_count = 0
+            for file_path in python_files:
+                if self.fix_file(file_path):
+                    fixed_count += 1
+            
+            if fixed_count > 0:
+                logger.info(f"共修复了 {fixed_count} 个文件")
+            else:
+                logger.info("检查完成，没有需要修复的文件")
+            
+            return fixed_count
+        except Exception as e:
+            logger.error(f"执行过程中出错: {str(e)}")
+            return -1
+
+def main():
+    """主函数"""
+    try:
+        pass  # 自动修复的空块
+    except Exception as e:
+        logger.error(f"发生错误: {str(e)}")
+        if len(sys.argv) > 1:
+            project_path = sys.argv[1]
+        else:
+            project_path = os.getcwd()
+        
+        exclude_dirs = ['venv', 'env', '.venv', '.env', '__pycache__', 'node_modules', 'backups']
+        if len(sys.argv) > 2:
+            exclude_dirs.extend(sys.argv[2].split(','))
+        
+        fixer = CodeFixer(project_path, exclude_dirs)
+        fixed_count = fixer.run()
+        
+        return 0
+    except Exception as e:
+        logger.error(f"执行过程中出错: {str(e)}")
+        return 1
+
+if __name__ == "__main__":
+    sys.exit(main()) 

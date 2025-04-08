@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>作文批改结果 - 小园丁作文批改</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <!-- 添加PDF生成库 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+    <style>
+        body {
+            background-color: #f8f9fa;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .navbar-brand {
+            font-weight: bold;
+        }
+        .main-content {
+            flex: 1;
+        }
+        .footer {
+            background-color: #212529;
+            color: rgba(255,255,255,0.6);
+            padding: 20px 0;
+            margin-top: auto;
+        }
+        .footer-link {
+            color: rgba(255,255,255,0.6);
+            text-decoration: none;
+        }
+        .footer-link:hover {
+            color: white;
+        }
+        .score-badge {
+            font-size: 1rem;
+            padding: 5px 10px;
+            border-radius: 20px;
+        }
+        .score-excellent {
+            background-color: #198754;
+            color: white;
+        }
+        .score-good {
+            background-color: #0dcaf0;
+            color: white;
+        }
+        .score-average {
+            background-color: #ffc107;
+            color: white;
+        }
+        .score-below {
+            background-color: #dc3545;
+            color: white;
+        }
+        .analysis-block {
+            margin-bottom: 20px;
+        }
+        .analysis-title {
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #0d6efd;
+        }
+        /* PDF打印样式优化 */
+        @media print {
+            body {
+                background-color: white;
+            }
+            .navbar, .footer, .no-print {
+                display: none !important;
+            }
+            .card {
+                border: none !important;
+                box-shadow: none !important;
+            }
+            .container {
+                max-width: 100% !important;
+                width: 100% !important;
+                padding: 0 !important;
+                margin: 0 !important;
+            }
+        }
+        /* 为PDF优化的字体大小 */
+        .pdf-content {
+            font-size: 0.9rem;
+        }
+        .pdf-content h4 {
+            font-size: 1.1rem;
+        }
+        .pdf-content h5 {
+            font-size: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <!-- 导航栏 -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="{{ url_for('main.index') }}">小园丁作文批改</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('main.index') }}">首页</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('main.correction') }}">作文批改</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('main.user_history') }}">我的作文</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('main.batch_upload') }}">批量上传</a>
+                    </li>
+                </ul>
+                <div class="d-flex">
+                    <div class="dropdown">
+                        <button class="btn btn-outline-light dropdown-toggle" type="button" id="userDropdown" data-bs-toggle="dropdown">
+                            <i class="bi bi-person-circle me-1"></i> {{ session.get('username', '用户') }}
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown">
+                            <li><a class="dropdown-item" href="{{ url_for('main.profile') }}"><i class="bi bi-person"></i> 个人资料</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('main.user_history') }}"><i class="bi bi-journal-text"></i> 我的作文</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ url_for('main.logout') }}"><i class="bi bi-box-arrow-right"></i> 退出登录</a></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+    
+    <div class="main-content py-5">
+        <div class="container">
+            <div class="row mb-4">
+                <div class="col">
+                    <nav aria-label="breadcrumb">
+                        <ol class="breadcrumb">
+                            <li class="breadcrumb-item"><a href="{{ url_for('main.index') }}">首页</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('main.user_history') }}">我的作文</a></li>
+                            <li class="breadcrumb-item active">作文批改结果</li>
+                        </ol>
+                    </nav>
+                </div>
+                <div class="col-auto">
+                    <button id="downloadPdfBtn" class="btn btn-outline-success">
+                        <i class="bi bi-file-pdf"></i> 下载PDF报告
+                    </button>
+                </div>
+            </div>
+            
+            <div id="resultSection">
+                <div class="card shadow-sm mb-4">
+                    <div class="card-body pdf-content">
+                        <h3 id="essayTitle" class="text-center mb-4" style="font-size: 20px; font-weight: bold;">
+                            作文标题：{% if title and title.strip() and title != '无标题' %}《{{ title }}》{% else %}【无标题】{% endif %}
+                        </h3>
+                        
+                        <!-- 表格集成样式 -->
+                        <div class="row mb-4">
+                            <div class="col-md-10 mx-auto"> <!-- 使用mx-auto居中表格，调整宽度 -->
+                                <table class="table table-bordered shadow-sm"> <!-- 添加阴影效果 -->
+                                    <thead class="table-light"> <!-- 表头浅色背景 -->
+                                        <tr>
+                                            <!-- 总分和等级突出显示在表头 -->
+                                            <th class="text-center py-3" colspan="2" style="font-size: 1.5rem;"> <!-- 调整字体大小和内边距 -->
+                                                总分: <strong class="text-success">{{ total_score }}/50</strong> 
+                                                <span class="mx-3">|</span> <!-- 分隔符 -->
+                                                等级: <strong class="text-primary">{{ grade }}</strong>
+                                            </th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td class="fw-bold ps-4" style="width: 50%;">作文字数</td> <!-- 增加左内边距 -->
+                                            <td>{{ word_count }}</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="fw-bold ps-4">错别字扣分</td>
+                                            <td class="{% if spelling_errors.解析|length > 0 %}text-danger fw-bold{% else %}text-success{% endif %}">
+                                                {% if spelling_errors.解析|length > 0 %}-{{ spelling_errors.解析|length }}{% else %}0{% endif %}
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <td class="fw-bold ps-4">内容主旨得分</td>
+                                            <td>{{ content_score }}</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="fw-bold ps-4">表达文采得分</td>
+                                            <td>{{ language_score }}</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="fw-bold ps-4">结构得分</td>
+                                            <td>{{ structure_score }}</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="fw-bold ps-4">书写得分</td>
+                                            <td>{{ writing_score }}</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        
+                        <!-- 评分详情 -->
+                        <div class="analysis-block">
+                            <h4 class="analysis-title"><i class="bi bi-star"></i> 总体评价</h4>
+                            <p>{{ overall_assessment|safe }}</p>
+                        </div>
+                        
+                        <div class="analysis-block">
+                            <h4 class="analysis-title"><i class="bi bi-clipboard-check"></i> 内容分析</h4>
+                            <p>{{ content_analysis|safe }}</p>
+                        </div>
+                        
+                        <div class="analysis-block">
+                            <h4 class="analysis-title"><i class="bi bi-chat-quote"></i> 表达与文采分析</h4>
+                            <p>{{ language_analysis|safe }}</p>
+                        </div>
+                        
+                        {% if structure_analysis %}
+                        <div class="analysis-block">
+                            <h4 class="analysis-title"><i class="bi bi-layout-text-window"></i> 结构分析</h4>
+                            <p>{{ structure_analysis|safe }}</p>
+                        </div>
+                        {% endif %}
+                        
+                        <div class="analysis-block">
+                            <h4 class="analysis-title"><i class="bi bi-spellcheck"></i> 错别字分析</h4>
+                            <p>
+                                {% if spelling_errors and spelling_errors.解析 and spelling_errors.解析|length > 0 %}
+                                共发现 {{ spelling_errors.解析|length }} 个错别字或语法错误。
+                                <ul class="mt-2">
+                                    {% for error in spelling_errors.解析 %}
+                                    <li>
+                                        <strong>错误：</strong>{{ error.错误 if '错误' in error else error.wrong }}，
+                                        <strong>位置：</strong>{{ error.位置 if '位置' in error else error.position|default('未知') }}，
+                                        <strong>正确写法：</strong>{{ error.正确写法 if '正确写法' in error else error.correct }}
+                                        {% if '上下文' in error or 'context' in error %}
+                                        ，<strong>上下文：</strong>{{ error.上下文 if '上下文' in error else error.context }}
+                                        {% endif %}
+                                    </li>
+                                    {% endfor %}
+                                </ul>
+                                {% else %}
+                                未发现明显的错别字或语法错误，请继续保持！
+                                {% endif %}
+                            </p>
+                        </div>
+                        
+                        {% if writing_analysis %}
+                        <div class="analysis-block">
+                            <h4 class="analysis-title"><i class="bi bi-pencil"></i> 书写分析</h4>
+                            <p>{{ writing_analysis|safe }}</p>
+                        </div>
+                        {% endif %}
+                        
+                        <!-- 作文原文 -->
+                        <div id="originalTextSection" class="mt-4 pt-3 border-top">
+                            <h4 class="text-center mb-3">作文原文</h4>
+                            <div id="originalTextContent" class="p-3 bg-light rounded" style="white-space: pre-wrap; font-family: SimSun, serif;">{{ content }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 页脚 -->
+    <footer class="footer py-3">
+        <div class="container">
+            <div class="text-center">
+                <p class="small mb-0">&copy; 2025 小园丁作文批改系统</p>
+            </div>
+        </div>
+    </footer>
+    
+    <!-- JavaScript -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // PDF下载功能
+        document.getElementById('downloadPdfBtn').addEventListener('click', function() {
+            try {
+                // 显示加载提示
+                const loadingContainer = document.createElement('div');
+                loadingContainer.id = 'pdfLoadingIndicator';
+                loadingContainer.style.position = 'fixed';
+                loadingContainer.style.top = '50%';
+                loadingContainer.style.left = '50%';
+                loadingContainer.style.transform = 'translate(-50%, -50%)';
+                loadingContainer.style.backgroundColor = 'rgba(255,255,255,0.9)';
+                loadingContainer.style.padding = '20px';
+                loadingContainer.style.borderRadius = '5px';
+                loadingContainer.style.boxShadow = '0 0 10px rgba(0,0,0,0.2)';
+                loadingContainer.style.zIndex = '9999';
+                loadingContainer.innerHTML = '<div class="text-center"><div class="spinner-border text-primary" role="status"></div><p class="mt-2">正在生成PDF，请稍候...</p></div>';
+                document.body.appendChild(loadingContainer);
+                
+                console.log('PDF生成开始...');
+                
+                // 获取作文标题作为PDF文件名
+                let filename = '作文批改报告';
+                const title = document.getElementById('essayTitle').textContent;
+                if (title) {
+                    filename = `${title}-批改报告.pdf`;
+                }
+                
+                // 创建临时容器，用于PDF生成
+                const tempContainer = document.createElement('div');
+                
+                // 添加标题
+                const titleDiv = document.createElement('div');
+                titleDiv.style.textAlign = 'center';
+                titleDiv.style.margin = '20px 0';
+                titleDiv.style.pageBreakAfter = 'avoid';
+                
+                const reportTitle = document.createElement('h2');
+                reportTitle.style.fontSize = '18px'; // 减小字体大小
+                reportTitle.style.fontWeight = 'bold';
+                reportTitle.style.marginBottom = '10px';
+                
+                if (title) {
+                    reportTitle.textContent = `小园丁作文评分报告`;
+                } else {
+                    reportTitle.textContent = '小园丁作文评分报告';
+                }
+                
+                titleDiv.appendChild(reportTitle);
+                tempContainer.appendChild(titleDiv);
+                
+                // 添加批改结果
+                const resultSection = document.querySelector('#resultSection .card');
+                
+                // 临时隐藏PDF下载按钮以避免其在截图中显示
+                const downloadBtn = document.getElementById('downloadPdfBtn');
+                const btnDisplay = downloadBtn.style.display;
+                downloadBtn.style.display = 'none';
+                
+                // 克隆结果区域
+                tempContainer.appendChild(resultSection.cloneNode(true));
+                
+                // PDF生成选项
+                const html2pdfOptions = {
+                    margin: 10, // 减小页边距
+                    filename: filename,
+                    image: { type: 'jpeg', quality: 0.95 },
+                    html2canvas: { 
+                        scale: 1.5, // 降低缩放比例，避免文字过大
+                        useCORS: true,
+                        scrollX: 0,
+                        scrollY: 0,
+                        backgroundColor: '#ffffff'
+                    },
+                    jsPDF: { 
+                        unit: 'mm', 
+                        format: 'a4', 
+                        orientation: 'portrait',
+                        compress: true
+                    },
+                    // 减小PDF中的字体大小
+                    fontStyles: false,
+                    defaultStyles: {
+                        fontSize: 8, // 更小的字体大小
+                        lineHeight: 1.2 // 更紧凑的行高
+                    }
+                };
+                
+                // 生成PDF
+                html2pdf().from(tempContainer).set(html2pdfOptions).save()
+                    .then(() => {
+                        console.log('PDF生成完成');
+                        // 移除加载提示
+                        const loadingIndicator = document.getElementById('pdfLoadingIndicator');
+                        if (loadingIndicator && loadingIndicator.parentNode) {
+                            loadingIndicator.parentNode.removeChild(loadingIndicator);
+                        }
+                        // 恢复下载按钮显示
+                        downloadBtn.style.display = btnDisplay;
+                    })
+                    .catch(error => {
+                        console.error('PDF生成失败:', error);
+                        alert(`PDF生成失败: ${error.message || '未知错误'}\n请尝试刷新页面后重试`);
+                        // 恢复下载按钮显示
+                        downloadBtn.style.display = btnDisplay;
+                        // 移除加载提示
+                        const loadingIndicator = document.getElementById('pdfLoadingIndicator');
+                        if (loadingIndicator && loadingIndicator.parentNode) {
+                            loadingIndicator.parentNode.removeChild(loadingIndicator);
+                        }
+                    });
+                
+            } catch (error) {
+                console.error('PDF生成主函数错误:', error);
+                alert(`PDF生成失败: ${error.message || '初始化失败'}\n请确保您的浏览器支持PDF生成功能`);
+                
+                // 移除可能存在的加载提示
+                const loadingIndicator = document.getElementById('pdfLoadingIndicator');
+                if (loadingIndicator && loadingIndicator.parentNode) {
+                    loadingIndicator.parentNode.removeChild(loadingIndicator);
+                }
+            }
+        });
+    </script>
+</body>
+</html> 

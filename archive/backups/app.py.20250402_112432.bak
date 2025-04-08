@@ -1,0 +1,2435 @@
+import os
+import json
+import logging
+import traceback
+import asyncio
+import sqlite3
+from flask import Flask, render_template, redirect, url_for, session, request, flash, g, jsonify, current_app, send_from_directory
+from datetime import datetime, timedelta, date
+import dotenv
+import time
+from werkzeug.security import generate_password_hash, check_password_hash
+from flask_cors import CORS
+from werkzeug.utils import secure_filename
+import uuid
+import re
+from functools import wraps
+
+# 加载环境变量
+dotenv.load_dotenv()
+
+# 标记AI服务初始化状态
+ai_initialized = False
+ai_available = False
+
+# 禁用Werkzeug默认日志记录器以避免双重日志
+logging.getLogger('werkzeug').disabled = True
+
+# 从app_instance导入Flask应用实例，确保使用单例模式
+from app_instance import app
+
+# 使用环境变量更新app配置
+app.secret_key = os.environ.get('SECRET_KEY', 'your_secret_key_here')
+app.permanent_session_lifetime = timedelta(days=30)
+app.config['UPLOAD_FOLDER'] = 'uploads'
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 限制上传大小为16MB
+# 静态文件配置
+app.static_folder = 'static'
+app.static_url_path = '/static'
+
+# 确保应用使用的目录存在
+if not os.path.exists('instance'):
+    os.makedirs('instance')
+
+# 数据库路径
+DATABASE = 'instance/essay_correction.db'
+
+# 配置日志
+if not os.path.exists('logs'):
+    os.makedirs('logs')
+
+# 创建日志格式化器
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+
+# 清除根日志记录器的所有处理器
+root_logger = logging.getLogger()
+for handler in root_logger.handlers[:]:
+    root_logger.removeHandler(handler)
+
+# 创建文件处理器
+file_handler = logging.FileHandler('logs/app.log', encoding='utf-8')
+file_handler.setFormatter(formatter)
+file_handler.setLevel(logging.INFO)
+
+# 创建控制台处理器
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(formatter)
+console_handler.setLevel(logging.INFO)
+
+# 配置根日志记录器
+root_logger.setLevel(logging.INFO)
+root_logger.addHandler(file_handler)
+root_logger.addHandler(console_handler)
+
+# 配置 Werkzeug 日志
+werkzeug_logger = logging.getLogger('werkzeug')
+werkzeug_logger.handlers = []  # 清除现有处理器
+werkzeug_logger.addHandler(logging.NullHandler())  # 添加空处理器
+werkzeug_logger.propagate = False  # 阻止日志传播到根日志记录器
+
+# 获取应用的日志记录器
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+logger.propagate = False  # 阻止日志传播到根日志记录器
+
+# 清除应用日志记录器的所有处理器
+for handler in logger.handlers[:]:
+    logger.removeHandler(handler)
+
+# 为应用日志记录器添加处理器
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+
+# 打印启动信息
+logger.info("\n" + "="*50)
+logger.info("AI评分系统启动")
+logger.info("日志配置完成 - 同时输出到控制台和文件")
+logger.info("="*50)
+
+# 初始化AI评分服务
+def initialize_ai_service():
+    global ai_initialized, ai_available
+    if not ai_initialized:
+        try:
+            from llm_func import model, get_model_response, handler_spell_error, handler_content_analysis, handler_express_analysis, handler_writing_analysis, handler_summary
+            ai_available = True
+            print("AI评分服务初始化成功")
+            ai_initialized = True
+        except Exception as e:
+            print(f"AI评分服务初始化失败: {e}")
+            ai_available = False
+            ai_initialized = True
+
+# 初始化AI服务
+initialize_ai_service()
+
+# 导入自定义模块
+from user_auth import (
+    User, register_user, login_user_with_password, login_user_with_code, 
+    send_verification_email, save_verification_code, generate_verification_code,
+    check_email_verification_limit, reset_password_with_code, reset_password_without_code
+)
+from user_profile import UserProfile, handle_profile_route
+from user_history import EssayHistory, handle_user_history_route, handle_delete_essay_route
+# 需要按需导入你的作文批改相关模块
+# from essay_correction import ...
+
+# 添加AI评分配置模块导入
+from ai_correction_config import (
+    get_prompt_template, 
+    extract_spelling_errors, 
+    format_spelling_errors,
+    normalize_scores,
+    get_fallback_result,
+    SCORING
+)
+
+# 导入统一评分任务
+from tasks import task_unified_scoring
+
+# 添加路由调试函数
+routes_checked = False
+
+@app.before_request
+def check_routes():
+    global routes_checked
+    if not routes_checked:
+        logger.info("\n===== 已注册的路由 =====")
+        for rule in app.url_map.iter_rules():
+            logger.info(f"{rule.endpoint}: {rule}")
+        logger.info("=======================\n")
+        routes_checked = True
+
+# 通用函数：获取数据库连接
+def get_db():
+    if 'db' not in g:
+        g.db = sqlite3.connect(DATABASE)
+        g.db.row_factory = sqlite3.Row
+    return g.db
+
+# 通用函数：关闭数据库连接
+@app.teardown_appcontext
+def close_db(e=None):
+    db = g.pop('db', None)
+    if db is not None:
+        db.close()
+
+# 管理员权限检查装饰器
+def admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            flash('请先登录', 'warning')
+            return redirect(url_for('login'))
+        
+        user_id = session.get('user_id')
+        role = session.get('role')
+        
+        if role != 'admin':
+            flash('您没有权限访问此页面', 'danger')
+            return redirect(url_for('index'))
+            
+        return f(*args, **kwargs)
+    return decorated_function
+
+# 获取用户最近的作文
+def get_recent_essays(user_id, limit=5):
+    """获取用户最近批改的作文列表"""
+    if not user_id:
+        return []
+        
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        # 查询用户最近的作文
+        cursor.execute("""
+            SELECT id, title, submission_time as created_at, total_score
+            FROM essays 
+            WHERE user_id = ? 
+            ORDER BY submission_time DESC
+            LIMIT ?
+        """, (user_id, limit))
+        
+        essays = cursor.fetchall()
+        
+        # 将查询结果转换为字典列表
+        result = []
+        for essay in essays:
+            result.append({
+                'id': essay[0],
+                'title': essay[1],
+                'created_at': essay[2],
+                'total_score': essay[3] if essay[3] is not None else 0
+            })
+        
+        return result
+        
+    except sqlite3.Error as e:
+        logger.error(f"获取最近作文时出错: {e}")
+        return []
+
+# 获取用户统计信息
+def get_user_stats(user_id):
+    """获取用户作文统计信息"""
+    if not user_id:
+        return None
+        
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        # 查询用户作文总数
+        cursor.execute("SELECT COUNT(*) FROM essays WHERE user_id = ?", (user_id,))
+        total_essays = cursor.fetchone()[0]
+        
+        # 查询用户平均分数（排除NULL值）
+        cursor.execute("""
+            SELECT AVG(total_score) 
+            FROM essays 
+            WHERE user_id = ? AND total_score IS NOT NULL
+        """, (user_id,))
+        avg_score_result = cursor.fetchone()[0]
+        avg_score = round(avg_score_result) if avg_score_result is not None else None
+        
+        return {
+            'total_essays': total_essays,
+            'avg_score': avg_score
+        }
+        
+    except sqlite3.Error as e:
+        logger.error(f"获取用户统计信息时出错: {e}")
+        return None
+
+# 下面的所有代码是路由定义，放在app创建之后，确保路由注册到正确的app实例
+# 主页路由
+@app.route('/')
+def index():
+    # 检查用户是否已登录
+    user = None
+    logged_in = False
+    recent_essays = []
+    stats = None
+    
+    if 'user_id' in session:
+        logged_in = True
+        user_id = session['user_id']
+        user = User.get(user_id)
+        
+        # 获取最近的作文列表
+        recent_essays = get_recent_essays(user_id)
+        # 获取用户统计信息
+        stats = get_user_stats(user_id)
+    
+    # 渲染首页模板
+    return render_template('index.html', 
+                          user=user, 
+                          logged_in=logged_in,
+                          recent_essays=recent_essays,
+                          stats=stats)
+
+# 注册页面路由
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'POST':
+        email = request.form.get('email')
+        username = request.form.get('username')
+        password = request.form.get('password')
+        password2 = request.form.get('password2')
+        
+        # 检查两次密码是否一致
+        if password != password2:
+            flash('两次输入的密码不一致', 'error')
+            return redirect(url_for('register'))
+        
+        # 注册用户
+        success, message = register_user(email, username, password)
+        
+        if success:
+            flash('注册成功，请登录', 'success')
+            return redirect(url_for('login'))
+        else:
+            flash(message, 'error')
+            return redirect(url_for('register'))
+    
+    return render_template('register.html')
+
+# 发送验证码路由
+@app.route('/send_verification_code', methods=['POST'])
+def send_code():
+    email = request.form.get('email')
+    purpose = request.form.get('purpose', 'registration')  # 用途：registration, login, password_reset
+    
+    if not email:
+        return {'success': False, 'error': '请提供邮箱地址'}, 400
+        
+    # 检查邮箱发送限制
+    if not check_email_verification_limit(email, purpose):
+        return {'success': False, 'error': '发送过于频繁，请稍后再试'}, 429
+    
+    # 生成验证码
+    code = generate_verification_code()
+    
+    # 发送验证码邮件
+    email_sent = send_verification_email(email, code, purpose)
+    
+    if email_sent:
+        # 保存验证码到数据库
+        save_verification_code(email, code, purpose)
+        return {'success': True, 'message': '验证码已发送，请查收邮件'}, 200
+    else:
+        return {'success': False, 'error': '发送验证码失败，请稍后重试'}, 500
+
+# 登录页面路由
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    # 如果用户已登录，重定向到主页
+    if 'user_id' in session:
+        return redirect(url_for('index'))
+        
+    if request.method == 'POST':
+        # 使用密码登录
+        username = request.form.get('username')
+        password = request.form.get('password')
+        remember = request.form.get('remember', '0') == '1'
+        
+        success, result = login_user_with_password(username, password)
+        
+        if success:
+            # 登录成功，设置session
+            session['user_id'] = result['id']  # 使用返回的字典格式的id
+            session['username'] = result['username']  # 保存用户名
+            session['role'] = result['role']  # 重要：保存用户角色
+            
+            if remember:
+                session.permanent = True
+            
+            # 更新最后登录时间
+            profile_manager = UserProfile()
+            profile_manager.update_last_login(result['id'])  # 使用返回的id
+            
+            flash('登录成功', 'success')
+            return redirect(url_for('index'))
+        else:
+            flash(result, 'danger')
+    
+    return render_template('login.html')
+
+# 忘记密码路由
+@app.route('/forgot_password', methods=['GET', 'POST'])
+def forgot_password():
+    # 如果用户已登录，重定向到主页
+    if 'user_id' in session:
+        return redirect(url_for('index'))
+        
+    if request.method == 'POST':
+        email = request.form.get('email')
+        new_password = request.form.get('new_password')
+        
+        # 使用自定义密码重置函数（需要在user_auth.py中实现）
+        result, message = reset_password_without_code(email, new_password)
+        
+        if result:
+            flash(message, 'success')
+        else:
+            flash(message, 'danger')
+    
+    return render_template('forgot_password.html')
+
+# 退出登录路由
+@app.route('/logout')
+def logout():
+    session.clear()
+    flash('您已成功退出登录', 'info')
+    return redirect(url_for('index'))
+
+# 个人资料路由，使用之前创建的函数
+@app.route('/profile', methods=['GET', 'POST'])
+def profile():
+    return handle_profile_route()
+
+# 用户作文历史路由
+@app.route('/user_history')
+def user_history():
+    """用户作文历史页面"""
+    # 检查用户是否已登录
+    if 'user_id' not in session:
+        flash('请先登录后再查看作文历史', 'warning')
+        return redirect(url_for('login'))
+    
+    user_id = session['user_id']
+    logger.info(f"用户 ID {user_id} 访问作文历史页面")
+    
+    try:
+        # 连接数据库
+        conn = sqlite3.connect('instance/essay_correction.db')
+        cursor = conn.cursor()
+        
+        # 查询用户的作文历史
+        cursor.execute("""
+            SELECT id, title, submission_time, total_score, grade, 
+                   content_score, language_score, structure_score, writing_score
+            FROM essays 
+            WHERE user_id = ? 
+            ORDER BY submission_time DESC
+        """, (user_id,))
+        
+        essays = cursor.fetchall()
+        conn.close()
+        
+        logger.info(f"找到 {len(essays)} 条作文历史记录")
+        
+        # 转换为字典格式便于模板使用
+        essay_list = []
+        for essay in essays:
+            essay_id, title, submission_time, total_score, grade, content_score, language_score, structure_score, writing_score = essay
+            essay_list.append({
+                'id': essay_id,
+                'title': title if title else '无标题',
+                'submission_time': submission_time,
+                'total_score': total_score,
+                'grade': grade,
+                'content_score': content_score,
+                'language_score': language_score,
+                'structure_score': structure_score,
+                'writing_score': writing_score
+            })
+        
+        return render_template('user_history.html', essays=essay_list)
+        
+    except Exception as e:
+        logger.error(f"加载用户历史页面出错: {str(e)}")
+        flash('加载作文历史出错，请稍后再试', 'danger')
+        return redirect(url_for('index'))
+
+# 删除作文路由，使用之前创建的函数
+@app.route('/delete_essay', methods=['POST'])
+def delete_essay():
+    return handle_delete_essay_route()
+
+# 查看作文结果
+@app.route('/view_result/<int:essay_id>')
+def view_result(essay_id):
+    if 'user_id' not in session:
+        flash('请先登录', 'warning')
+        return redirect(url_for('login'))
+    
+    try:
+        conn = sqlite3.connect('instance/essay_correction.db')
+        cursor = conn.cursor()
+        
+        # 获取作文信息
+        cursor.execute("""
+            SELECT id, user_id, title, content, total_score, grade, 
+                   content_score, language_score, structure_score, writing_score,
+                   spelling_errors, overall_assessment, content_analysis, 
+                   language_analysis, structure_analysis, writing_analysis,
+                   submission_time, word_count
+            FROM essays 
+            WHERE id = ? AND user_id = ?
+        """, (essay_id, session['user_id']))
+        
+        essay_data = cursor.fetchone()
+        conn.close()
+        
+        if not essay_data:
+            flash('未找到该作文或无权访问', 'danger')
+            return redirect(url_for('user_history'))
+        
+        # 将查询结果转换为字典
+        columns = ['id', 'user_id', 'title', 'content', 'total_score', 'grade',
+                  'content_score', 'language_score', 'structure_score', 'writing_score',
+                  'spelling_errors', 'overall_assessment', 'content_analysis',
+                  'language_analysis', 'structure_analysis', 'writing_analysis',
+                  'submission_time', 'word_count']
+        essay = dict(zip(columns, essay_data))
+        
+        # 处理错别字信息
+        if essay['spelling_errors']:
+            try:
+                essay['spelling_errors'] = json.loads(essay['spelling_errors'])
+            except:
+                essay['spelling_errors'] = {"解析": []}
+        else:
+            essay['spelling_errors'] = {"解析": []}
+        
+        # 构建AI评分结果
+        ai_result = {
+            "总分": essay['total_score'],
+            "等级": essay['grade'],
+            "内容分": essay['content_score'],
+            "表达分": essay['language_score'],
+            "结构分": essay['structure_score'],
+            "书写分": essay['writing_score'],
+            "总体评价": essay['overall_assessment'],
+            "内容分析": essay['content_analysis'],
+            "表达分析": essay['language_analysis'],
+            "结构分析": essay['structure_analysis'],
+            "书写分析": essay['writing_analysis'],
+            "错别字": essay['spelling_errors'],
+            "标题": essay['title'],
+            "原文": essay['content']
+        }
+        
+        return render_template('results.html', 
+                               title=essay['title'],
+                               content=essay['content'],
+                               ai_result=ai_result,
+                               spelling_errors=essay['spelling_errors'],
+                               id=essay['id'],
+                               user_id=essay['user_id'],
+                               submission_time=essay['submission_time'],
+                               word_count=essay['word_count'],
+                               total_score=essay['total_score'],
+                               grade=essay['grade'],
+                               content_score=essay['content_score'],
+                               language_score=essay['language_score'],
+                               structure_score=essay['structure_score'],
+                               writing_score=essay['writing_score'],
+                               overall_assessment=essay['overall_assessment'],
+                               content_analysis=essay['content_analysis'],
+                               language_analysis=essay['language_analysis'],
+                               structure_analysis=essay['structure_analysis'],
+                               writing_analysis=essay['writing_analysis'])
+    
+    except Exception as e:
+        logger.error(f"查看作文详情时出错: {str(e)}")
+        logger.error(traceback.format_exc())  # 添加详细的堆栈跟踪
+        flash('查看作文详情时出错', 'danger')
+        return redirect(url_for('user_history'))
+
+# 异步AI评分函数
+async def ai_analyze_content(text, subject=""):
+    """
+    使用AI分析作文并返回评分结果
+    
+    Args:
+        text (str): 作文内容
+        subject (str): 作文标题
+        
+    Returns:
+        dict: 包含评分和分析的结果字典
+    """
+    try:
+        logger.info("\n" + "="*100)
+        logger.info("【开始AI评分】")
+        logger.info(f"作文标题: {subject}")
+        logger.info(f"作文长度: {len(text)}字符")
+        logger.info(f"作文内容前300字符: \n{text[:300]}...")
+        logger.info("="*50)
+
+        # 获取书写分析结果（固定满分）
+        writing_result = await handler_writing_analysis()
+        logger.info("【书写分析完成】")
+        logger.info(f"分数: {writing_result['书写得分']}")
+        logger.info(f"评语: {writing_result['解析']}")
+        
+        # 错别字分析
+        spell_result = await handler_spell_error(text)
+        logger.info("【错别字分析完成】")
+        logger.info(f"分数: {spell_result['错别字扣分']}")
+        logger.info(f"评语: {spell_result['解析']}")
+        
+        # 内容主旨分析
+        content_result = await handler_content_analysis(subject, text)
+        logger.info("【内容主旨分析完成】")
+        logger.info(f"分数: {content_result['内容主旨得分']}")
+        logger.info(f"评语: {content_result['解析']}")
+        
+        # 表达文采分析
+        express_result = await handler_express_analysis(subject, text)
+        logger.info("【表达文采分析完成】")
+        logger.info(f"分数: {express_result['表达文采得分']}")
+        logger.info(f"评语: {express_result['解析']}")
+
+        # 整合所有评分结果
+        result = {
+            "书写分析": writing_result,  # 添加书写分析结果
+            "错别字": spell_result,
+            "内容主旨": content_result,
+            "表达文采": express_result,
+            "总分": str(float(writing_result['书写得分']) + 
+                     float(content_result['内容主旨得分']) + 
+                     float(express_result['表达文采得分']) - 
+                     float(spell_result['错别字扣分']))
+        }
+        
+        logger.info("\n" + "="*50)
+        logger.info("【评分结果汇总】")
+        logger.info(json.dumps(result, ensure_ascii=False, indent=2))
+        logger.info("="*50)
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"AI分析过程出错: {str(e)}")
+        raise
+
+# 添加缺少的ai_scoring函数
+def ai_scoring(title, content):
+    """
+    调用异步AI分析函数并处理结果为标准格式
+    
+    Args:
+        title (str): 作文标题
+        content (str): 作文内容
+        
+    Returns:
+        dict: 包含评分和分析的结果字典，符合评分结果页面所需格式
+    """
+    try:
+        # 使用asyncio.run代替手动创建和关闭事件循环
+        import asyncio
+        try:
+            # 首选方法：使用asyncio.run (Python 3.7+)
+            analyze_result = asyncio.run(ai_analyze_content(content, title))
+        except RuntimeError:
+            # 备用方法：如果有现有事件循环正在运行时
+            logger.info("检测到现有事件循环，使用备用方法执行异步函数")
+            current_loop = asyncio.get_event_loop()
+            if current_loop.is_running():
+                # 创建一个新的事件循环用于此次调用
+                loop = asyncio.new_event_loop()
+                try:
+                    analyze_result = loop.run_until_complete(ai_analyze_content(content, title))
+                finally:
+                    loop.close()
+            else:
+                # 使用现有事件循环
+                analyze_result = current_loop.run_until_complete(ai_analyze_content(content, title))
+        
+        # 处理结果为标准格式
+        writing_score = float(analyze_result['书写分析']['书写得分'])
+        content_score = float(analyze_result['内容主旨']['内容主旨得分'])
+        language_score = float(analyze_result['表达文采']['表达文采得分'])
+        error_deduction = float(analyze_result['错别字']['错别字扣分'])
+        total_score = writing_score + content_score + language_score - error_deduction
+        
+        # 确定等级
+        if total_score >= 90:
+            grade = "优秀"
+        elif total_score >= 80:
+            grade = "良好"
+        elif total_score >= 70:
+            grade = "中等"
+        elif total_score >= 60:
+            grade = "及格"
+        else:
+            grade = "不及格"
+            
+        # 组装标准评分结果格式
+        result = {
+            "总分": total_score,
+            "等级": grade,
+            "内容分": content_score,
+            "表达分": language_score,
+            "结构分": 0,  # 当前系统未评分，设为0
+            "书写分": writing_score,
+            "错别字": analyze_result['错别字'],
+            "内容分析": analyze_result['内容主旨']['解析'],
+            "表达分析": analyze_result['表达文采']['解析'],
+            "结构分析": "暂无结构分析",
+            "书写分析": analyze_result['书写分析']['解析'],
+            "总体评价": f"本次作文总分为{total_score}分，等级{grade}。内容得分{content_score}分，表达得分{language_score}分，书写得分{writing_score}分，错别字扣分{error_deduction}分。"
+        }
+        
+        logger.info(f"AI评分完成，总分: {total_score}, 等级: {grade}")
+        return result
+        
+    except Exception as e:
+        logger.error(f"AI评分函数执行错误: {str(e)}")
+        raise
+
+# 添加统一评分函数
+def unified_ai_scoring(title, content):
+    """
+    调用统一评分函数并处理结果为标准格式
+    
+    Args:
+        title (str): 作文标题
+        content (str): 作文内容
+        
+    Returns:
+        dict: 包含评分和分析的结果字典，符合评分结果页面所需格式
+    """
+    try:
+        # 导入统一评分函数
+        from llm_func import unified_essay_scoring
+        
+        # 使用asyncio.run代替手动创建和关闭事件循环
+        import asyncio
+        try:
+            # 首选方法：使用asyncio.run (Python 3.7+)
+            unified_result = asyncio.run(unified_essay_scoring(title, content))
+        except RuntimeError:
+            # 备用方法：如果有现有事件循环正在运行时
+            logger.info("检测到现有事件循环，使用备用方法执行异步函数")
+            current_loop = asyncio.get_event_loop()
+            if current_loop.is_running():
+                # 创建一个新的事件循环用于此次调用
+                loop = asyncio.new_event_loop()
+                try:
+                    unified_result = loop.run_until_complete(unified_essay_scoring(title, content))
+                finally:
+                    loop.close()
+            else:
+                # 使用现有事件循环
+                unified_result = current_loop.run_until_complete(unified_essay_scoring(title, content))
+        
+        logger.info("【统一评分成功】")
+        logger.info(json.dumps(unified_result, ensure_ascii=False, indent=2))
+        
+        # 确保返回的结果是字典类型
+        if not isinstance(unified_result, dict):
+            logger.error(f"统一评分返回的结果不是字典类型: {type(unified_result)}")
+            # 提供默认字典
+            unified_result = {
+                "总得分": 0,
+                "等级评定": "E-未完成",
+                "分项得分": {
+                    "内容主旨": "0",
+                    "语言文采": "0",
+                    "文章结构": "0",
+                    "文面书写": "0"
+                },
+                "多维分析": {
+                    "内容分析": "评分出错，无法分析",
+                    "表达分析": "评分出错，无法分析",
+                    "结构分析": "评分出错，无法分析",
+                    "书写分析": "评分出错，无法分析"
+                },
+                "总体评价": "评分系统出错，无法给出评价",
+                "错别字": []
+            }
+        
+        # 提取各项分数，安全处理，防止索引错误
+        total_score = int(unified_result.get('总得分', 0))
+        grade_assessment = unified_result.get('等级评定', 'B-良好')
+        
+        # 从分项得分中提取各项分数，确保使用get方法
+        try:
+            # 确保分项得分存在且为字典
+            if not isinstance(unified_result.get('分项得分', {}), dict):
+                unified_result['分项得分'] = {
+                    "内容主旨": "15",
+                    "语言文采": "10",
+                    "文章结构": "8",
+                    "文面书写": "5"
+                }
+                
+            scores = unified_result.get('分项得分', {})
+            content_score = int(scores.get('内容主旨', 15))
+            language_score = int(scores.get('语言文采', 10)) 
+            structure_score = int(scores.get('文章结构', 8))
+            writing_score = int(scores.get('文面书写', 5))
+            
+            # 获取错别字内容和扣分
+            spelling_errors = unified_result.get('错别字', [])
+            error_deduction = len(spelling_errors) if isinstance(spelling_errors, list) else 0
+            
+            # 重新计算总分，考虑错别字扣分
+            calculated_total = content_score + language_score + structure_score + writing_score - error_deduction
+            
+            # 始终使用计算得出的总分，确保错别字扣分被考虑
+            total_score = calculated_total
+            logger.info(f"最终总分: {total_score}（原始总分: {unified_result.get('总得分', 0)}, 错别字扣分: {error_deduction}）")
+            
+            # 确定等级
+            if total_score >= 90:
+                grade = "优秀"
+            elif total_score >= 80:
+                grade = "良好"
+            elif total_score >= 70:
+                grade = "中等"
+            elif total_score >= 60:
+                grade = "及格"
+            else:
+                grade = "不及格"
+        except Exception as e:
+            logger.error(f"评分过程中出错: {str(e)}")
+            grade = "未评级"
+            
+        # 构建并返回评分结果
+        return {
+            'total_score': total_score,
+            'grade': grade,
+            'grade_assessment': grade_assessment,
+            'content_score': content_score if 'content_score' in locals() else 0,
+            'language_score': language_score if 'language_score' in locals() else 0,
+            'structure_score': structure_score if 'structure_score' in locals() else 0,
+            'writing_score': writing_score if 'writing_score' in locals() else 0,
+            'spelling_errors': spelling_errors if 'spelling_errors' in locals() else [],
+            'error_deduction': error_deduction if 'error_deduction' in locals() else 0,
+            'detailed_analysis': unified_result.get('多维分析', {}),
+            'overall_comment': unified_result.get('总体评价', '未提供评价')
+        }
+    except Exception as e:
+        logger.error(f"统一评分处理过程中发生错误: {str(e)}")
+        # 返回默认评分结果
+        return {
+            'total_score': 0,
+            'grade': '未评级',
+            'grade_assessment': 'E-未完成',
+            'content_score': 0,
+            'language_score': 0,
+            'structure_score': 0,
+            'writing_score': 0,
+            'spelling_errors': [],
+            'error_deduction': 0,
+            'detailed_analysis': {
+                '内容分析': '评分过程中出错，无法分析',
+                '表达分析': '评分过程中出错，无法分析',
+                '结构分析': '评分过程中出错，无法分析',
+                '书写分析': '评分过程中出错，无法分析'
+            },
+            'overall_comment': '评分系统出错，无法给出评价'
+        }
+
+# 获取用户作文批改限制
+def get_user_limits(user_type):
+    """根据用户类型获取作文批改限制"""
+    if user_type == 'free':
+        return 2, 10  # 免费用户：每日2篇，每月10篇
+    elif user_type == 'regular':
+        return 30, 300  # 普通会员：每日30篇，每月300篇
+    elif user_type in ['premium', 'vip']:
+        return 60, 500  # 高级会员：每日60篇，每月500篇
+    else:
+        return 2, 10  # 默认使用免费用户限制
+
+# 会员订单历史页面
+@app.route('/correction', methods=['GET', 'POST'])
+def correction():
+    """作文批改页面：接收用户提交的作文并进行批改"""
+    if request.method == 'POST':
+        try:
+            # 检查用户登录状态
+            user_id = session.get('user_id')
+            if not user_id:
+                flash('请先登录后再进行作文批改', 'warning')
+                return redirect(url_for('login'))
+    
+            # 检查用户剩余次数
+            connection = get_db()
+            cursor = connection.cursor()
+            
+            # 获取用户信息和会员状态
+            cursor.execute("SELECT user_type, membership_expiry FROM users WHERE user_id = ?", (user_id,))
+            user_info = cursor.fetchone()
+            
+            # 如果用户不存在，给出错误提示
+            if not user_info:
+                flash('用户信息无效，请重新登录', 'danger')
+                return redirect(url_for('login'))
+    
+            user_type = user_info[0]
+            membership_expiry = user_info[1]
+            
+            # 检查会员是否有效
+            is_premium = False
+            if membership_expiry:
+                try:
+                    expiry_date = datetime.strptime(membership_expiry, '%Y-%m-%d').date()
+                    is_premium = expiry_date >= date.today() and user_type in ['regular', 'premium']
+                    logger.info(f"用户ID {user_id} 会员状态: {user_type}, 到期日: {expiry_date}, 当前有效: {is_premium}")
+                except ValueError as e:
+                    logger.error(f"会员到期日期解析错误: {e}")
+                    flash('系统错误: 会员信息异常', 'danger')
+                    return redirect(url_for('index'))
+            
+            # 获取当天已批改的作文数量
+            today = date.today().strftime('%Y-%m-%d')
+            cursor.execute("""
+                SELECT COUNT(*) FROM essays 
+                WHERE user_id = ? AND DATE(submission_time) = ?
+            """, (user_id, today))
+            daily_count = cursor.fetchone()[0]
+            
+            # 获取当月已批改的作文数量
+            current_month = date.today().strftime('%Y-%m')
+            cursor.execute("""
+                SELECT COUNT(*) FROM essays 
+                WHERE user_id = ? AND strftime('%Y-%m', submission_time) = ?
+            """, (user_id, current_month))
+            monthly_count = cursor.fetchone()[0]
+            
+            # 检查剩余量
+            daily_limit, monthly_limit = get_user_limits(user_type)
+            logger.info(f"用户ID {user_id} 限制: 每日{daily_limit}, 每月{monthly_limit}, 已用: 今日{daily_count}, 本月{monthly_count}")
+            
+            # 检查是否超出限制
+            if daily_count >= daily_limit:
+                flash(f'您今日批改已达上限({daily_limit}篇)，请明天再试或升级会员', 'warning')
+                return redirect(url_for('membership'))
+            
+            if monthly_count >= monthly_limit:
+                flash(f'您本月批改已达上限({monthly_limit}篇)，请下月再试或升级会员', 'warning')
+                return redirect(url_for('membership'))
+            
+            # 获取表单数据
+            subject = request.form.get('subject', '无标题').strip()
+            article = request.form.get('article', '').strip()
+            file = request.files.get('file')
+            use_file_content = request.form.get('useFileContent') == 'on'
+            
+            # 如果选择了使用文件内容且有上传文件
+            if use_file_content and file and file.filename:
+                file_content = None
+                file_extension = os.path.splitext(file.filename)[1].lower()
+
+                try:
+                    # 根据文件扩展名处理不同格式
+                    if file_extension == '.txt':
+                        file_content = file.read().decode('utf-8')
+                    elif file_extension == '.docx':
+                        import docx
+                        doc = docx.Document(file)
+                        file_content = '\n'.join([para.text for para in doc.paragraphs])
+                    else:
+                        flash('不支持的文件格式，请上传.txt或.docx文件', 'danger')
+                        return redirect(url_for('correction'))
+                    
+                    # 如果成功获取了文件内容
+                    if file_content:
+                        article = file_content
+                        # 如果没有提供标题，尝试使用文件名作为标题
+                        if not subject:
+                            subject = os.path.splitext(file.filename)[0]
+                except Exception as e:
+                    logger.error(f"文件处理出错: {str(e)}")
+                    flash(f'文件读取失败: {str(e)}', 'danger')
+                    return redirect(url_for('correction'))
+            
+            # 验证内容是否为空
+            if not article.strip():
+                flash('作文内容不能为空，请输入作文内容', 'danger')
+                return redirect(url_for('correction'))
+            
+            # 如果没有标题，尝试从内容的第一行提取
+            if not subject:
+                first_line = article.strip().split('\n')[0].strip()
+                if len(first_line) <= 30:  # 如果第一行不太长，可能是标题
+                    subject = first_line
+            else:
+                    subject = '无标题'
+            
+            # 获取字数
+            word_count = len(article)
+            
+            # 记录到数据库
+            submission_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            
+            try:
+                cursor.execute("""
+                    INSERT INTO essays 
+                    (user_id, title, content, submission_time, word_count) 
+                    VALUES (?, ?, ?, ?, ?)
+                """, (user_id, subject, article, submission_time, word_count))
+                
+            essay_id = cursor.lastrowid
+                connection.commit()
+                
+                # 调用AI评分服务
+                try:
+                    ai_result = unified_ai_scoring(subject, article)
+                
+                # 确保等级正确，特别是对空作文
+                    grade = ai_result.get('grade_assessment', ai_result.get('grade', 'E-未完成'))
+                    if len(article.strip()) == 0 or int(ai_result.get('total_score', 0)) == 0:
+                    grade = "E-未完成"
+                
+                    # 获取错别字数组
+                    spelling_errors = json.dumps(ai_result.get('spelling_errors', []), ensure_ascii=False)
+                    
+                    # 更新评分结果到数据库
+                    cursor.execute("""
+                    UPDATE essays SET 
+                        total_score = ?, grade = ?, content_score = ?, 
+                        language_score = ?, structure_score = ?, writing_score = ?,
+                    spelling_errors = ?, overall_assessment = ?, 
+                        content_analysis = ?, language_analysis = ?,
+                        structure_analysis = ?, writing_analysis = ?
+                    WHERE id = ?
+                """, (
+                        ai_result.get('total_score', 0),
+                        grade,
+                        ai_result.get('content_score', 0),
+                        ai_result.get('language_score', 0),
+                        ai_result.get('structure_score', 0),
+                        ai_result.get('writing_score', 0),
+                    spelling_errors,
+                        ai_result.get('overall_comment', ''),
+                        ai_result.get('detailed_analysis', {}).get('内容分析', ''),
+                        ai_result.get('detailed_analysis', {}).get('表达分析', ''),
+                        ai_result.get('detailed_analysis', {}).get('结构分析', ''),
+                        ai_result.get('detailed_analysis', {}).get('书写分析', ''),
+                            essay_id
+                ))
+                    connection.commit()
+                
+                    # 准备模板渲染数据
+                    template_data = {
+                        'title': subject,
+                        'content': article,
+                        'total_score': ai_result.get('total_score', 0),
+                        'grade': grade,
+                        'content_score': ai_result.get('content_score', 0),
+                        'language_score': ai_result.get('language_score', 0),
+                        'structure_score': ai_result.get('structure_score', 0),
+                        'writing_score': ai_result.get('writing_score', 0),
+                        'spelling_errors': json.loads(spelling_errors),
+                        'word_count': word_count,
+                        'overall_assessment': ai_result.get('overall_comment', ''),
+                        'content_analysis': ai_result.get('detailed_analysis', {}).get('内容分析', ''),
+                        'language_analysis': ai_result.get('detailed_analysis', {}).get('表达分析', ''),
+                        'structure_analysis': ai_result.get('detailed_analysis', {}).get('结构分析', ''),
+                        'writing_analysis': ai_result.get('detailed_analysis', {}).get('书写分析', '')
+                    }
+                    
+                    # 渲染结果页面
+                    return render_template('results.html', **template_data)
+                except Exception as e:
+                    logger.error(f"AI评分过程中发生错误: {str(e)}")
+                    flash(f'AI评分失败，请稍后再试: {str(e)}', 'danger')
+                    return redirect(url_for('correction'))
+            
+            except sqlite3.Error as e:
+                logger.error(f"数据库错误: {str(e)}")
+                connection.rollback()
+                flash('系统错误，请稍后再试', 'danger')
+                return redirect(url_for('correction'))
+                
+            except Exception as e:
+            logger.error(f"处理作文提交时发生错误: {str(e)}")
+            flash(f'提交作文时出错: {str(e)}', 'danger')
+            return redirect(url_for('correction'))
+    
+    # GET 请求：显示作文提交页面
+    return render_template('correction.html')
+
+# 展示评分结果
+@app.route('/results')
+def results():
+    """展示作文的批改结果"""
+    try:
+        essay_id = request.args.get('essay_id')
+        
+        # 如果没有指定essay_id，尝试从会话中获取
+        if not essay_id:
+            essay_id = session.get('essay_id')
+            
+        # 如果仍然没有essay_id，重定向到历史页面
+        if not essay_id:
+            flash('未找到要显示的作文', 'warning')
+            return redirect(url_for('user_history'))
+        
+        # 从数据库获取作文信息
+        conn = get_db()
+        cursor = conn.cursor()
+        
+                cursor.execute("""
+            SELECT id, user_id, title, content, submission_time, total_score, grade, 
+                   content_score, language_score, structure_score, writing_score,
+                   spelling_errors, overall_assessment, content_analysis, 
+                   language_analysis, structure_analysis, writing_analysis, word_count
+            FROM essays
+                    WHERE id = ?
+        """, (essay_id,))
+        
+        essay = cursor.fetchone()
+        
+        if not essay:
+            flash('找不到指定的作文记录', 'warning')
+            return redirect(url_for('user_history'))
+        
+        # 确保当前用户有权限查看这篇作文
+        if essay['user_id'] != session.get('user_id') and not session.get('is_admin', False):
+            flash('您没有权限查看这篇作文', 'danger')
+            return redirect(url_for('user_history'))
+        
+        # 解析错别字数据
+        spelling_errors = {}
+        if essay['spelling_errors']:
+            try:
+                spelling_errors = json.loads(essay['spelling_errors'])
+            except:
+                spelling_errors = {"解析": []}
+        
+        # 准备模板数据
+        template_data = {
+            'title': essay['title'],
+            'content': essay['content'],
+            'total_score': essay['total_score'],
+            'grade': essay['grade'],
+            'content_score': essay['content_score'],
+            'language_score': essay['language_score'],
+            'structure_score': essay['structure_score'],
+            'writing_score': essay['writing_score'],
+            'spelling_errors': spelling_errors,
+            'word_count': essay['word_count'],
+            'overall_assessment': essay['overall_assessment'],
+            'content_analysis': essay['content_analysis'],
+            'language_analysis': essay['language_analysis'],
+            'structure_analysis': essay['structure_analysis'],
+            'writing_analysis': essay['writing_analysis']
+        }
+        
+        return render_template('results.html', **template_data)
+                
+        except Exception as e:
+        logger.error(f"显示结果页面时出错: {str(e)}")
+        flash('加载结果页面时出错', 'danger')
+        return redirect(url_for('user_history'))
+
+# 批量上传作文路由
+@app.route('/batch_upload', methods=['GET', 'POST'])
+def batch_upload():
+    # 检查用户是否已登录
+    if 'user_id' not in session:
+        flash('请先登录后再进行批量上传', 'warning')
+        return redirect(url_for('login'))
+    
+    processed_files_info = [] # 用于存储每个文件的处理结果
+    
+    if request.method == 'POST':
+        if 'files[]' not in request.files:
+            flash('未检测到上传的文件', 'danger')
+            return redirect(request.url)
+        
+        files = request.files.getlist('files[]')
+        
+        if not files or len(files) == 0 or files[0].filename == '':
+            flash('请选择要上传的文件', 'danger')
+            return redirect(request.url)
+        
+        user_id = session.get('user_id')
+        conn = None # 初始化数据库连接
+        
+        try:
+            conn = sqlite3.connect('instance/essay_correction.db')
+            cursor = conn.cursor()
+            
+            for file in files:
+                filename = file.filename
+                content = ""
+                status = '失败' # 默认状态
+                error_message = ''
+                essay_id = None
+                
+                try:
+                    filename_base = os.path.splitext(filename)[0]
+                    file_ext = os.path.splitext(filename)[1].lower()
+                    
+                    # 读取文件内容
+                    if file_ext == '.txt':
+                        content = file.read().decode('utf-8')
+                    elif file_ext == '.docx':
+                        import docx
+                        doc = docx.Document(file)
+                        content = '\n'.join([para.text for para in doc.paragraphs])
+                    elif file_ext == '.doc':
+                         try:
+                            import pypandoc
+                            # Ensure upload folder exists
+            upload_dir = app.config.get('UPLOAD_FOLDER', 'uploads')
+            if not os.path.exists(upload_dir):
+                os.makedirs(upload_dir)
+                            # Save the uploaded file temporarily to read with pandoc
+                            temp_filename = os.path.join(upload_dir, secure_filename(f"{uuid.uuid4()}_{filename}")) # Add UUID
+                            file.seek(0) # Reset file pointer before saving
+                            file.save(temp_filename)
+                            # Convert .doc to plain text using pandoc
+                            content = pypandoc.convert_file(temp_filename, 'plain', format='doc')
+                            os.remove(temp_filename) # Clean up the temporary file
+                            logger.info(f"Successfully read .doc file '{filename}' using pandoc")
+                         except ImportError:
+                            logger.error("pypandoc library not found. Please install it: pip install pypandoc")
+                            error_message = '无法处理.doc文件，缺少pypandoc库'
+                            raise ValueError(error_message)
+                         except Exception as pandoc_error:
+                            logger.error(f"Error reading .doc file '{filename}' with pandoc: {pandoc_error}")
+                            error_message = f'处理.doc文件 ({filename}) 时出错: {pandoc_error}'
+                            if os.path.exists(temp_filename): # Clean up temp file on error too
+                                os.remove(temp_filename)
+                            raise ValueError(error_message) # Raise error to be caught by outer loop
+                    else:
+                        error_message = f"不支持的文件格式: {file_ext}"
+                        raise ValueError(error_message)
+                        
+                        # 检查内容是否为空
+                        if not content.strip():
+                        error_message = "文件内容为空"
+                        raise ValueError(error_message)
+                        
+                    # 获取标题
+                    title = filename_base # 批量上传优先使用文件名
+                    logger.info(f"处理文件: '{filename}', 获取标题: '{title}'")
+
+                    # 1. 先插入基本信息到数据库
+                    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    word_count = len(content)
+                        cursor.execute(
+                        "INSERT INTO essays (user_id, title, content, submission_time, word_count) VALUES (?, ?, ?, ?, ?)",
+                        (user_id, title, content, current_time, word_count)
+                        )
+                        essay_id = cursor.lastrowid
+                    conn.commit() # 提交事务以获取 ID
+                    logger.info(f"文件 '{filename}' 基本信息已存入数据库, ID={essay_id}")
+                        
+                    # 2. 调用AI进行评分
+                    logger.info(f"开始对文件 '{filename}' (ID: {essay_id}) 进行AI评分")
+                        ai_result = unified_ai_scoring(title, content)
+                    logger.info(f"文件 '{filename}' AI评分完成")
+
+                    # 调试输出，确保所有评分结果正确获取
+                    logger.info(f"AI评分详细结果: 总分={ai_result.get('总分', 0)}, 等级={ai_result.get('等级', 'E')}")
+                    logger.info(f"多维分析内容: 内容分析={ai_result.get('内容分析', '')[:50]}..., 表达分析={ai_result.get('表达分析', '')[:50]}...")
+                    logger.info(f"总体评价: {ai_result.get('总体评价', '')[:50]}...")
+
+                    # 3. 更新数据库中的评分结果
+                    spelling_errors_json = json.dumps(ai_result.get('错别字', {"解析": []}), ensure_ascii=False)
+                    grade = ai_result.get('grade_assessment', ai_result.get('grade', 'E-未完成')) # 获取等级，优先使用grade_assessment
+                    
+                        cursor.execute("""
+                        UPDATE essays SET 
+                        total_score = ?, grade = ?, content_score = ?, 
+                        language_score = ?, structure_score = ?, writing_score = ?,
+                        spelling_errors = ?, overall_assessment = ?, 
+                        content_analysis = ?, language_analysis = ?,
+                        structure_analysis = ?, writing_analysis = ?
+                        WHERE id = ?
+                        """, (
+                        ai_result.get('total_score', 0),
+                        grade,
+                        ai_result.get('content_score', 0),
+                        ai_result.get('language_score', 0),
+                        ai_result.get('structure_score', 0),
+                        ai_result.get('writing_score', 0),
+                        spelling_errors_json,
+                        ai_result.get('overall_comment', ''),
+                        ai_result.get('detailed_analysis', {}).get('内容分析', ''),
+                        ai_result.get('detailed_analysis', {}).get('表达分析', ''),
+                        ai_result.get('detailed_analysis', {}).get('结构分析', ''),
+                        ai_result.get('detailed_analysis', {}).get('书写分析', ''),
+                            essay_id
+                        ))
+                    conn.commit() # 提交评分更新
+                    logger.info(f"文件 '{filename}' (ID: {essay_id}) 评分结果已更新至数据库")
+                    status = '成功'
+                        
+                    except Exception as e:
+                    logger.error(f"处理文件 '{filename}' 时出错: {str(e)}")
+                    error_message = str(e)
+                    if conn: # 如果出错，回滚当前文件的事务
+                        conn.rollback()
+                
+                finally:
+                    # 记录处理结果
+                    processed_files_info.append({
+                        'filename': filename,
+                        'status': status,
+                        'error': error_message,
+                        'essay_id': essay_id # 可以用来生成结果链接
+                    })
+                    file.seek(0) # 重置文件指针以便读取大小（如果需要）
+
+            flash(f'批量上传处理完成，共处理 {len(files)} 个文件', 'info')
+            
+        except Exception as e:
+            logger.error(f"批量上传过程中发生严重错误: {str(e)}")
+            flash('批量上传过程中发生错误，部分文件可能未处理', 'danger')
+            if conn:
+                conn.rollback() # 回滚所有未提交的更改
+                
+        finally:
+            if conn:
+                conn.close() # 确保数据库连接被关闭
+                
+        # 渲染结果，显示每个文件的处理状态
+        # 保存成功处理的文件ID到session，用于在用户历史页面高亮显示
+        successful_essay_ids = [file_info.get('essay_id') for file_info in processed_files_info if file_info.get('status') == '成功' and file_info.get('essay_id')]
+        if successful_essay_ids:
+            session['last_batch_essay_id'] = successful_essay_ids
+            
+        return render_template('batch_upload.html', processed_files=processed_files_info)
+    
+    # GET 请求
+    return render_template('batch_upload.html', processed_files=processed_files_info)
+
+@app.route('/membership')
+def membership():
+    """会员中心页面，显示用户的会员信息和订单历史"""
+    # 检查用户是否已登录
+    if 'user_id' not in session:
+        flash('请先登录后再访问会员中心', 'warning')
+        return redirect(url_for('login'))
+    
+    user_id = session.get('user_id')
+    
+    # 获取用户信息
+        conn = sqlite3.connect('instance/essay_correction.db')
+    conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+    
+    # 查询用户基本信息
+    cursor.execute("SELECT user_id, username, email, user_type, membership_expiry FROM users WHERE user_id = ?", (user_id,))
+    user = dict(cursor.fetchone())
+    
+    # 检查用户是否存在
+    if not user:
+        conn.close()
+        flash('用户信息不存在', 'danger')
+        return redirect(url_for('index'))
+    
+    # 获取会员套餐信息
+    membership_plans = []
+    cursor.execute("SELECT * FROM membership_plans WHERE active = 1 ORDER BY price")
+    for row in cursor.fetchall():
+        membership_plans.append(dict(row))
+    
+    # 获取最近的会员订单
+    recent_orders = []
+    try:
+        # 获取表结构以确定正确的列名
+        cursor.execute("PRAGMA table_info(membership_orders)")
+        columns = [column[1] for column in cursor.fetchall()]
+        
+        # 构建查询
+        select_columns = []
+        if 'id' in columns:
+            select_columns.append('id')
+        else:
+            # 使用主键列名
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='membership_orders'")
+            if cursor.fetchone():
+                cursor.execute("PRAGMA table_info(membership_orders)")
+                pk_columns = [column[1] for column in cursor.fetchall() if column[5] == 1]  # 第6列是pk标志
+                if pk_columns:
+                    select_columns.append(f"{pk_columns[0]} as id")
+        
+        # 添加其他列
+        for col in ['plan_id', 'plan_name', 'amount', 'created_at', 'payment_status']:
+            if col in columns:
+                select_columns.append(col)
+        
+        if select_columns:
+            query = f"""
+                SELECT {', '.join(select_columns)}
+                FROM membership_orders 
+                WHERE user_id = ? 
+                ORDER BY created_at DESC 
+                LIMIT 5
+            """
+            cursor.execute(query, (user_id,))
+            for row in cursor.fetchall():
+                recent_orders.append(dict(row))
+    except Exception as e:
+        logger.error(f"查询会员订单时出错: {str(e)}")
+        # 出错时使用空列表
+    
+    # 获取用户统计信息 - 已批改的作文数量等
+    cursor.execute("SELECT COUNT(*) as essay_count FROM essays WHERE user_id = ?", (user_id,))
+    essay_count = cursor.fetchone()['essay_count']
+    
+    # 添加模板所需的其他用户信息
+    user['essays_total_used'] = essay_count
+    
+    # 根据用户类型设置不同的默认剩余次数
+    if user['user_type'] == 'free':
+        user['essays_remaining'] = 10  # 免费用户10篇
+        user['essays_daily_limit'] = 2  # 免费用户每日限制
+    elif user['user_type'] == 'regular':
+        user['essays_remaining'] = 300  # 普通会员300篇
+        user['essays_daily_limit'] = 30  # 普通会员每日限制
+    elif user['user_type'] in ['premium', 'vip']:
+        user['essays_remaining'] = 500  # 高级会员500篇
+        user['essays_daily_limit'] = 60  # 高级会员每日限制
+    else:
+        user['essays_remaining'] = 10  # 默认为免费用户权限
+        user['essays_daily_limit'] = 2  # 默认每日限制
+    
+    user['essays_daily_used'] = 0  # 今日已使用次数
+    user['vip_status'] = 0  # 非无限状态
+    
+    # 配置信息供模板使用，与用户类型权限保持一致
+    config = {
+        'free_essays': 10,              # 免费用户总批改次数
+        'free_daily_limit': 2,          # 免费用户每日限制
+        'regular_monthly_essays': 300,  # 普通会员批改次数
+        'regular_daily_essays': 30,     # 普通会员每日限制
+        'premium_monthly_essays': 500,  # 高级会员批改次数
+        'premium_daily_essays': 60      # 高级会员每日限制
+    }
+    
+    conn.close()
+    
+    # 处理会员过期时间
+    membership_status = '普通用户'
+    days_left = 0
+    
+    if user['user_type'] in ['premium', 'vip']:
+        membership_status = '会员用户'
+        # 计算剩余天数
+        if user['membership_expiry']:
+            try:
+                # 尝试完整的日期时间格式
+                expiry_date = datetime.strptime(user['membership_expiry'], '%Y-%m-%d %H:%M:%S')
+        except ValueError:
+            try:
+                    # 尝试仅日期格式
+                    expiry_date = datetime.strptime(user['membership_expiry'], '%Y-%m-%d')
+            except ValueError:
+                    # 记录无法解析的日期格式
+                    logger.error(f"无法解析的会员过期日期格式: {user['membership_expiry']}")
+                    expiry_date = datetime.now()
+            
+            days_left = (expiry_date - datetime.now()).days
+            if days_left < 0:
+                days_left = 0
+                membership_status = '会员已过期'
+    
+    # 渲染会员中心页面
+    return render_template('membership.html', 
+                          user=user,
+                          membership_status=membership_status,
+                          days_left=days_left,
+                          essay_count=essay_count,
+                          recent_orders=recent_orders,
+                          membership_plans=membership_plans,
+                          config=config)
+
+@app.route('/purchase_membership')
+@app.route('/purchase_membership/<string:plan>')
+def purchase_membership(plan=None):
+    """购买会员页面"""
+    # 检查用户是否已登录
+    if 'user_id' not in session:
+        flash('请先登录后再购买会员', 'warning')
+        return redirect(url_for('login'))
+    
+    # 简单的重定向回会员中心，实际项目中此处应该是支付流程
+    flash('会员购买功能正在开发中，敬请期待', 'info')
+        return redirect(url_for('membership'))
+    
+@app.route('/order_history')
+def order_history():
+    """会员订单历史页面，显示用户的订单记录"""
+    # 检查用户是否已登录
+    if 'user_id' not in session:
+        flash('请先登录后再查看订单历史', 'warning')
+        return redirect(url_for('login'))
+    
+    user_id = session.get('user_id')
+    
+    # 获取分页参数
+    page = request.args.get('page', 1, type=int)
+    per_page = 10  # 每页显示10条记录
+    
+    # 查询用户的订单
+    conn = sqlite3.connect('instance/essay_correction.db')
+    conn.row_factory = sqlite3.Row  # 使结果可以通过列名访问
+    cursor = conn.cursor()
+    
+    # 获取总记录数
+    total_orders = 0
+    orders = []
+    
+    try:
+        # 检查表是否存在
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='membership_orders'")
+        if cursor.fetchone():
+    # 获取总记录数
+    cursor.execute("SELECT COUNT(*) FROM membership_orders WHERE user_id = ?", (user_id,))
+    total_orders = cursor.fetchone()[0]
+    
+    # 计算分页信息
+    total_pages = (total_orders + per_page - 1) // per_page  # 向上取整
+    offset = (page - 1) * per_page
+    
+    # 查询当前页的订单
+    cursor.execute("""
+        SELECT * FROM membership_orders 
+        WHERE user_id = ? 
+        ORDER BY created_at DESC
+        LIMIT ? OFFSET ?
+    """, (user_id, per_page, offset))
+    
+    for row in cursor.fetchall():
+        orders.append(dict(row))
+        else:
+            total_pages = 0
+            flash('订单功能尚未准备好', 'info')
+    except Exception as e:
+        logger.error(f"查询订单历史时出错: {str(e)}")
+        flash('获取订单历史时出错', 'warning')
+        total_pages = 0
+    
+    conn.close()
+    
+    # 构造分页信息
+    pagination = {
+        'current_page': page,
+        'pages': total_pages,
+        'total': total_orders
+    }
+    
+    return render_template('order_history.html', orders=orders, pagination=pagination)
+
+# ====================== 管理后台路由 ======================
+
+# 管理控制台首页
+@app.route('/admin/dashboard')
+@admin_required
+def admin_dashboard():
+    """管理后台控制面板"""
+    try:
+        # 获取数据库连接
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        # 获取统计数据
+        cursor.execute("SELECT COUNT(*) FROM users")
+        total_users = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM essays")
+        total_essays = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM users WHERE user_type IN ('regular', 'premium')")
+        premium_users = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT SUM(amount) FROM membership_orders WHERE payment_status = 'completed'")
+        total_income = cursor.fetchone()[0] or 0
+        
+        # 获取最近注册的用户
+        cursor.execute("""
+            SELECT user_id, username, email, created_at, user_type 
+            FROM users 
+            ORDER BY created_at DESC 
+            LIMIT 5
+        """)
+        recent_users = [dict(zip([column[0] for column in cursor.description], row)) for row in cursor.fetchall()]
+        
+        # 获取最近批改的作文
+        cursor.execute("""
+            SELECT e.id, e.title, e.submission_time, e.total_score, u.username
+            FROM essays e
+            JOIN users u ON e.user_id = u.user_id
+            ORDER BY e.submission_time DESC
+            LIMIT 5
+        """)
+        recent_essays = [dict(zip([column[0] for column in cursor.description], row)) for row in cursor.fetchall()]
+        
+        # 获取系统信息
+        system_info = {
+            'ai_available': ai_available,
+            'uptime': '正常运行',
+            'error_logs': 0,
+            'last_backup': None
+        }
+        
+        # 构建统计数据
+        stats = {
+            'total_users': total_users,
+            'total_essays': total_essays,
+            'premium_users': premium_users,
+            'total_income': round(total_income, 2)
+        }
+        
+        return render_template('admin/dashboard.html', 
+                              stats=stats, 
+                              recent_users=recent_users,
+                              recent_essays=recent_essays,
+                              system_info=system_info,
+                              active_page='dashboard')
+    
+    except Exception as e:
+        logger.error(f"加载管理控制台出错: {str(e)}")
+        flash(f'加载管理控制台出错: {str(e)}', 'danger')
+        return redirect(url_for('index'))
+
+# 用户管理页面
+@app.route('/admin/users')
+@admin_required
+def user_management():
+    """用户管理页面"""
+    try:
+        # 获取查询参数
+        search = request.args.get('search', '')
+        user_type = request.args.get('user_type', '')
+        role = request.args.get('role', '')
+        status = request.args.get('status', '')
+        page = request.args.get('page', 1, type=int)
+        per_page = 10 # 每页显示10条记录
+        
+        # 构建SQL查询
+        query = "SELECT * FROM users WHERE 1=1"
+        params = []
+        
+        if search:
+            query += " AND (username LIKE ? OR email LIKE ?)"
+            params.extend([f'%{search}%', f'%{search}%'])
+        
+        if user_type:
+            query += " AND user_type = ?"
+            params.append(user_type)
+        
+        if role:
+            query += " AND role = ?"
+            params.append(role)
+        
+        if status:
+            query += " AND is_active = ?"
+            params.append(int(status))
+        
+        # 获取数据库连接
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        # 获取总记录数
+        count_query = f"SELECT COUNT(*) FROM ({query})"
+        cursor.execute(count_query, params)
+        total = cursor.fetchone()[0]
+        
+        # 计算分页信息
+        total_pages = (total + per_page - 1) // per_page  # 向上取整
+        offset = (page - 1) * per_page
+        
+        # 获取当前页的数据
+        query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        params.extend([per_page, offset])
+        
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        
+        # 将结果转换为字典列表
+        users = []
+        for row in rows:
+            user = dict(zip([column[0] for column in cursor.description], row))
+            users.append(user)
+        
+        # 构造分页信息
+        pagination = {
+            'current_page': page,
+            'pages': total_pages,
+            'total': total
+        }
+        
+        return render_template('admin/user_management.html', 
+                              users=users, 
+                              pagination=pagination,
+                              active_page='users')
+    
+    except Exception as e:
+        logger.error(f"加载用户管理页面出错: {str(e)}")
+        flash(f'加载用户管理页面出错: {str(e)}', 'danger')
+        return redirect(url_for('admin_dashboard'))
+
+# 用户详情页面
+@app.route('/admin/users/<int:user_id>')
+@admin_required
+def user_detail(user_id):
+    """用户详情页面"""
+    try:
+        # 获取数据库连接
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        # 获取用户信息
+        cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
+        user_data = cursor.fetchone()
+        
+        if not user_data:
+            flash('用户不存在', 'danger')
+            return redirect(url_for('user_management'))
+        
+        # 将结果转换为字典
+        user = dict(zip([column[0] for column in cursor.description], user_data))
+        
+        # 获取用户订单信息
+        cursor.execute("""
+            SELECT * FROM membership_orders 
+            WHERE user_id = ? 
+            ORDER BY created_at DESC
+        """, (user_id,))
+        user_orders = []
+        for row in cursor.fetchall():
+            order = dict(zip([column[0] for column in cursor.description], row))
+            user_orders.append(order)
+        
+        # 获取用户作文信息
+        cursor.execute("""
+            SELECT id, title, submission_time, word_count, total_score, grade
+            FROM essays 
+            WHERE user_id = ? 
+            ORDER BY submission_time DESC
+            LIMIT 10
+        """, (user_id,))
+        user_essays = []
+        for row in cursor.fetchall():
+            essay = dict(zip([column[0] for column in cursor.description], row))
+            user_essays.append(essay)
+        
+        return render_template('admin/user_detail.html', 
+                              user=user, 
+                              user_orders=user_orders,
+                              user_essays=user_essays)
+    
+    except Exception as e:
+        logger.error(f"加载用户详情页面出错: {str(e)}")
+        flash(f'加载用户详情页面出错: {str(e)}', 'danger')
+        return redirect(url_for('user_management'))
+
+# 系统配置页面
+@app.route('/admin/config')
+@admin_required
+def website_config():
+    """系统配置页面"""
+    try:
+        # 获取数据库连接
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        # 获取所有配置项
+        cursor.execute("SELECT config_name, config_value FROM website_config")
+        config_rows = cursor.fetchall()
+        
+        # 将结果转换为字典
+        config = {row[0]: row[1] for row in config_rows}
+        
+        # 备份信息
+        backup_info = {
+            'last_backup': config.get('last_backup_time', '从未备份')
+        }
+        
+        return render_template('admin/website_config.html', 
+                              config=config,
+                              backup_info=backup_info,
+                              active_page='config')
+    
+    except Exception as e:
+        logger.error(f"加载系统配置页面出错: {str(e)}")
+        flash(f'加载系统配置页面出错: {str(e)}', 'danger')
+        return redirect(url_for('admin_dashboard'))
+
+# ... 其他管理后台路由 ...
+
+# 管理后台数据统计页面
+@app.route('/admin/stats')
+@admin_required
+def essay_stats():
+    """数据统计页面"""
+    try:
+        # 获取数据库连接
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        # 获取作文统计数据
+        cursor.execute("SELECT COUNT(*) FROM essays")
+        total_essays = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT AVG(total_score) FROM essays WHERE total_score IS NOT NULL")
+        avg_score = cursor.fetchone()[0]
+        avg_score = round(avg_score, 2) if avg_score else 0
+        
+        cursor.execute("SELECT AVG(word_count) FROM essays WHERE word_count IS NOT NULL")
+        avg_words = cursor.fetchone()[0]
+        avg_words = round(avg_words, 2) if avg_words else 0
+        
+        # 构建统计数据
+        stats = {
+            'total_essays': total_essays,
+            'avg_score': avg_score,
+            'avg_words': avg_words,
+            'monthly_stats': [],
+            'score_distribution': []
+        }
+        
+        return render_template('admin/essay_stats.html',
+                              stats=stats,
+                              active_page='stats')
+    
+    except Exception as e:
+        logger.error(f"加载数据统计页面出错: {str(e)}")
+        flash(f'加载数据统计页面出错: {str(e)}', 'danger')
+        return redirect(url_for('admin_dashboard'))
+
+# 更新用户基本信息
+@app.route('/admin/users/<int:user_id>/update', methods=['POST'])
+@admin_required
+def update_user(user_id):
+    """更新用户基本信息"""
+    try:
+        # 获取表单数据
+        username = request.form.get('username')
+        email = request.form.get('email')
+        new_password = request.form.get('new_password')
+        role = request.form.get('role')
+        user_type = request.form.get('user_type')
+        is_active = int(request.form.get('is_active', 1))
+        
+        # 获取数据库连接
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        # 检查用户是否存在
+        cursor.execute("SELECT 1 FROM users WHERE user_id = ?", (user_id,))
+        if not cursor.fetchone():
+            flash('用户不存在', 'danger')
+            return redirect(url_for('user_management'))
+        
+        # 检查用户名是否已被其他用户使用
+        cursor.execute("SELECT 1 FROM users WHERE username = ? AND user_id != ?", (username, user_id))
+        if cursor.fetchone():
+            flash('该用户名已被使用', 'danger')
+            return redirect(url_for('user_detail', user_id=user_id))
+        
+        # 检查邮箱是否已被其他用户使用
+        cursor.execute("SELECT 1 FROM users WHERE email = ? AND user_id != ?", (email, user_id))
+        if cursor.fetchone():
+            flash('该邮箱已被注册', 'danger')
+            return redirect(url_for('user_detail', user_id=user_id))
+        
+        # 构建更新SQL
+        sql = """
+            UPDATE users SET 
+            username = ?, 
+            email = ?, 
+            role = ?,
+            user_type = ?,
+            is_active = ?
+        """
+        params = [username, email, role, user_type, is_active]
+        
+        # 如果提供了新密码，更新密码
+        if new_password:
+            sql += ", password_hash = ?"
+            params.append(generate_password_hash(new_password))
+        
+        sql += " WHERE user_id = ?"
+        params.append(user_id)
+        
+        # 执行更新
+        cursor.execute(sql, params)
+        conn.commit()
+        
+        flash('用户信息更新成功', 'success')
+        return redirect(url_for('user_detail', user_id=user_id))
+    
+    except Exception as e:
+        logger.error(f"更新用户信息出错: {str(e)}")
+        flash(f'更新用户信息出错: {str(e)}', 'danger')
+        return redirect(url_for('user_detail', user_id=user_id))
+
+# 更新用户会员权益
+@app.route('/admin/users/<int:user_id>/membership', methods=['POST'])
+@admin_required
+def update_user_membership(user_id):
+    """更新用户会员权益"""
+    try:
+        # 获取表单数据
+        essays_remaining = request.form.get('essays_remaining', type=int)
+        essays_monthly_limit = request.form.get('essays_monthly_limit', type=int)
+        essays_daily_limit = request.form.get('essays_daily_limit', type=int)
+        essays_daily_used = request.form.get('essays_daily_used', type=int)
+        vip_status = request.form.get('vip_status', type=int)
+        membership_expiry = request.form.get('membership_expiry')
+        
+        # 获取数据库连接
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        # 检查用户是否存在
+        cursor.execute("SELECT 1 FROM users WHERE user_id = ?", (user_id,))
+        if not cursor.fetchone():
+            flash('用户不存在', 'danger')
+            return redirect(url_for('user_management'))
+        
+        # 执行更新
+        cursor.execute("""
+            UPDATE users SET 
+            essays_remaining = ?,
+            essays_monthly_limit = ?,
+            essays_daily_limit = ?,
+            essays_daily_used = ?,
+            vip_status = ?,
+            membership_expiry = ?
+            WHERE user_id = ?
+        """, (
+            essays_remaining, 
+            essays_monthly_limit, 
+            essays_daily_limit, 
+            essays_daily_used, 
+            vip_status, 
+            membership_expiry if membership_expiry else None, 
+            user_id
+        ))
+        conn.commit()
+        
+        flash('会员权益更新成功', 'success')
+        return redirect(url_for('user_detail', user_id=user_id))
+    
+    except Exception as e:
+        logger.error(f"更新会员权益出错: {str(e)}")
+        flash(f'更新会员权益出错: {str(e)}', 'danger')
+        return redirect(url_for('user_detail', user_id=user_id))
+
+# 添加新用户
+@app.route('/admin/users/add', methods=['POST'])
+@admin_required
+def add_user():
+    """添加新用户"""
+    try:
+        # 获取表单数据
+        username = request.form.get('username')
+        email = request.form.get('email')
+        password = request.form.get('password')
+        user_type = request.form.get('user_type', 'free')
+        role = request.form.get('role', 'user')
+        
+        # 获取数据库连接
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        # 检查用户名是否已存在
+        cursor.execute("SELECT 1 FROM users WHERE username = ?", (username,))
+        if cursor.fetchone():
+            flash('该用户名已被使用', 'danger')
+            return redirect(url_for('user_management'))
+        
+        # 检查邮箱是否已存在
+        cursor.execute("SELECT 1 FROM users WHERE email = ?", (email,))
+        if cursor.fetchone():
+            flash('该邮箱已被注册', 'danger')
+            return redirect(url_for('user_management'))
+        
+        # 创建用户
+        password_hash = generate_password_hash(password)
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        today = datetime.now().strftime('%Y-%m-%d')
+        
+        # 设置默认配置
+        essays_remaining = 10
+        essays_monthly_limit = 10
+        essays_daily_limit = 5
+        membership_expiry = None
+        
+        # 根据用户类型设置权益
+        if user_type == 'regular':
+            essays_remaining = 300
+            essays_monthly_limit = 300
+            essays_daily_limit = 30
+            membership_expiry = (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d')
+        elif user_type == 'premium':
+            essays_remaining = 500
+            essays_monthly_limit = 500
+            essays_daily_limit = 60
+            membership_expiry = (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d')
+        
+        cursor.execute("""
+            INSERT INTO users (
+                username, email, password_hash, created_at, 
+                user_type, essays_remaining, essays_monthly_limit, essays_daily_limit, 
+                essays_daily_used, essays_total_used, daily_reset_date, membership_expiry,
+                registration_bonus_claimed, vip_status, is_active, role
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            username, email, password_hash, now,
+            user_type, essays_remaining, essays_monthly_limit, essays_daily_limit,
+            0, 0, today, membership_expiry,
+            1, 0, 1, role
+        ))
+        
+        conn.commit()
+        
+        flash('用户添加成功', 'success')
+        return redirect(url_for('user_management'))
+    
+    except Exception as e:
+        logger.error(f"添加用户出错: {str(e)}")
+        flash(f'添加用户出错: {str(e)}', 'danger')
+        return redirect(url_for('user_management'))
+
+# 删除用户
+@app.route('/admin/users/delete', methods=['POST'])
+@admin_required
+def delete_user():
+    """删除用户"""
+    try:
+        user_id = request.form.get('user_id', type=int)
+        
+        # 获取数据库连接
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        # 检查用户是否存在
+        cursor.execute("SELECT role FROM users WHERE user_id = ?", (user_id,))
+        user = cursor.fetchone()
+        
+        if not user:
+            flash('用户不存在', 'danger')
+            return redirect(url_for('user_management'))
+        
+        # 不允许删除管理员账号
+        if user[0] == 'admin':
+            flash('不能删除管理员账号', 'danger')
+            return redirect(url_for('user_management'))
+        
+        # 删除用户相关数据
+        cursor.execute("DELETE FROM essays WHERE user_id = ?", (user_id,))
+        cursor.execute("DELETE FROM membership_orders WHERE user_id = ?", (user_id,))
+        cursor.execute("DELETE FROM user_profiles WHERE user_id = ?", (user_id,))
+        cursor.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
+        
+        conn.commit()
+        
+        flash('用户已删除', 'success')
+        return redirect(url_for('user_management'))
+    
+    except Exception as e:
+        logger.error(f"删除用户出错: {str(e)}")
+        flash(f'删除用户出错: {str(e)}', 'danger')
+        return redirect(url_for('user_management'))
+
+# 更新会员配置
+@app.route('/admin/config/membership', methods=['POST'])
+@admin_required
+def update_membership_config():
+    """更新会员配置"""
+    try:
+        # 获取表单数据
+        free_essays = request.form.get('free_essays', type=int)
+        free_daily_limit = request.form.get('free_daily_limit', type=int)
+        regular_monthly_essays = request.form.get('regular_monthly_essays', type=int)
+        regular_daily_essays = request.form.get('regular_daily_essays', type=int)
+        regular_price = request.form.get('regular_price', type=float)
+        premium_monthly_essays = request.form.get('premium_monthly_essays', type=int)
+        premium_daily_essays = request.form.get('premium_daily_essays', type=int)
+        premium_price = request.form.get('premium_price', type=float)
+        registration_bonus = request.form.get('registration_bonus', type=int)
+        
+        # 获取数据库连接
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        # 更新配置
+        configs = {
+            'free_essays': free_essays,
+            'free_daily_limit': free_daily_limit,
+            'regular_monthly_essays': regular_monthly_essays,
+            'regular_daily_essays': regular_daily_essays,
+            'regular_price': regular_price,
+            'premium_monthly_essays': premium_monthly_essays,
+            'premium_daily_essays': premium_daily_essays,
+            'premium_price': premium_price,
+            'registration_bonus': registration_bonus
+        }
+        
+        for name, value in configs.items():
+            cursor.execute("""
+                INSERT OR REPLACE INTO website_config (config_name, config_value)
+                VALUES (?, ?)
+            """, (name, value))
+        
+        conn.commit()
+        
+        flash('会员配置已更新', 'success')
+        return redirect(url_for('website_config'))
+    
+    except Exception as e:
+        logger.error(f"更新会员配置出错: {str(e)}")
+        flash(f'更新会员配置出错: {str(e)}', 'danger')
+        return redirect(url_for('website_config'))
+
+# 更新系统配置
+@app.route('/admin/config/system', methods=['POST'])
+@admin_required
+def update_system_config():
+    """更新系统配置"""
+    try:
+        # 获取表单数据
+        site_title = request.form.get('site_title')
+        site_description = request.form.get('site_description')
+        contact_email = request.form.get('contact_email')
+        maintenance_mode = request.form.get('maintenance_mode', '0')
+        
+        # 获取数据库连接
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        # 更新配置
+        configs = {
+            'site_title': site_title,
+            'site_description': site_description,
+            'contact_email': contact_email,
+            'maintenance_mode': maintenance_mode
+        }
+        
+        for name, value in configs.items():
+            cursor.execute("""
+                INSERT OR REPLACE INTO website_config (config_name, config_value)
+                VALUES (?, ?)
+            """, (name, value))
+        
+        conn.commit()
+        
+        flash('系统配置已更新', 'success')
+        return redirect(url_for('website_config'))
+    
+    except Exception as e:
+        logger.error(f"更新系统配置出错: {str(e)}")
+        flash(f'更新系统配置出错: {str(e)}', 'danger')
+        return redirect(url_for('website_config'))
+
+# 更新AI配置
+@app.route('/admin/config/ai', methods=['POST'])
+@admin_required
+def update_ai_config():
+    """更新AI配置"""
+    try:
+        # 获取表单数据
+        ai_service_status = request.form.get('ai_service_status', '1')
+        max_tokens = request.form.get('max_tokens', '4096')
+        temperature = request.form.get('temperature', '0.7')
+        model_name = request.form.get('model_name', 'gpt-3.5-turbo')
+        
+        # 获取数据库连接
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        # 更新配置
+        configs = {
+            'ai_service_status': ai_service_status,
+            'max_tokens': max_tokens,
+            'temperature': temperature,
+            'model_name': model_name
+        }
+        
+        for name, value in configs.items():
+            cursor.execute("""
+                INSERT OR REPLACE INTO website_config (config_name, config_value)
+                VALUES (?, ?)
+            """, (name, value))
+        
+        conn.commit()
+        
+        flash('AI配置已更新', 'success')
+        return redirect(url_for('website_config'))
+    
+    except Exception as e:
+        logger.error(f"更新AI配置出错: {str(e)}")
+        flash(f'更新AI配置出错: {str(e)}', 'danger')
+        return redirect(url_for('website_config'))
+
+# 备份数据库
+@app.route('/admin/backup', methods=['POST'])
+@admin_required
+def backup_database():
+    """备份数据库"""
+    try:
+        import shutil
+        import os
+        from datetime import datetime
+        
+        # 创建备份目录
+        backup_dir = 'backups'
+        if not os.path.exists(backup_dir):
+            os.makedirs(backup_dir)
+        
+        # 生成备份文件名
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        backup_file = f"{backup_dir}/essay_correction_{timestamp}.db"
+        
+        # 备份数据库
+        shutil.copy2('instance/essay_correction.db', backup_file)
+        
+        # 更新最后备份时间
+        conn = get_db()
+        cursor = conn.cursor()
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        cursor.execute("""
+            INSERT OR REPLACE INTO website_config (config_name, config_value)
+            VALUES ('last_backup_time', ?)
+        """, (now,))
+        
+        conn.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'数据库已备份到 {backup_file}'
+        })
+    
+    except Exception as e:
+        logger.error(f"备份数据库出错: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'备份失败: {str(e)}'
+        })
+
+# 清理临时文件
+@app.route('/admin/clear-temp', methods=['POST'])
+@admin_required
+def clear_temp_files():
+    """清理临时文件"""
+    try:
+        import os
+        import glob
+        
+        # 清理上传目录
+        upload_dir = app.config.get('UPLOAD_FOLDER', 'uploads')
+        if os.path.exists(upload_dir):
+            files = glob.glob(f"{upload_dir}/*")
+            for file in files:
+                if os.path.isfile(file):
+                    os.remove(file)
+        
+        return jsonify({
+            'success': True,
+            'message': '临时文件已清理'
+        })
+    
+    except Exception as e:
+        logger.error(f"清理临时文件出错: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'清理失败: {str(e)}'
+        })
+
+# 管理后台日志查看页面
+@app.route('/admin/logs')
+@admin_required
+def admin_log_viewer():
+    """管理后台日志查看页面"""
+    try:
+        # 查找日志文件
+        log_dir = 'logs'
+        if not os.path.exists(log_dir):
+            log_dir = '.'
+        
+        log_files_with_time = []
+        for file in os.listdir(log_dir):
+            if file.endswith('.log'):
+                full_path = os.path.join(log_dir, file)
+                log_files_with_time.append((file, os.path.getmtime(full_path)))
+        
+        # 按修改时间排序，最新的在前
+        log_files_with_time.sort(key=lambda x: x[1], reverse=True)
+        
+        # 提取文件名
+        log_files = [f[0] for f in log_files_with_time]
+        
+        selected_log = request.args.get('log')
+        if not selected_log and log_files:
+            selected_log = log_files[0]
+        
+        log_content = []
+        error_count = 0
+        
+        if selected_log:
+            log_path = os.path.join(log_dir, selected_log)
+            try:
+                with open(log_path, 'r', encoding='utf-8') as f:
+                    lines = f.readlines()
+                    # 只获取最后1000行
+                    lines = lines[-1000:]
+                    
+                    for line in lines:
+                        if 'ERROR' in line or '错误' in line:
+                            error_count += 1
+                        log_content.append(line)
+            except UnicodeDecodeError as e:
+                logger.warning(f"UTF-8 解码日志文件失败，尝试 GBK 编码: {str(e)}")
+                # 如果UTF-8解码失败，尝试其他编码
+                try:
+                    with open(log_path, 'r', encoding='gbk') as f:
+                        lines = f.readlines()
+                        lines = lines[-1000:]
+                        
+                        for line in lines:
+                            if 'ERROR' in line or '错误' in line:
+                                error_count += 1
+                            log_content.append(line)
+                except UnicodeDecodeError as e2:
+                    logger.warning(f"GBK 解码日志文件也失败，使用二进制模式: {str(e2)}")
+                    # 如果仍然失败，以二进制模式读取
+                    with open(log_path, 'rb') as f:
+                        binary_content = f.read()
+                        # 将二进制内容转换为可显示的十六进制字符串
+                        log_content = [f"二进制日志文件，无法以文本模式显示：{selected_log}",
+                                      f"文件大小: {len(binary_content)} 字节",
+                                      "请使用文本编辑器查看此文件。"]
+        
+        return render_template('admin/log_viewer.html',
+                              log_files=log_files,
+                              selected_log=selected_log,
+                              log_content=log_content,
+                              error_count=error_count,
+                              active_page='logs')
+    
+    except Exception as e:
+        logger.error(f"加载日志查看页面出错: {str(e)}")
+        flash(f'加载日志查看页面出错: {str(e)}', 'danger')
+        return redirect(url_for('admin_dashboard'))
+
+# 订单管理页面
+@app.route('/admin/orders')
+@admin_required
+def order_management():
+    """订单管理页面"""
+    try:
+        # 获取查询参数
+        status = request.args.get('status', '')
+        page = request.args.get('page', 1, type=int)
+        per_page = 20  # 每页显示20条记录
+        
+        # 获取数据库连接
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        # 构建SQL查询
+        query = """
+            SELECT o.*, u.username 
+            FROM membership_orders o
+            JOIN users u ON o.user_id = u.user_id
+            WHERE 1=1
+        """
+        params = []
+        
+        if status:
+            query += " AND o.payment_status = ?"
+            params.append(status)
+        
+        # 获取总记录数
+        count_query = f"SELECT COUNT(*) FROM ({query})"
+        cursor.execute(count_query, params)
+        total = cursor.fetchone()[0]
+        
+        # 计算分页信息
+        total_pages = (total + per_page - 1) // per_page  # 向上取整
+        offset = (page - 1) * per_page
+        
+        # 获取当前页的数据
+        query += " ORDER BY o.created_at DESC LIMIT ? OFFSET ?"
+        params.extend([per_page, offset])
+        
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        
+        # 列名
+        columns = [desc[0] for desc in cursor.description]
+        
+        # 将结果转换为字典列表
+        orders = []
+        for row in rows:
+            order = dict(zip(columns, row))
+            orders.append(order)
+        
+        # 构造分页信息
+        pagination = {
+            'current_page': page,
+            'pages': total_pages,
+            'total': total
+        }
+        
+        # 统计收入
+        cursor.execute("""
+            SELECT 
+                SUM(amount) as total_income,
+                COUNT(*) as order_count
+            FROM membership_orders
+            WHERE payment_status = 'completed'
+        """)
+        income_stats = cursor.fetchone()
+        
+        # 按月统计收入
+        cursor.execute("""
+            SELECT 
+                strftime('%Y-%m', created_at) as month, 
+                SUM(amount) as income,
+                COUNT(*) as order_count
+            FROM membership_orders
+            WHERE payment_status = 'completed'
+            GROUP BY month
+            ORDER BY month DESC
+            LIMIT 12
+        """)
+        monthly_income = []
+        for row in cursor.fetchall():
+            monthly_income.append([row[0], float(row[1]) if row[1] else 0, row[2]])
+        
+        # 构建统计数据
+        stats = {
+            'total_income': income_stats[0] or 0,
+            'order_count': income_stats[1] or 0,
+            'monthly_income': monthly_income
+        }
+        
+        return render_template('admin/order_management.html',
+                             orders=orders,
+                             stats=stats,
+                             pagination=pagination,
+                             filter_status=status,
+                             active_page='orders')
+    
+    except Exception as e:
+        logger.error(f"加载订单管理页面出错: {str(e)}")
+        flash(f'加载订单管理页面出错: {str(e)}', 'danger')
+        return redirect(url_for('admin_dashboard'))
+
+# 启动应用
+if __name__ == '__main__':
+    logger.info("【启动Flask应用】日志系统已配置完成")
+    
+    # 启动Flask应用
+    app.run(debug=True, host='127.0.0.1', port=5000) 

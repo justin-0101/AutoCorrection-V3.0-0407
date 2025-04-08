@@ -1,0 +1,223 @@
+"""
+作文批改异步任务模块
+处理作文批改相关的异步任务
+"""
+import logging
+import json
+import time
+from celery import shared_task
+from pathlib import Path
+import sys
+
+# 确保工作目录正确
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
+
+from app.models.essay import Essay
+from app.extensions import db
+from services.ai_service import AIService
+from utils.exceptions import AIServiceError
+from utils.websocket_manager import notify_user
+
+# 获取logger
+logger = logging.getLogger(__name__)
+
+@shared_task(
+    name='tasks.correction_tasks.process_essay_correction',
+    bind=True,
+    max_retries=3,
+    default_retry_delay=5*60,  # 5分钟后重试
+    acks_late=True
+)
+def process_essay_correction(self, essay_id, title, content, user_id=None, grade=None):
+    """
+    异步处理作文批改任务
+    
+    Args:
+        self: Celery任务实例
+        essay_id: 作文ID
+        title: 作文标题
+        content: 作文内容
+        user_id: 用户ID（可选）
+        grade: 年级（可选）
+        
+    Returns:
+        dict: 批改结果
+    """
+    start_time = time.time()
+    logger.info(f"开始异步批改作文，ID: {essay_id}")
+    
+    try:
+        # 更新作文状态为处理中
+        update_essay_status(essay_id, "processing")
+        
+        # 创建AI服务实例
+        ai_service = AIService()
+        
+        # 批改作文
+        correction_result = ai_service.correct_essay(
+            essay_text=content,
+            title=title,
+            grade=grade
+        )
+        
+        # 检查批改是否成功
+        if not correction_result.get('success', False):
+            error_msg = f"作文批改失败: {correction_result.get('error', '未知错误')}"
+            logger.error(error_msg)
+            
+            # 更新作文状态为失败
+            update_essay_status(essay_id, "failed", error=error_msg)
+            
+            # 通知用户任务失败
+            if user_id:
+                notify_user(user_id, {
+                    "type": "correction_failed",
+                    "essay_id": essay_id,
+                    "error": error_msg
+                })
+                
+            return {
+                "status": "error",
+                "message": "批改失败，请稍后再试",
+                "error": correction_result.get('error', '未知错误'),
+                "error_type": correction_result.get('error_type', 'UnknownError')
+            }
+        
+        # 处理时间
+        processing_time = time.time() - start_time
+        
+        # 保存结果到数据库
+        with db.session() as session:
+            essay = session.query(Essay).get(essay_id)
+            if essay:
+                essay.status = "completed"
+                essay.processed_time = processing_time
+                essay.corrected_text = correction_result.get('corrected_text', '')
+                essay.scores = json.dumps(correction_result.get('score', {}))
+                essay.feedback = json.dumps(correction_result.get('feedback', {}))
+                essay.errors = json.dumps(correction_result.get('errors', []))
+                essay.suggestions = json.dumps(correction_result.get('improvement_suggestions', []))
+                essay.grade = correction_result.get('grade', '')
+                session.commit()
+        
+        # 通知用户任务完成
+        result = {
+            "status": "success",
+            "essay_id": essay_id,
+            "title": title,
+            "original_text": content,
+            "corrected_text": correction_result.get('corrected_text', ''),
+            "score": correction_result.get('score', {}),
+            "feedback": correction_result.get('feedback', {}),
+            "errors": correction_result.get('errors', []),
+            "improvement_suggestions": correction_result.get('improvement_suggestions', []),
+            "word_count": correction_result.get('word_count', len(content)),
+            "processing_time": processing_time,
+            "grade": correction_result.get('grade', ''),
+            "grade_description": correction_result.get('grade_description', '')
+        }
+        
+        if user_id:
+            notify_user(user_id, {
+                "type": "correction_completed",
+                "essay_id": essay_id,
+                "result": result
+            })
+        
+        logger.info(f"异步批改作文完成，ID: {essay_id}，耗时: {processing_time:.2f}秒")
+        return result
+        
+    except Exception as e:
+        logger.error(f"异步批改作文异常，ID: {essay_id}: {str(e)}", exc_info=True)
+        
+        # 记录失败，并在一定次数内尝试重试
+        try:
+            # 更新作文状态为失败
+            update_essay_status(essay_id, "failed", error=str(e))
+            
+            # 通知用户任务失败
+            if user_id:
+                notify_user(user_id, {
+                    "type": "correction_failed",
+                    "essay_id": essay_id,
+                    "error": str(e)
+                })
+                
+            # 在重试次数内尝试重试
+            self.retry(exc=e)
+        except self.MaxRetriesExceededError:
+            # 已达到最大重试次数
+            logger.error(f"作文批改任务达到最大重试次数，ID: {essay_id}")
+            return {
+                "status": "error",
+                "message": "批改任务多次失败，请联系管理员",
+                "error": str(e)
+            }
+
+def update_essay_status(essay_id, status, error=None):
+    """
+    更新作文状态
+    
+    Args:
+        essay_id: 作文ID
+        status: 状态 (pending/processing/completed/failed)
+        error: 错误信息（如果有）
+    """
+    try:
+        with db.session() as session:
+            essay = session.query(Essay).get(essay_id)
+            if essay:
+                essay.status = status
+                if error:
+                    essay.error_message = error
+                session.commit()
+        logger.info(f"更新作文状态为: {status}，ID: {essay_id}")
+    except Exception as e:
+        logger.error(f"更新作文状态失败，ID: {essay_id}: {str(e)}")
+
+@shared_task(name='tasks.correction_tasks.batch_process_essays')
+def batch_process_essays(essay_ids):
+    """
+    批量处理多篇作文
+    
+    Args:
+        essay_ids: 作文ID列表
+        
+    Returns:
+        list: 每篇作文的处理结果或任务ID
+    """
+    results = []
+    for essay_id in essay_ids:
+        try:
+            with db.session() as session:
+                essay = session.query(Essay).get(essay_id)
+                if essay and essay.status == "pending":
+                    # 启动每篇文章的异步批改
+                    task = process_essay_correction.delay(
+                        essay_id, 
+                        essay.title, 
+                        essay.original_text, 
+                        essay.user_id, 
+                        essay.grade
+                    )
+                    results.append({
+                        "essay_id": essay_id,
+                        "task_id": task.id,
+                        "status": "dispatched"
+                    })
+                else:
+                    results.append({
+                        "essay_id": essay_id,
+                        "status": "skipped",
+                        "message": "Essay not found or not in pending status"
+                    })
+        except Exception as e:
+            logger.error(f"批量处理作文失败，ID: {essay_id}: {str(e)}")
+            results.append({
+                "essay_id": essay_id,
+                "status": "error",
+                "message": str(e)
+            })
+    return results 

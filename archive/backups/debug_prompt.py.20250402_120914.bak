@@ -1,0 +1,43 @@
+"""
+调试脚本，用于测试get_unified_prompt函数
+"""
+
+import sys
+import traceback
+
+print("Python version:", sys.version)
+print("-------------------")
+
+try:
+    # 先导入task_unified_scoring，以确保它是可用的
+    print("Attempting to import task_unified_scoring...")
+    from tasks import task_unified_scoring
+    print("Successfully imported task_unified_scoring")
+    print("Task format instruction type:", type(task_unified_scoring.format_instruction()))
+    print("Task format instruction (first 100 chars):", task_unified_scoring.format_instruction()[:100])
+    print("-------------------")
+
+    # 检查SCORING内容
+    print("Checking SCORING in ai_correction_config...")
+    from ai_correction_config import SCORING
+    print("SCORING keys:", SCORING.keys())
+    if "criteria" in SCORING:
+        print("Criteria keys:", SCORING["criteria"].keys())
+    print("-------------------")
+
+    # 然后导入get_unified_prompt并使用它
+    print("Attempting to import get_unified_prompt...")
+    from ai_correction_config import get_unified_prompt
+    print("Successfully imported get_unified_prompt")
+    
+    print("Calling get_unified_prompt...")
+    prompt = get_unified_prompt("我的梦想", "作文内容...", 650)
+    print("-------------------")
+    print("Generated prompt (truncated):")
+    print(prompt[:500] + "...")  # 只输出前500个字符以便于查看
+
+    print("Prompt successfully generated.")
+except Exception as e:
+    print("ERROR:", str(e))
+    print("Traceback:")
+    traceback.print_exc() 

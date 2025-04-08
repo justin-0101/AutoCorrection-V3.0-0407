@@ -1,0 +1,122 @@
+2025-04-04 20:29:14,270 INFO [app] [__init__.py:132] - ×÷ÎÄÅú¸ÄÏµÍ³Æô¶¯
+2025-04-04 20:29:14,359 INFO [werkzeug] [_internal.py:97] - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.0.132:5000
+2025-04-04 20:29:14,360 INFO [werkzeug] [_internal.py:97] - [33mPress CTRL+C to quit[0m
+2025-04-04 20:29:14,360 INFO [werkzeug] [_internal.py:97] -  * Restarting with stat
+2025-04-04 20:29:15,513 INFO [app] [__init__.py:132] - ×÷ÎÄÅú¸ÄÏµÍ³Æô¶¯
+2025-04-04 20:29:15,578 WARNING [werkzeug] [_internal.py:97] -  * Debugger is active!
+2025-04-04 20:29:15,585 INFO [werkzeug] [_internal.py:97] -  * Debugger PIN: 288-261-912
+2025-04-04 20:29:25,523 INFO [werkzeug] [_internal.py:97] - 127.0.0.1 - - [04/Apr/2025 20:29:25] "GET / HTTP/1.1" 200 -
+2025-04-04 20:29:29,967 ERROR [app] [main_routes.py:135] - Failed to render membership.html. Error: 'user' is undefined
+Traceback:
+Traceback (most recent call last):
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\app\routes\main_routes.py", line 132, in membership
+    return render_template('membership.html')
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\.venv\Lib\site-packages\flask\templating.py", line 150, in render_template
+    return _render(app, template, context)
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\.venv\Lib\site-packages\flask\templating.py", line 131, in _render
+    rv = template.render(context)
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\.venv\Lib\site-packages\jinja2\environment.py", line 1295, in render
+    self.environment.handle_exception()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\.venv\Lib\site-packages\jinja2\environment.py", line 942, in handle_exception
+    raise rewrite_traceback_stack(source=source)
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\templates\membership.html", line 82, in top-level template code
+    {% if user.user_type == 'premium' %}
+    ^
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\.venv\Lib\site-packages\jinja2\environment.py", line 490, in getattr
+    return getattr(obj, attribute)
+jinja2.exceptions.UndefinedError: 'user' is undefined
+
+2025-04-04 20:29:29,967 INFO [werkzeug] [_internal.py:97] - 127.0.0.1 - - [04/Apr/2025 20:29:29] "GET /membership HTTP/1.1" 200 -
+2025-04-04 20:29:40,006 INFO [werkzeug] [_internal.py:97] - 127.0.0.1 - - [04/Apr/2025 20:29:40] "GET / HTTP/1.1" 200 -
+2025-04-04 20:29:41,625 INFO [werkzeug] [_internal.py:97] - 127.0.0.1 - - [04/Apr/2025 20:29:41] "GET /history HTTP/1.1" 200 -
+2025-04-04 20:29:42,215 ERROR [app] [main_routes.py:114] - Failed to render batch_upload.html. Error: Could not build url for endpoint 'user_history'. Did you mean 'main.user_history' instead?
+Traceback:
+Traceback (most recent call last):
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\app\routes\main_routes.py", line 111, in batch_upload
+    return render_template('batch_upload.html')
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\.venv\Lib\site-packages\flask\templating.py", line 150, in render_template
+    return _render(app, template, context)
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\.venv\Lib\site-packages\flask\templating.py", line 131, in _render
+    rv = template.render(context)
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\.venv\Lib\site-packages\jinja2\environment.py", line 1295, in render
+    self.environment.handle_exception()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\.venv\Lib\site-packages\jinja2\environment.py", line 942, in handle_exception
+    raise rewrite_traceback_stack(source=source)
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\templates\batch_upload.html", line 464, in top-level template code
+    window.location.href = '{{ url_for("user_history") }}';
+    
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\.venv\Lib\site-packages\flask\app.py", line 1121, in url_for
+    return self.handle_url_build_error(error, endpoint, values)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\.venv\Lib\site-packages\flask\app.py", line 1110, in url_for
+    rv = url_adapter.build(  # type: ignore[union-attr]
+        endpoint,
+    ...<3 lines>...
+        force_external=_external,
+    )
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\.venv\Lib\site-packages\werkzeug\routing\map.py", line 924, in build
+    raise BuildError(endpoint, values, method, self)
+werkzeug.routing.exceptions.BuildError: Could not build url for endpoint 'user_history'. Did you mean 'main.user_history' instead?
+
+2025-04-04 20:29:42,216 INFO [werkzeug] [_internal.py:97] - 127.0.0.1 - - [04/Apr/2025 20:29:42] "GET /batch_upload HTTP/1.1" 200 -
+2025-04-04 20:30:03,411 INFO [app] [main_routes.py:47] - Correction route accessed with method: GET
+2025-04-04 20:30:03,417 INFO [werkzeug] [_internal.py:97] - 127.0.0.1 - - [04/Apr/2025 20:30:03] "GET /correction HTTP/1.1" 200 -
+2025-04-04 20:30:12,226 INFO [app] [main_routes.py:47] - Correction route accessed with method: POST
+2025-04-04 20:30:12,227 INFO [app] [main_routes.py:52] - Processing correction form submission
+2025-04-04 20:30:12,228 INFO [app] [main_routes.py:65] - File uploaded: ÄÇ¸ö½Ì»áÎÒÍùÇ°×ßµÄÈË1.docx
+2025-04-04 20:30:12,230 INFO [werkzeug] [_internal.py:97] - 127.0.0.1 - - [04/Apr/2025 20:30:12] "[32mPOST /correction HTTP/1.1[0m" 302 -
+2025-04-04 20:30:12,259 ERROR [app] [main_routes.py:156] - Failed to render results.html for essay 101. Error: Could not build url for endpoint 'index'. Did you mean 'main.index' instead?
+Traceback:
+Traceback (most recent call last):
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\app\routes\main_routes.py", line 153, in results
+    return render_template('results.html', essay_id=essay_id)
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\.venv\Lib\site-packages\flask\templating.py", line 150, in render_template
+    return _render(app, template, context)
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\.venv\Lib\site-packages\flask\templating.py", line 131, in _render
+    rv = template.render(context)
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\.venv\Lib\site-packages\jinja2\environment.py", line 1295, in render
+    self.environment.handle_exception()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\.venv\Lib\site-packages\jinja2\environment.py", line 942, in handle_exception
+    raise rewrite_traceback_stack(source=source)
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\templates\results.html", line 102, in top-level template code
+    <a class="navbar-brand" href="{{ url_for('index') }}">Ð¡Ô°¶¡×÷ÎÄÅú¸Ä</a>
+    ^^^^^^^^^^^^^
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\.venv\Lib\site-packages\flask\app.py", line 1121, in url_for
+    return self.handle_url_build_error(error, endpoint, values)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\.venv\Lib\site-packages\flask\app.py", line 1110, in url_for
+    rv = url_adapter.build(  # type: ignore[union-attr]
+        endpoint,
+    ...<3 lines>...
+        force_external=_external,
+    )
+  File "D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor\.venv\Lib\site-packages\werkzeug\routing\map.py", line 924, in build
+    raise BuildError(endpoint, values, method, self)
+werkzeug.routing.exceptions.BuildError: Could not build url for endpoint 'index'. Did you mean 'main.index' instead?
+
+2025-04-04 20:30:12,260 INFO [werkzeug] [_internal.py:97] - 127.0.0.1 - - [04/Apr/2025 20:30:12] "GET /results/101 HTTP/1.1" 200 -
+2025-04-04 20:30:46,891 INFO [app] [main_routes.py:47] - Correction route accessed with method: GET
+2025-04-04 20:30:46,893 INFO [werkzeug] [_internal.py:97] - 127.0.0.1 - - [04/Apr/2025 20:30:46] "GET /correction HTTP/1.1" 200 -
+2025-04-04 20:31:41,997 INFO [werkzeug] [_internal.py:97] -  * Detected change in 'D:\\git-justin0101\\auto-currection\\AutoCorrection-V2.0-Backup-Before-Refactor\\app\\routes\\main_routes.py', reloading
+2025-04-04 20:31:42,194 INFO [werkzeug] [_internal.py:97] -  * Restarting with stat
+2025-04-04 20:31:43,536 INFO [app] [__init__.py:132] - ×÷ÎÄÅú¸ÄÏµÍ³Æô¶¯
+2025-04-04 20:31:43,598 WARNING [werkzeug] [_internal.py:97] -  * Debugger is active!
+2025-04-04 20:31:43,602 INFO [werkzeug] [_internal.py:97] -  * Debugger PIN: 288-261-912
+2025-04-04 20:32:47,301 INFO [app] [__init__.py:132] - ×÷ÎÄÅú¸ÄÏµÍ³Æô¶¯
+2025-04-04 20:32:47,376 INFO [werkzeug] [_internal.py:97] - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.0.132:5000
+2025-04-04 20:32:47,376 INFO [werkzeug] [_internal.py:97] - [33mPress CTRL+C to quit[0m
+2025-04-04 20:32:47,376 INFO [werkzeug] [_internal.py:97] -  * Restarting with stat
+2025-04-04 20:32:48,654 INFO [app] [__init__.py:132] - ×÷ÎÄÅú¸ÄÏµÍ³Æô¶¯
+2025-04-04 20:32:48,717 WARNING [werkzeug] [_internal.py:97] -  * Debugger is active!
+2025-04-04 20:33:26,549 INFO [werkzeug] [_internal.py:97] - 127.0.0.1 - - [04/Apr/2025 20:33:26] "GET / HTTP/1.1" 200 -
+2025-04-04 20:33:49,085 INFO [werkzeug] [_internal.py:97] -  * Restarting with stat
+2025-04-04 20:33:49,601 INFO [werkzeug] [_internal.py:97] -  * Restarting with stat

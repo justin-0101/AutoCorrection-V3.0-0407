@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}批量上传结果{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2 class="mb-4">批量上传处理结果</h2>
+    
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                    {{ message }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <div class="card">
+        <div class="card-body">
+            <h5 class="card-title mb-4">处理详情</h5>
+            
+            {% if processed_files %}
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>文件名</th>
+                                <th>状态</th>
+                                <th>详情</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for file in processed_files %}
+                                <tr>
+                                    <td>{{ file.filename }}</td>
+                                    <td>
+                                        {% if file.status == '成功' %}
+                                            <span class="badge bg-success">{{ file.status }}</span>
+                                        {% else %}
+                                            <span class="badge bg-danger">{{ file.status }}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if file.status == '成功' %}
+                                            <a href="{{ url_for('main.results', essay_id=file.essay_id) }}" class="btn btn-sm btn-primary">查看结果</a>
+                                        {% else %}
+                                            <span class="text-danger">{{ file.error }}</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p class="text-muted">没有处理记录</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="mt-4">
+        <a href="{{ url_for('main.batch_upload') }}" class="btn btn-primary">继续上传</a>
+        <a href="{{ url_for('main.user_history') }}" class="btn btn-secondary">查看作文历史</a>
+    </div>
+</div>
+{% endblock %} 

@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>小园丁作文批改智能体</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .navbar-brand {
+            font-weight: bold;
+        }
+        .hero-section {
+            background-color: #0d6efd;
+            color: white;
+            padding: 80px 0;
+            text-align: center;
+        }
+        .hero-title {
+            font-size: 2.5rem;
+            font-weight: bold;
+            margin-bottom: 20px;
+        }
+        .hero-subtitle {
+            font-size: 1.2rem;
+            margin-bottom: 30px;
+            max-width: 700px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        .feature-section {
+            padding: 60px 0;
+        }
+        .feature-card {
+            height: 100%;
+            border: none;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease;
+        }
+        .feature-card:hover {
+            transform: translateY(-5px);
+        }
+        .feature-icon {
+            font-size: 2.5rem;
+            color: #0d6efd;
+            margin-bottom: 20px;
+        }
+        .feature-title {
+            font-weight: bold;
+            margin-bottom: 15px;
+        }
+        .main-content {
+            flex: 1;
+        }
+        .action-btn {
+            font-weight: 600;
+            padding: 10px 20px;
+        }
+        .footer {
+            background-color: #212529;
+            color: rgba(255,255,255,0.6);
+            padding: 40px 0 20px;
+            margin-top: auto;
+        }
+        .footer-title {
+            color: white;
+            font-weight: bold;
+            margin-bottom: 20px;
+        }
+        .footer-link {
+            color: rgba(255,255,255,0.6);
+            text-decoration: none;
+        }
+        .footer-link:hover {
+            color: white;
+        }
+        .dashboard-card {
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            border-radius: 10px;
+            padding: 20px;
+            height: 100%;
+            transition: transform 0.3s ease;
+            border-top: 4px solid #0d6efd;
+        }
+        .dashboard-card:hover {
+            transform: translateY(-5px);
+        }
+        .dashboard-icon {
+            font-size: 2rem;
+            color: #0d6efd;
+            margin-bottom: 15px;
+        }
+        .dashboard-title {
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        .recent-essay {
+            border-left: 3px solid #0d6efd;
+            padding-left: 15px;
+            margin-bottom: 15px;
+        }
+        .recent-title {
+            font-weight: bold;
+        }
+        .score-badge {
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 0.85rem;
+        }
+        .score-excellent {
+            background-color: #198754;
+            color: white;
+        }
+        .score-good {
+            background-color: #0dcaf0;
+            color: white;
+        }
+        .score-average {
+            background-color: #ffc107;
+            color: white;
+        }
+        .score-below {
+            background-color: #dc3545;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <!-- 导航栏 -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="{{ url_for('index') }}">小园丁作文批改</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link active" href="{{ url_for('index') }}">首页</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('correction') }}">作文批改</a>
+                    </li>
+                    {% if logged_in %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('user_history') }}">我的作文</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('batch_upload') }}">批量上传</a>
+                    </li>
+                    {% endif %}
+                </ul>
+                
+                <div class="d-flex">
+                    {% if logged_in %}
+                    <div class="dropdown">
+                        <button class="btn btn-outline-light dropdown-toggle" type="button" id="userDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="bi bi-person-circle me-1"></i> {{ user.username }}
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown">
+                            <li><a class="dropdown-item" href="{{ url_for('profile') }}"><i class="bi bi-person"></i> 个人资料</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('user_history') }}"><i class="bi bi-journal-text"></i> 我的作文</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ url_for('logout') }}"><i class="bi bi-box-arrow-right"></i> 退出登录</a></li>
+                        </ul>
+                    </div>
+                    {% else %}
+                    <a href="{{ url_for('login') }}" class="btn btn-outline-light me-2">登录</a>
+                    <a href="{{ url_for('register') }}" class="btn btn-primary">注册</a>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </nav>
+    
+    <div class="main-content">
+        {% if logged_in %}
+        <!-- 已登录用户的仪表盘 -->
+        <div class="container py-5">
+            <div class="row mb-4">
+                <div class="col">
+                    <h2>欢迎回来，{{ user.username }}</h2>
+                    <p class="text-muted">在这里管理您的作文批改和查看进度</p>
+                </div>
+            </div>
+            
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="alert alert-{{ category }}">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+            
+            <div class="row g-4 mb-5">
+                <div class="col-md-4">
+                    <div class="dashboard-card">
+                        <div class="dashboard-icon">
+                            <i class="bi bi-pencil-square"></i>
+                        </div>
+                        <h4 class="dashboard-title">开始批改</h4>
+                        <p>提交您的作文，获得详细的批改分析和建议</p>
+                        <a href="{{ url_for('correction') }}" class="btn btn-primary action-btn">
+                            <i class="bi bi-plus-circle"></i> 新建批改
+                        </a>
+                    </div>
+                </div>
+                
+                <div class="col-md-4">
+                    <div class="dashboard-card">
+                        <div class="dashboard-icon">
+                            <i class="bi bi-file-earmark-text"></i>
+                        </div>
+                        <h4 class="dashboard-title">我的作文</h4>
+                        <p>查看您所有提交的作文历史记录和批改结果</p>
+                        <a href="{{ url_for('user_history') }}" class="btn btn-primary action-btn">
+                            <i class="bi bi-list-ul"></i> 查看历史
+                        </a>
+                    </div>
+                </div>
+                
+                <div class="col-md-4">
+                    <div class="dashboard-card">
+                        <div class="dashboard-icon">
+                            <i class="bi bi-cloud-upload"></i>
+                        </div>
+                        <h4 class="dashboard-title">批量上传</h4>
+                        <p>一次性上传多篇作文进行批量批改，提高效率</p>
+                        <a href="{{ url_for('batch_upload') }}" class="btn btn-primary action-btn">
+                            <i class="bi bi-upload"></i> 批量上传
+                        </a>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="row">
+                <div class="col-md-8">
+                    <div class="card">
+                        <div class="card-header bg-white">
+                            <h5 class="mb-0">最近批改的作文</h5>
+                        </div>
+                        <div class="card-body">
+                            {% if recent_essays %}
+                                {% for essay in recent_essays %}
+                                <div class="recent-essay">
+                                    <div class="d-flex justify-content-between">
+                                        <h6 class="recent-title">{{ essay.title }}</h6>
+                                        <div>
+                                            {% if essay.total_score >= 90 %}
+                                            <span class="score-badge score-excellent">{{ essay.total_score }}分</span>
+                                            {% elif essay.total_score >= 80 %}
+                                            <span class="score-badge score-good">{{ essay.total_score }}分</span>
+                                            {% elif essay.total_score >= 60 %}
+                                            <span class="score-badge score-average">{{ essay.total_score }}分</span>
+                                            {% else %}
+                                            <span class="score-badge score-below">{{ essay.total_score }}分</span>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    <p class="mb-1 text-muted small">{{ essay.created_at }}</p>
+                                    <a href="{{ url_for('view_result', essay_id=essay.id) }}" class="btn btn-sm btn-outline-primary mt-2">查看详情</a>
+                                </div>
+                                {% endfor %}
+                                
+                                <div class="text-center mt-4">
+                                    <a href="{{ url_for('user_history') }}" class="btn btn-outline-primary">查看全部作文</a>
+                                </div>
+                            {% else %}
+                                <div class="text-center py-4">
+                                    <i class="bi bi-journal-text fs-1 text-muted"></i>
+                                    <p class="mt-3">您还没有提交过作文</p>
+                                    <a href="{{ url_for('correction') }}" class="btn btn-primary">开始您的第一次批改</a>
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-md-4">
+                    <div class="card mb-4">
+                        <div class="card-header bg-white">
+                            <h5 class="mb-0">批改进度</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="text-center">
+                                <i class="bi bi-bar-chart-line fs-1 text-primary"></i>
+                                <h3 class="mt-3">{{ stats.total_essays if stats else 0 }}</h3>
+                                <p class="text-muted">总批改数量</p>
+                                
+                                {% if stats and stats.avg_score %}
+                                <h4 class="mt-3">{{ stats.avg_score }}分</h4>
+                                <p class="text-muted">平均分数</p>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-header bg-white">
+                            <h5 class="mb-0">快速操作</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="d-grid gap-2">
+                                <a href="{{ url_for('correction') }}" class="btn btn-outline-primary">
+                                    <i class="bi bi-pencil"></i> 新建批改
+                                </a>
+                                <a href="{{ url_for('profile') }}" class="btn btn-outline-secondary">
+                                    <i class="bi bi-person"></i> 个人资料
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        {% else %}
+        <!-- 未登录用户的首页 -->
+        <!-- 主横幅 -->
+        <div class="hero-section">
+            <div class="container">
+                <h1 class="hero-title">智能作文批改，助力学习成长</h1>
+                <p class="hero-subtitle">小园丁作文批改智能体为您提供专业的作文评估和建议，让写作学习更高效、更有针对性。</p>
+                <div>
+                    <a href="{{ url_for('register') }}" class="btn btn-light btn-lg me-2 action-btn">免费注册</a>
+                    <a href="{{ url_for('login') }}" class="btn btn-outline-light btn-lg action-btn">立即登录</a>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 特色功能介绍 -->
+        <div class="feature-section">
+            <div class="container">
+                <div class="text-center mb-5">
+                    <h2>我们的特色功能</h2>
+                    <p class="text-muted">一站式作文批改解决方案，助力教师和学生提升写作水平</p>
+                </div>
+                
+                <div class="row g-4">
+                    <div class="col-md-4">
+                        <div class="card feature-card h-100">
+                            <div class="card-body text-center p-4">
+                                <div class="feature-icon">
+                                    <i class="bi bi-lightning-charge"></i>
+                                </div>
+                                <h4 class="feature-title">智能批改</h4>
+                                <p>使用先进的AI技术对作文进行全方位的评估，包括结构、内容和语言表达，提供详细的分析和建议。</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="col-md-4">
+                        <div class="card feature-card h-100">
+                            <div class="card-body text-center p-4">
+                                <div class="feature-icon">
+                                    <i class="bi bi-graph-up"></i>
+                                </div>
+                                <h4 class="feature-title">进步追踪</h4>
+                                <p>记录每次批改的结果，帮助您追踪写作能力的提升，发现学习中的薄弱环节，有针对性地提高。</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="col-md-4">
+                        <div class="card feature-card h-100">
+                            <div class="card-body text-center p-4">
+                                <div class="feature-icon">
+                                    <i class="bi bi-cloud-upload"></i>
+                                </div>
+                                <h4 class="feature-title">批量处理</h4>
+                                <p>一次上传多篇作文进行批量批改，特别适合教师和辅导机构使用，大幅提高工作效率。</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 开始使用 -->
+        <div class="bg-light py-5">
+            <div class="container text-center">
+                <h2 class="mb-4">准备好开始使用了吗？</h2>
+                <p class="mb-4 text-muted">注册账号，立即体验智能作文批改服务</p>
+                <a href="{{ url_for('register') }}" class="btn btn-primary btn-lg action-btn">免费注册</a>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+    
+    <!-- 页脚 -->
+    <footer class="footer mt-auto">
+        <div class="container">
+            <div class="row">
+                <div class="col-md-4 mb-4">
+                    <h5 class="footer-title">小园丁作文批改智能体</h5>
+                    <p>我们致力于为学生提供智能、高效的作文批改服务，助力写作能力提升。</p>
+                </div>
+                
+                <div class="col-md-2 mb-4">
+                    <h5 class="footer-title">产品</h5>
+                    <ul class="list-unstyled">
+                        <li class="mb-2"><a href="#" class="footer-link">作文批改</a></li>
+                        <li class="mb-2"><a href="#" class="footer-link">批量上传</a></li>
+                        <li class="mb-2"><a href="#" class="footer-link">数据分析</a></li>
+                    </ul>
+                </div>
+                
+                <div class="col-md-2 mb-4">
+                    <h5 class="footer-title">关于我们</h5>
+                    <ul class="list-unstyled">
+                        <li class="mb-2"><a href="#" class="footer-link">团队介绍</a></li>
+                        <li class="mb-2"><a href="#" class="footer-link">联系我们</a></li>
+                        <li class="mb-2"><a href="#" class="footer-link">服务条款</a></li>
+                    </ul>
+                </div>
+                
+                <div class="col-md-4 mb-4">
+                    <h5 class="footer-title">联系方式</h5>
+                    <ul class="list-unstyled">
+                        <li class="mb-2"><i class="bi bi-envelope me-2"></i> contact@xiaoyuanding.com</li>
+                        <li class="mb-2"><i class="bi bi-telephone me-2"></i> (123) 456-7890</li>
+                        <li class="mb-2"><i class="bi bi-geo-alt me-2"></i> 北京市海淀区中关村</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <hr class="mt-4 mb-3 border-secondary">
+            
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <p class="mb-0">© 2023 小园丁作文批改智能体. 保留所有权利.</p>
+                </div>
+                <div class="col-md-6 text-md-end mb-3">
+                    <a href="#" class="footer-link me-3"><i class="bi bi-facebook"></i></a>
+                    <a href="#" class="footer-link me-3"><i class="bi bi-twitter"></i></a>
+                    <a href="#" class="footer-link me-3"><i class="bi bi-instagram"></i></a>
+                    <a href="#" class="footer-link"><i class="bi bi-linkedin"></i></a>
+                </div>
+            </div>
+        </div>
+    </footer>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

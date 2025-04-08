@@ -1,0 +1,260 @@
+import os
+import base64
+import json
+import logging
+import requests
+from datetime import datetime
+
+# 配置日志
+logger = logging.getLogger(__name__)
+
+# 调试选项 - 仅开发环境使用
+DEBUG_MODE = os.getenv('DEBUG_MODE', 'false').lower() == 'true'
+DISABLE_SSL_VERIFY = os.getenv('DISABLE_SSL_VERIFY', 'false').lower() == 'true'
+
+# 千问API配置
+QWEN_API_KEY = os.getenv('DASHSCOPE_API_KEY', '')
+QWEN_MODEL = os.getenv('DASHSCOPE_MODEL', 'qwen-vl-plus')
+QWEN_BASE_URL = os.getenv('DASHSCOPE_BASE_URL', 'https://dashscope.aliyuncs.com/api/v1/services/vision/text-generation')
+
+def encode_image_to_base64(image_path):
+    """将图片编码为base64格式"""
+    try:
+        with open(image_path, "rb") as image_file:
+            return base64.b64encode(image_file.read()).decode('utf-8')
+    except Exception as e:
+        logger.error(f"图片编码失败: {str(e)}")
+        return None
+
+def process_image(image_path):
+    """使用千问API处理图片并提取文本内容"""
+    try:
+        # 记录开始处理时间
+        start_time = datetime.now()
+        logger.info(f"开始处理图片: {image_path}")
+        
+        # 检查API密钥是否配置
+        if not QWEN_API_KEY:
+            logger.error("缺少QWEN_API_KEY环境变量，无法使用千问API进行图片处理")
+            return None
+        
+        # 检查文件类型，如果是PDF需要转换
+        is_pdf = image_path.lower().endswith('.pdf')
+        temp_image_path = image_path
+        
+        if is_pdf:
+            logger.info(f"检测到PDF文件，尝试使用专用OCR API直接处理")
+            # 对于PDF文件，直接使用专用OCR API处理
+            text = get_qwen_ocr_result(image_path)
+            if text:
+                logger.info(f"使用专用OCR API从PDF提取文本成功，长度: {len(text)}")
+                return text
+            
+            # 如果专用OCR API失败，尝试转换为图片
+            logger.info("专用OCR API处理失败，尝试将PDF转换为图片后处理")
+            try:
+                # 尝试将PDF转为图片
+                from pdf2image import convert_from_path
+                import tempfile
+                
+                logger.info(f"检测到PDF文件，尝试转换第一页为图片")
+                
+                # 设置poppler路径
+                poppler_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'poppler', 'Library', 'bin')
+                
+                # 添加poppler路径到环境变量
+                if os.path.exists(poppler_path):
+                    logger.info(f"使用本地poppler路径: {poppler_path}")
+                    # 添加到环境变量PATH
+                    os.environ["PATH"] = poppler_path + os.pathsep + os.environ.get("PATH", "")
+                    logger.info(f"已添加poppler到PATH环境变量")
+                    
+                    # 将PDF的第一页转换为图片
+                    try:
+                        images = convert_from_path(image_path, first_page=1, last_page=1, poppler_path=poppler_path)
+                        logger.info(f"使用poppler_path参数成功调用convert_from_path")
+                    except Exception as e:
+                        logger.error(f"使用poppler_path参数转换失败: {str(e)}，尝试使用环境变量")
+                        images = convert_from_path(image_path, first_page=1, last_page=1)
+                else:
+                    logger.info("未找到本地poppler路径，尝试使用系统poppler")
+                    # 尝试使用系统安装的poppler
+                    images = convert_from_path(image_path, first_page=1, last_page=1)
+                
+                if images:
+                    # 保存为临时图片文件
+                    temp_image_path = os.path.join(tempfile.gettempdir(), "pdf_page_1.png")
+                    images[0].save(temp_image_path, "PNG")
+                    logger.info(f"PDF成功转换为图片: {temp_image_path}")
+                else:
+                    logger.error("PDF转换为图片失败，未生成图片")
+                    return None
+            except ImportError as ie:
+                logger.error(f"缺少pdf2image库或其依赖，无法转换PDF为图片: {str(ie)}")
+                return None
+            except Exception as e:
+                logger.error(f"PDF转换错误: {str(e)}")
+                # 尝试直接将PDF作为图片处理
+                logger.info("尝试直接将PDF作为图片发送给OCR服务")
+                temp_image_path = image_path
+                # 不返回None，继续处理
+        
+        # 编码图片
+        base64_image = encode_image_to_base64(temp_image_path)
+        if not base64_image:
+            logger.error("图片编码失败")
+            return None
+        
+        # 构建API请求
+        prompt = "请提取这张图片中的所有文字内容。只需要提取文字，不需要任何解释或描述。只输出提取的文字内容，不要添加任何额外的文字或标点符号。"
+        
+        payload = {
+            "model": QWEN_MODEL,
+            "input": {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"text": prompt},
+                            {"image": base64_image}
+                        ]
+                    }
+                ]
+            },
+            "parameters": {}
+        }
+        
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {QWEN_API_KEY}"
+        }
+        
+        # 发送请求
+        logger.info("发送图片处理请求到千问API")
+        if DISABLE_SSL_VERIFY:
+            logger.warning("警告: SSL验证已禁用，仅用于开发环境")
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            response = requests.post(QWEN_BASE_URL, headers=headers, json=payload, verify=False)
+        else:
+            response = requests.post(QWEN_BASE_URL, headers=headers, json=payload)
+        
+        # 检查响应
+        if response.status_code == 200:
+            result = response.json()
+            try:
+                # 尝试使用新的API响应格式
+                extracted_text = result['output']['message']['content'][0]['text']
+            except (KeyError, IndexError):
+                try:
+                    # 尝试使用通用API响应格式
+                    extracted_text = result.get('output', {}).get('text', '')
+                    if not extracted_text:
+                        # 尝试其他可能的响应格式
+                        extracted_text = result.get('result', '')
+                except Exception as format_error:
+                    logger.error(f"无法解析API响应: {str(format_error)}")
+                    logger.error(f"API响应内容: {response.text}")
+                    return None
+            
+            # 处理完成
+            end_time = datetime.now()
+            process_time = (end_time - start_time).total_seconds()
+            logger.info(f"图片处理完成，耗时: {process_time}秒")
+            
+            return extracted_text
+        else:
+            logger.error(f"API请求失败: {response.status_code}, {response.text}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"图片处理异常: {str(e)}")
+        return None
+
+def get_qwen_ocr_result(image_path):
+    """直接调用千问OCR API处理图片或PDF"""
+    try:
+        # 记录开始处理时间
+        start_time = datetime.now()
+        logger.info(f"开始处理文件: {image_path}")
+        
+        # 检查API密钥是否配置
+        if not QWEN_API_KEY:
+            logger.error("缺少DASHSCOPE_API_KEY环境变量，无法使用千问API进行OCR处理")
+            return None
+        
+        # 编码文件为base64
+        with open(image_path, "rb") as file:
+            file_content = file.read()
+            base64_content = base64.b64encode(file_content).decode('utf-8')
+        
+        # 构建API请求
+        api_url = "https://dashscope.aliyuncs.com/api/v1/services/vision/ocr/document-recognition"
+        
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {QWEN_API_KEY}"
+        }
+        
+        payload = {
+            "model": "cv_document_intelligence",
+            "input": {
+                "document": base64_content
+            },
+            "parameters": {}
+        }
+        
+        # 发送请求
+        logger.info("发送OCR请求到千问API")
+        if DISABLE_SSL_VERIFY:
+            logger.warning("警告: SSL验证已禁用，仅用于开发环境")
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            response = requests.post(api_url, headers=headers, json=payload, verify=False)
+        else:
+            response = requests.post(api_url, headers=headers, json=payload)
+        
+        # 检查响应
+        if response.status_code == 200:
+            result = response.json()
+            logger.info(f"OCR API响应: {result}")
+            
+            try:
+                # 提取OCR结果
+                extracted_text = result.get('output', {}).get('text', '')
+                
+                # 处理完成
+                end_time = datetime.now()
+                process_time = (end_time - start_time).total_seconds()
+                logger.info(f"OCR处理完成，耗时: {process_time}秒")
+                
+                return extracted_text
+            except Exception as parse_error:
+                logger.error(f"解析OCR响应失败: {str(parse_error)}")
+                logger.error(f"响应内容: {response.text}")
+                return None
+        else:
+            logger.error(f"OCR API请求失败: {response.status_code}, {response.text}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"OCR处理异常: {str(e)}")
+        return None
+
+# 测试代码（当直接运行此文件时执行）
+if __name__ == "__main__":
+    # 设置日志级别
+    logging.basicConfig(level=logging.INFO)
+    
+    # 测试图片路径
+    test_image = "test.jpg"
+    
+    if os.path.exists(test_image):
+        result = process_image(test_image)
+        if result:
+            print("提取的文本:")
+            print(result)
+        else:
+            print("文本提取失败")
+    else:
+        print(f"测试图片不存在: {test_image}") 

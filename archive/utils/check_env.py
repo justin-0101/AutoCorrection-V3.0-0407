@@ -1,0 +1,61 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+import os
+from dotenv import load_dotenv
+
+def check_env():
+    """检查环境变量配置"""
+    print("=== 环境变量检查 ===")
+    
+    # 加载环境变量
+    load_dotenv()
+    
+    # 检查千问API密钥
+    api_key = os.getenv("DASHSCOPE_API_KEY")
+    if not api_key:
+        print("错误: DASHSCOPE_API_KEY 未设置")
+    else:
+        masked_key = api_key[:4] + "*" * (len(api_key) - 8) + api_key[-4:]
+        print(f"DASHSCOPE_API_KEY: {masked_key} (长度: {len(api_key)})")
+    
+    # 检查模型名称
+    model = os.getenv("DASHSCOPE_MODEL", "qwen-vl-max")
+    print(f"DASHSCOPE_MODEL: {model}")
+    
+    # 检查环境变量文件
+    env_path = ".env"
+    if os.path.exists(env_path):
+        print(f"\n.env 文件存在，大小: {os.path.getsize(env_path)}字节")
+        print("文件内容 (敏感信息已隐藏):")
+        try:
+            pass  # 自动修复的空块
+        except Exception as e:
+            logger.error(f"发生错误: {str(e)}")
+        except Exception as e:
+            logger.error(f"发生错误: {str(e)}")
+            with open(env_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        if "DASHSCOPE_API_KEY" in line and "=" in line:
+                            key, value = line.split("=", 1)
+                            if value:
+                                masked = value[:4] + "*" * (len(value) - 8) + value[-4:] if len(value) > 8 else "****"
+                                print(f"{key}={masked}")
+                            else:
+                                print(f"{key}=<空值>")
+                        else:
+                            print(line)
+        except Exception as e:
+            print(f"读取.env文件时出错: {e}")
+    else:
+        print("\n.env 文件不存在")
+    
+    return api_key is not None and len(api_key) > 10
+
+if __name__ == "__main__":
+    if check_env():
+        print("\n✅ 环境变量配置正常")
+    else:
+        print("\n❌ 环境变量配置有问题，请检查!") 

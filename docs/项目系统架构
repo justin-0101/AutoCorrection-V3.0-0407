@@ -1,0 +1,125 @@
+系统架构概览
+1. 数据层
+数据库
+SQLite数据库 (essay_correction.db)
+使用Flask-SQLAlchemy进行ORM
+核心模型
+Essay: 作文模型，包含内容、状态、评分等信息
+新增了source_type字段，类型为枚举，支持多种来源类型
+使用EssaySourceType枚举管理来源类型 (text, upload, paste, api等)
+User: 用户模型，处理认证和权限
+Correction: 批改结果模型，存储批改信息
+UserFeedback: 用户反馈模型
+TaskStatus: 任务状态跟踪模型(计划中)
+数据迁移
+使用Flask-Migrate管理数据库迁移
+已创建并应用了source_type字段的迁移
+2. 服务层
+核心服务
+ServiceContainer: 依赖注入容器，管理服务实例
+通过register和get方法管理服务生命周期
+AIClientFactory: AI客户端工厂，负责创建不同AI提供商的客户端
+RedisService: Redis服务，用于缓存和消息队列
+CorrectionService: 批改服务，处理作文批改的核心逻辑
+输入处理
+InputSanitizer: 输入清理工具，处理用户输入的安全性和规范化
+sanitize_input: 通用输入清理
+sanitize_enum_input: 枚举类型输入处理
+文档处理
+DocumentProcessor: 处理上传的文档，提取内容
+支持多种文件格式(.docx, .pdf, .txt)
+3. 异步处理系统
+任务队列
+使用Celery+Redis实现异步任务队列
+批改任务作为异步处理，避免阻塞用户界面
+关键任务
+process_essay_correction: 作文批改任务
+包含重试机制和错误处理
+监控
+使用Prometheus进行任务监控(计划中)
+任务状态记录到数据库(计划中)
+4. Web应用层
+路由与控制器
+main_routes.py: 主要路由处理
+/correction: 处理作文提交(文本输入和文件上传)
+auth_routes.py: 认证相关路由
+模板引擎
+使用Jinja2模板系统
+模板存储在templates目录
+静态资源
+CSS、JavaScript和图片存储在static目录
+5. 基础设施
+配置管理
+使用环境变量和.env文件管理配置
+不同环境(开发、测试、生产)有不同配置
+日志系统
+应用级别日志
+任务级别日志(计划中)
+日志分类存储
+监控系统
+Prometheus指标收集(计划中)
+服务健康检查(计划中)
+6. 安全与性能
+安全特性
+输入验证和清理
+安全的密码存储
+防止SQL注入(SQLAlchemy)
+性能优化
+数据库索引优化
+Redis缓存机制(计划中)
+异步处理避免阻塞
+7. 测试框架
+测试类型
+单元测试
+集成测试
+端到端测试(计划中)
+测试工具
+Pytest测试框架
+测试配置(conftest.py)
+模拟对象和测试数据
+8. 部署与运维
+部署方式
+WSGI应用服务器
+Celery工作器
+备份策略
+数据库备份
+代码版本控制
+监控与警报
+系统状态监控(计划中)
+错误警报机制(计划中)
+
+#已存在的系统组件
+已确认存在的组件：
+数据层:
+SQLite数据库(essay_correction.db)
+Essay模型及刚添加的source_type字段
+User和Correction模型
+Flask-SQLAlchemy ORM
+Flask-Migrate数据库迁移
+服务层:
+ServiceContainer依赖注入系统(但有缺陷，无法获取ai_client_factory)
+AIClientFactory(存在但有问题)
+InputSanitizer输入处理工具
+DocumentProcessor文档处理
+异步处理:
+Celery+Redis任务队列
+process_essay_correction批改任务(当前实现有问题)
+Web应用层:
+Flask路由系统
+Jinja2模板
+静态资源管理
+计划实现的组件：
+
+#第二阶段计划的系统组件:
+TaskStatus模型(计划中)
+改进的任务重试机制
+任务日志分离
+死信队列配置
+Prometheus监控指标
+第三阶段计划:
+服务容器自动注册机制
+依赖验证中间件
+服务生命周期管理
+第四阶段计划:
+完整的测试套件
+技术文档和操作手册

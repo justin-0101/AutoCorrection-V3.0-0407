@@ -1,0 +1,193 @@
+# 开发环境设置指南
+
+本指南提供了设置一致开发环境的步骤，以防止常见问题（如缩进错误）并提高代码质量。
+
+## 必要工具安装
+
+### 1. Python 环境
+
+确保使用 Python 3.8 或更高版本:
+
+```bash
+# 检查Python版本
+python --version
+```
+
+### 2. 代码质量工具
+
+安装以下工具来维护代码质量:
+
+```bash
+# 安装必要的代码质量工具
+pip install black flake8 pylint isort pre-commit
+```
+
+## IDE 设置
+
+### VS Code 配置
+
+1. 安装以下扩展:
+   - Python (Microsoft)
+   - EditorConfig for VS Code
+   - Python Docstring Generator
+   - Pylint
+   - autoDocstring
+
+2. 配置 `settings.json`:
+
+```json
+{
+    "editor.formatOnSave": true,
+    "python.formatting.provider": "black",
+    "python.linting.enabled": true,
+    "python.linting.pylintEnabled": true,
+    "python.linting.flake8Enabled": true,
+    "python.sortImports.args": ["--profile", "black"],
+    "editor.rulers": [88],
+    "editor.detectIndentation": false,
+    "editor.insertSpaces": true,
+    "editor.tabSize": 4
+}
+```
+
+### PyCharm 配置
+
+1. 安装插件:
+   - .editorconfig
+   - Save Actions
+
+2. 配置 PyCharm:
+   - 转到 `File > Settings > Editor > Code Style > Python`
+   - 设置缩进为4个空格
+   - 启用 `Use tab character` 选项
+   - 在 `Other Settings` 中设置行长度为88
+
+3. 设置外部工具:
+   - 添加 Black 作为外部工具
+   - 添加 isort 作为外部工具
+   - 配置保存时运行这些工具
+
+## 版本控制配置
+
+### Git 配置
+
+1. 配置 Git 忽略文件:
+
+```bash
+# 创建全局 gitignore
+git config --global core.excludesfile ~/.gitignore_global
+```
+
+添加以下内容到 `~/.gitignore_global`:
+```
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+```
+
+2. 设置 pre-commit 钩子:
+
+在项目根目录下创建 `.pre-commit-config.yaml`:
+
+```yaml
+repos:
+-   repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+    -   id: trailing-whitespace
+    -   id: end-of-file-fixer
+    -   id: check-yaml
+    -   id: check-added-large-files
+
+-   repo: https://github.com/pycqa/isort
+    rev: 5.12.0
+    hooks:
+    -   id: isort
+        args: ["--profile", "black"]
+
+-   repo: https://github.com/psf/black
+    rev: 23.3.0
+    hooks:
+    -   id: black
+        language_version: python3.8
+
+-   repo: https://github.com/pycqa/flake8
+    rev: 6.0.0
+    hooks:
+    -   id: flake8
+        additional_dependencies: [flake8-docstrings]
+```
+
+安装 pre-commit 钩子:
+
+```bash
+pre-commit install
+```
+
+## 项目级配置
+
+在项目根目录创建以下配置文件:
+
+### flake8 配置 (.flake8)
+
+```ini
+[flake8]
+max-line-length = 88
+extend-ignore = E203
+exclude = .git,__pycache__,build,dist
+```
+
+### pylint 配置 (pylintrc)
+
+```ini
+[MASTER]
+max-line-length=88
+disable=C0111
+```
+
+### isort 配置 (.isort.cfg)
+
+```ini
+[settings]
+profile=black
+line_length=88
+```
+
+## 结构化代码
+
+1. **按模块组织代码**:
+   - 使用包和子包来组织相关功能
+   - 保持函数和类的单一责任
+
+2. **确保正确的异常处理**:
+   - 所有 `try` 块必须有对应的 `except` 或 `finally`
+   - 在异常处理中记录足够的上下文
+   - 不要捕获过于宽泛的异常
+
+3. **定期检查和修复**:
+   - 使用自动化脚本定期检查代码质量
+   - 设置 CI/CD 管道来验证提交的代码 

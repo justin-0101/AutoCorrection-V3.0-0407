@@ -1,0 +1,17 @@
+
+# config/source_types.yaml
+allowed_types:
+  - text
+  - paste
+  - upload
+  - api
+  - email  # 可添加新的类型
+  - speech # 语音输入
+validation:
+  case_sensitive: false
+  allow_whitespace: false
+  max_length: 20
+defaults:
+  default_type: text
+  fallback_type: text
+replace_types: false  # 是否替换现有类型

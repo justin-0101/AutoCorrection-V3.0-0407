@@ -1,0 +1,3100 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理员后台演示</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    
+    <style>
+        /* 侧边栏样式 */
+        .sidebar {
+            position: fixed;
+            top: 0;
+            bottom: 0;
+            left: 0;
+            z-index: 100;
+            padding: 48px 0 0;
+            box-shadow: inset -1px 0 0 rgba(0, 0, 0, .1);
+            background-color: #343a40;
+        }
+        
+        .sidebar .nav-link {
+            font-weight: 500;
+            color: #ced4da;
+            padding: 0.75rem 1rem;
+            transition: all 0.2s ease;
+        }
+        
+        .sidebar .nav-link:hover, 
+        .sidebar .nav-link.active {
+            color: #fff;
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+        
+        .sidebar .nav-link i {
+            margin-right: 10px;
+        }
+        
+        .sidebar-heading {
+            font-size: .75rem;
+            text-transform: uppercase;
+            padding: 1rem;
+            color: #adb5bd;
+        }
+        
+        .navbar-brand {
+            padding: 1rem;
+            color: #fff;
+            background-color: rgba(0, 0, 0, .25);
+            width: 100%;
+            display: block;
+            text-align: center;
+        }
+        
+        /* 主内容区域样式 */
+        main {
+            padding-top: 1.5rem;
+        }
+        
+        /* 卡片样式 */
+        .card {
+            margin-bottom: 1.5rem;
+            box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+            transition: all 0.2s ease;
+        }
+        
+        .card:hover {
+            box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+        }
+        
+        /* 表格样式 */
+        .table th {
+            background-color: #f8f9fa;
+            border-top: none;
+        }
+        
+        /* 状态指示器 */
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+        
+        .status-active {
+            background-color: #28a745;
+        }
+        
+        .status-inactive {
+            background-color: #dc3545;
+        }
+        
+        /* 加载指示器 */
+        .loading {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 2rem;
+            color: #6c757d;
+        }
+        
+        .loading i {
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* 响应式调整 */
+        @media (max-width: 767.98px) {
+            .sidebar {
+                position: static;
+                padding-top: 0;
+                box-shadow: none;
+            }
+            
+            main {
+                margin-left: 0 !important;
+            }
+        }
+        
+        /* 页面切换动画 */
+        #page-content > div {
+            animation: fadeIn 0.3s ease;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        /* 自定义滚动条 */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: #adb5bd;
+            border-radius: 3px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: #6c757d;
+        }
+
+        /* 自定义Toast通知 */
+        .toast-container {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 9999;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- 侧边栏导航 -->
+            <nav id="sidebar" class="col-md-3 col-lg-2 d-md-block sidebar collapse">
+                <div class="position-sticky">
+                    <h1 class="navbar-brand">作文批改系统</h1>
+                    <div class="pt-3">
+                        <ul class="nav flex-column">
+                            <li class="nav-item">
+                                <a class="nav-link active" href="#" data-page="dashboard">
+                                    <i class="bi bi-speedometer2"></i> 控制面板
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link" href="#" data-page="users">
+                                    <i class="bi bi-people"></i> 用户管理
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link" href="#" data-page="membership">
+                                    <i class="bi bi-star"></i> 会员管理
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link" href="#" data-page="essays">
+                                    <i class="bi bi-book"></i> 作文管理
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link" href="#" data-page="stats">
+                                    <i class="bi bi-bar-chart"></i> 数据统计
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link" href="#" data-page="config">
+                                    <i class="bi bi-gear"></i> 系统配置
+                                </a>
+                            </li>
+                        </ul>
+                        
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>用户</span>
+                        </h6>
+                        <ul class="nav flex-column mb-2">
+                            <li class="nav-item">
+                                <a class="nav-link" href="#">
+                                    <i class="bi bi-box-arrow-right"></i> 退出登录
+                                </a>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </nav>
+
+            <!-- 主内容区域 -->
+            <main class="col-md-9 ms-sm-auto col-lg-10 px-md-4">
+                <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+                    <h1 class="h2" id="page-title">控制面板</h1>
+                    <div class="btn-toolbar mb-2 mb-md-0">
+                        <div class="btn-group me-2">
+                            <button type="button" class="btn btn-sm btn-outline-secondary">操作</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary">导出</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 页面内容区域 -->
+                <div id="page-content">
+                    <!-- 默认显示控制面板 -->
+                    <div id="dashboard-content">
+                        <div class="row row-cols-1 row-cols-md-2 row-cols-xl-4 g-4 mb-4">
+                            <div class="col">
+                                <div class="card border-primary">
+                                    <div class="card-body">
+                                        <h5 class="card-title">用户总数</h5>
+                                        <h2 class="card-text" id="total-users">--</h2>
+                                        <p class="card-text text-muted">较上月增长 <span id="user-growth">--</span>%</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col">
+                                <div class="card border-success">
+                                    <div class="card-body">
+                                        <h5 class="card-title">作文总数</h5>
+                                        <h2 class="card-text" id="total-essays">--</h2>
+                                        <p class="card-text text-muted">较上月增长 <span id="essay-growth">--</span>%</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col">
+                                <div class="card border-info">
+                                    <div class="card-body">
+                                        <h5 class="card-title">会员数量</h5>
+                                        <h2 class="card-text" id="total-memberships">--</h2>
+                                        <p class="card-text text-muted">转化率 <span id="conversion-rate">--</span>%</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col">
+                                <div class="card border-warning">
+                                    <div class="card-body">
+                                        <h5 class="card-title">月收入</h5>
+                                        <h2 class="card-text" id="monthly-revenue">--</h2>
+                                        <p class="card-text text-muted">较上月 <span id="revenue-growth">--</span>%</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6 mb-4">
+                                <div class="card">
+                                    <div class="card-header">用户增长趋势</div>
+                                    <div class="card-body">
+                                        <canvas id="users-chart" width="400" height="200"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6 mb-4">
+                                <div class="card">
+                                    <div class="card-header">收入趋势</div>
+                                    <div class="card-body">
+                                        <canvas id="revenue-chart" width="400" height="200"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 其他页面内容将由JavaScript动态加载 -->
+                    <div id="users-content" style="display:none;"></div>
+                    <div id="membership-content" style="display:none;"></div>
+                    <div id="essays-content" style="display:none;"></div>
+                    <div id="stats-content" style="display:none;"></div>
+                    <div id="config-content" style="display:none;"></div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- 模态框 -->
+    <div class="modal fade" id="commonModal" tabindex="-1" aria-labelledby="modalTitle" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="modalTitle">标题</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+                </div>
+                <div class="modal-body" id="modalBody">
+                    <!-- 模态框内容将动态加载 -->
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                    <button type="button" class="btn btn-primary" id="modalConfirm">确认</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast通知容器 -->
+    <div class="toast-container"></div>
+
+    <!-- JavaScript -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+    <!-- 添加自定义JavaScript -->
+    <script>
+        // 全局变量
+        const currentUser = {
+            id: 1,
+            username: 'admin',
+            email: 'admin@example.com',
+            is_admin: true,
+            created_at: '2023-01-01T00:00:00'
+        };
+        
+        // 模拟数据
+        const mockData = {
+            // 仪表盘数据
+            dashboard: {
+                users: {
+                    total: 1258,
+                    growth: 15.8,
+                    trend: {
+                        labels: ['1月', '2月', '3月', '4月', '5月', '6月'],
+                        data: [850, 900, 950, 1050, 1150, 1258]
+                    }
+                },
+                essays: {
+                    total: 3475,
+                    growth: 23.4,
+                    trend: {
+                        labels: ['1月', '2月', '3月', '4月', '5月', '6月'],
+                        data: [2200, 2400, 2600, 2900, 3200, 3475]
+                    }
+                },
+                memberships: {
+                    total: 325,
+                    conversion_rate: 25.8
+                },
+                revenue: {
+                    monthly: 32560,
+                    growth: 18.5,
+                    trend: {
+                        labels: ['1月', '2月', '3月', '4月', '5月', '6月'],
+                        data: [15000, 18000, 21000, 25000, 28000, 32560]
+                    }
+                }
+            },
+            
+            // 用户数据
+            users: {
+                data: [
+                    {
+                        id: 1,
+                        username: 'admin',
+                        email: 'admin@example.com',
+                        is_admin: true,
+                        membership_status: '年度会员',
+                        membership_expires_at: '2024-12-31',
+                        created_at: '2023-01-01T00:00:00',
+                        last_login_at: '2023-06-15T14:30:00',
+                        essay_count: 42
+                    },
+                    {
+                        id: 2,
+                        username: 'zhang_san',
+                        email: 'zhangsan@example.com',
+                        is_admin: false,
+                        membership_status: '月度会员',
+                        membership_expires_at: '2023-07-15',
+                        created_at: '2023-02-15T10:20:00',
+                        last_login_at: '2023-06-14T09:45:00',
+                        essay_count: 15
+                    },
+                    {
+                        id: 3,
+                        username: 'li_si',
+                        email: 'lisi@example.com',
+                        is_admin: false,
+                        membership_status: null,
+                        membership_expires_at: null,
+                        created_at: '2023-03-10T08:30:00',
+                        last_login_at: '2023-06-01T11:20:00',
+                        essay_count: 3
+                    },
+                    {
+                        id: 4,
+                        username: 'wang_wu',
+                        email: 'wangwu@example.com',
+                        is_admin: false,
+                        membership_status: '年度会员',
+                        membership_expires_at: '2024-05-20',
+                        created_at: '2023-03-20T14:15:00',
+                        last_login_at: '2023-06-10T16:40:00',
+                        essay_count: 28
+                    },
+                    {
+                        id: 5,
+                        username: 'zhao_liu',
+                        email: 'zhaoliu@example.com',
+                        is_admin: false,
+                        membership_status: null,
+                        membership_expires_at: null,
+                        created_at: '2023-04-05T09:10:00',
+                        last_login_at: '2023-05-25T10:30:00',
+                        essay_count: 0
+                    },
+                    {
+                        id: 6,
+                        username: 'qian_qi',
+                        email: 'qianqi@example.com',
+                        is_admin: false,
+                        membership_status: '月度会员',
+                        membership_expires_at: '2023-06-30',
+                        created_at: '2023-04-15T11:25:00',
+                        last_login_at: '2023-06-12T13:15:00',
+                        essay_count: 8
+                    },
+                    {
+                        id: 7,
+                        username: 'sun_ba',
+                        email: 'sunba@example.com',
+                        is_admin: false,
+                        membership_status: null,
+                        membership_expires_at: null,
+                        created_at: '2023-04-25T16:40:00',
+                        last_login_at: '2023-05-30T09:20:00',
+                        essay_count: 1
+                    },
+                    {
+                        id: 8,
+                        username: 'zhou_jiu',
+                        email: 'zhoujiu@example.com',
+                        is_admin: false,
+                        membership_status: '年度会员',
+                        membership_expires_at: '2024-01-10',
+                        created_at: '2023-05-05T10:30:00',
+                        last_login_at: '2023-06-13T15:50:00',
+                        essay_count: 20
+                    },
+                    {
+                        id: 9,
+                        username: 'wu_shi',
+                        email: 'wushi@example.com',
+                        is_admin: false,
+                        membership_status: null,
+                        membership_expires_at: null,
+                        created_at: '2023-05-15T08:45:00',
+                        last_login_at: '2023-06-05T11:10:00',
+                        essay_count: 5
+                    },
+                    {
+                        id: 10,
+                        username: 'zheng_shiyi',
+                        email: 'zhengshiyi@example.com',
+                        is_admin: false,
+                        membership_status: '月度会员',
+                        membership_expires_at: '2023-07-05',
+                        created_at: '2023-05-25T13:20:00',
+                        last_login_at: '2023-06-14T16:30:00',
+                        essay_count: 12
+                    }
+                ],
+                pagination: {
+                    page: 1,
+                    pages: 3,
+                    per_page: 10,
+                    total: 26,
+                    has_prev: false,
+                    has_next: true,
+                    prev_num: null,
+                    next_num: 2
+                }
+            },
+            
+            // 会员计划数据
+            membershipPlans: [
+                {
+                    id: 1,
+                    name: "月度会员",
+                    price: 29.90,
+                    duration_days: 30,
+                    daily_limit: 5,
+                    features: "优先批改,AI辅助解析,专业老师点评"
+                },
+                {
+                    id: 2,
+                    name: "年度会员",
+                    price: 298.00,
+                    duration_days: 365,
+                    daily_limit: 10,
+                    features: "优先批改,AI辅助解析,专业老师点评,个性化学习计划"
+                },
+                {
+                    id: 3,
+                    name: "终身会员",
+                    price: 998.00,
+                    duration_days: 36500,
+                    daily_limit: 0,
+                    features: "无限批改,AI辅助解析,专业老师点评,个性化学习计划,VIP客服"
+                }
+            ],
+            
+            // 会员用户数据
+            memberships: {
+                data: [
+                    {
+                        user_id: 1,
+                        username: "admin",
+                        email: "admin@example.com",
+                        plan_id: 3,
+                        plan_name: "终身会员",
+                        created_at: "2023-01-15T08:00:00Z",
+                        expires_at: "2123-01-15T08:00:00Z",
+                        payment_method: "支付宝",
+                        amount: 998.00,
+                        transaction_id: "TX-20230115080000",
+                        daily_limit: 0,
+                        features: "无限批改,AI辅助解析,专业老师点评,个性化学习计划,VIP客服"
+                    },
+                    {
+                        user_id: 2,
+                        username: "zhang_san",
+                        email: "zhangsan@example.com",
+                        plan_id: 2,
+                        plan_name: "年度会员",
+                        created_at: "2023-05-20T10:15:00Z",
+                        expires_at: "2024-05-20T10:15:00Z",
+                        payment_method: "微信支付",
+                        amount: 298.00,
+                        transaction_id: "TX-20230520101500",
+                        daily_limit: 10,
+                        features: "优先批改,AI辅助解析,专业老师点评,个性化学习计划"
+                    },
+                    {
+                        user_id: 4,
+                        username: "wang_wu",
+                        email: "wangwu@example.com",
+                        plan_id: 2,
+                        plan_name: "年度会员",
+                        created_at: "2023-06-10T09:30:00Z",
+                        expires_at: "2024-06-10T09:30:00Z",
+                        payment_method: "银行卡",
+                        amount: 298.00,
+                        transaction_id: "TX-20230610093000",
+                        daily_limit: 10,
+                        features: "优先批改,AI辅助解析,专业老师点评,个性化学习计划"
+                    },
+                    {
+                        user_id: 6,
+                        username: "qian_qi",
+                        email: "qianqi@example.com",
+                        plan_id: 1,
+                        plan_name: "月度会员",
+                        created_at: "2023-06-01T14:20:00Z",
+                        expires_at: "2023-07-01T14:20:00Z",
+                        payment_method: "支付宝",
+                        amount: 29.90,
+                        transaction_id: "TX-20230601142000",
+                        daily_limit: 5,
+                        features: "优先批改,AI辅助解析,专业老师点评"
+                    },
+                    {
+                        user_id: 8,
+                        username: "zhou_jiu",
+                        email: "zhoujiu@example.com",
+                        plan_id: 2,
+                        plan_name: "年度会员",
+                        created_at: "2023-01-10T11:45:00Z",
+                        expires_at: "2024-01-10T11:45:00Z",
+                        payment_method: "微信支付",
+                        amount: 298.00,
+                        transaction_id: "TX-20230110114500",
+                        daily_limit: 10,
+                        features: "优先批改,AI辅助解析,专业老师点评,个性化学习计划"
+                    },
+                    {
+                        user_id: 10,
+                        username: "zheng_shiyi",
+                        email: "zhengshiyi@example.com",
+                        plan_id: 1,
+                        plan_name: "月度会员",
+                        created_at: "2023-06-05T15:30:00Z",
+                        expires_at: "2023-07-05T15:30:00Z",
+                        payment_method: "微信支付",
+                        amount: 29.90,
+                        transaction_id: "TX-20230605153000",
+                        daily_limit: 5,
+                        features: "优先批改,AI辅助解析,专业老师点评"
+                    }
+                ],
+                pagination: {
+                    page: 1,
+                    pages: 2,
+                    per_page: 10,
+                    total: 16,
+                    has_prev: false,
+                    has_next: true,
+                    prev_num: null,
+                    next_num: 2
+                }
+            },
+            
+            // 作文数据
+            essays: {
+                data: [
+                    {
+                        id: 1,
+                        title: "我的暑假生活",
+                        user_id: 2,
+                        username: "zhang_san",
+                        status: "已批改",
+                        word_count: 560,
+                        created_at: "2023-06-10T15:30:00Z",
+                        updated_at: "2023-06-10T16:20:00Z",
+                        score: 85,
+                        grade_level: "初中"
+                    },
+                    {
+                        id: 2,
+                        title: "环保与我们的生活",
+                        user_id: 4,
+                        username: "wang_wu",
+                        status: "待批改",
+                        word_count: 750,
+                        created_at: "2023-06-12T09:40:00Z",
+                        updated_at: "2023-06-12T09:40:00Z",
+                        score: null,
+                        grade_level: "高中"
+                    },
+                    {
+                        id: 3,
+                        title: "谈谈我对读书的理解",
+                        user_id: 6,
+                        username: "qian_qi",
+                        status: "已批改",
+                        word_count: 620,
+                        created_at: "2023-06-09T14:20:00Z",
+                        updated_at: "2023-06-09T15:15:00Z",
+                        score: 92,
+                        grade_level: "高中"
+                    },
+                    {
+                        id: 4,
+                        title: "我的家乡",
+                        user_id: 8,
+                        username: "zhou_jiu",
+                        status: "已批改",
+                        word_count: 480,
+                        created_at: "2023-06-08T10:10:00Z",
+                        updated_at: "2023-06-08T11:30:00Z",
+                        score: 78,
+                        grade_level: "小学"
+                    },
+                    {
+                        id: 5,
+                        title: "科技改变生活",
+                        user_id: 10,
+                        username: "zheng_shiyi",
+                        status: "待批改",
+                        word_count: 830,
+                        created_at: "2023-06-14T13:50:00Z",
+                        updated_at: "2023-06-14T13:50:00Z",
+                        score: null,
+                        grade_level: "高中"
+                    },
+                    {
+                        id: 6,
+                        title: "友谊的重要性",
+                        user_id: 3,
+                        username: "li_si",
+                        status: "已批改",
+                        word_count: 540,
+                        created_at: "2023-06-05T16:00:00Z",
+                        updated_at: "2023-06-05T17:20:00Z",
+                        score: 88,
+                        grade_level: "初中"
+                    },
+                    {
+                        id: 7,
+                        title: "保护环境，从我做起",
+                        user_id: 2,
+                        username: "zhang_san",
+                        status: "系统批改",
+                        word_count: 680,
+                        created_at: "2023-06-11T11:25:00Z",
+                        updated_at: "2023-06-11T11:28:00Z",
+                        score: 75,
+                        grade_level: "初中"
+                    },
+                    {
+                        id: 8,
+                        title: "我的理想职业",
+                        user_id: 4,
+                        username: "wang_wu",
+                        status: "待批改",
+                        word_count: 710,
+                        created_at: "2023-06-13T15:40:00Z",
+                        updated_at: "2023-06-13T15:40:00Z",
+                        score: null,
+                        grade_level: "高中"
+                    },
+                    {
+                        id: 9,
+                        title: "互联网与青少年",
+                        user_id: 8,
+                        username: "zhou_jiu",
+                        status: "系统批改",
+                        word_count: 760,
+                        created_at: "2023-06-14T09:15:00Z",
+                        updated_at: "2023-06-14T09:18:00Z",
+                        score: 82,
+                        grade_level: "高中"
+                    },
+                    {
+                        id: 10,
+                        title: "我最敬佩的人",
+                        user_id: 10,
+                        username: "zheng_shiyi",
+                        status: "已批改",
+                        word_count: 520,
+                        created_at: "2023-06-07T14:30:00Z",
+                        updated_at: "2023-06-07T16:00:00Z",
+                        score: 90,
+                        grade_level: "初中"
+                    }
+                ],
+                pagination: {
+                    page: 1,
+                    pages: 3,
+                    per_page: 10,
+                    total: 28,
+                    has_prev: false,
+                    has_next: true,
+                    prev_num: null,
+                    next_num: 2
+                }
+            },
+            
+            // 作文详情数据
+            essayDetails: {
+                id: 1,
+                title: "我的暑假生活",
+                content: "今年暑假，我过得十分充实。首先，我参加了为期两周的夏令营，认识了许多新朋友，学习了各种有趣的知识和技能。在那里，我们一起参观了科技馆，进行了户外探险活动，还自己动手制作了手工艺品。回家后，我每天坚持阅读和写作，完成了暑假作业，还看了几本课外书。此外，我还和家人一起去了海边旅游，体验了海上冲浪，看到了美丽的日出日落。这个暑假让我不仅放松了身心，也学到了很多知识，真是一段难忘的经历。",
+                user_id: 2,
+                username: "zhang_san",
+                status: "已批改",
+                word_count: 560,
+                created_at: "2023-06-10T15:30:00Z",
+                updated_at: "2023-06-10T16:20:00Z",
+                score: 85,
+                grade_level: "初中",
+                comments: [
+                    {
+                        paragraph_index: 0,
+                        comment: "开头引人入胜，但可以更具体地描述夏令营的活动。",
+                        type: "suggestion"
+                    },
+                    {
+                        paragraph_index: 0,
+                        comment: "这里有几处用词不够准确，可以使用更丰富的形容词。",
+                        type: "correction"
+                    }
+                ],
+                corrections: [
+                    {
+                        original: "认识了许多新朋友",
+                        corrected: "结交了许多新朋友",
+                        reason: "用词更加准确"
+                    },
+                    {
+                        original: "进行了户外探险活动",
+                        corrected: "参与了户外探险活动",
+                        reason: "表达更加自然"
+                    }
+                ],
+                overall_comment: "这篇作文内容充实，条理清晰，能够完整地描述暑假生活。语言表达基本流畅，但个别地方用词不够准确，可以使用更丰富的词汇。建议增加一些具体细节描写，使文章更加生动。总体来说是一篇不错的作文。",
+                grader: "李老师",
+                graded_at: "2023-06-10T16:20:00Z"
+            }
+        };
+        
+        // 定义图表对象
+        const charts = {
+            usersChart: null,
+            revenueChart: null
+        };
+        
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            // 初始化导航
+            initNavigation();
+            
+            // 加载仪表盘数据
+            loadDashboardData();
+        });
+        
+        /**
+         * 初始化导航
+         */
+        function initNavigation() {
+            const navLinks = document.querySelectorAll('.nav-link[data-page]');
+            
+            navLinks.forEach(link => {
+                link.addEventListener('click', function(event) {
+                    event.preventDefault();
+                    
+                    // 移除所有活动链接的active类
+                    navLinks.forEach(item => item.classList.remove('active'));
+                    
+                    // 为当前链接添加active类
+                    this.classList.add('active');
+                    
+                    // 切换页面
+                    const page = this.getAttribute('data-page');
+                    changePage(page);
+                });
+            });
+        }
+        
+        /**
+         * 切换页面
+         * @param {string} page - 页面标识符
+         */
+        function changePage(page) {
+            // 隐藏所有内容
+            const contentDivs = document.querySelectorAll('#page-content > div');
+            contentDivs.forEach(div => div.style.display = 'none');
+            
+            // 更新页面标题
+            const pageTitle = document.getElementById('page-title');
+            
+            // 显示选中的内容
+            switch(page) {
+                case 'users':
+                    pageTitle.textContent = '用户管理';
+                    const usersContent = document.getElementById('users-content');
+                    usersContent.style.display = 'block';
+                    loadUsersPage();
+                    break;
+                    
+                case 'membership':
+                    pageTitle.textContent = '会员管理';
+                    const membershipContent = document.getElementById('membership-content');
+                    membershipContent.style.display = 'block';
+                    loadMembershipPage();
+                    break;
+                    
+                case 'essays':
+                    pageTitle.textContent = '作文管理';
+                    const essaysContent = document.getElementById('essays-content');
+                    essaysContent.style.display = 'block';
+                    loadEssaysPage();
+                    break;
+                    
+                case 'stats':
+                    pageTitle.textContent = '数据统计';
+                    const statsContent = document.getElementById('stats-content');
+                    statsContent.style.display = 'block';
+                    statsContent.innerHTML = '<div class="alert alert-info">数据统计功能正在开发中...</div>';
+                    break;
+                    
+                case 'config':
+                    pageTitle.textContent = '系统配置';
+                    const configContent = document.getElementById('config-content');
+                    configContent.style.display = 'block';
+                    configContent.innerHTML = '<div class="alert alert-info">系统配置功能正在开发中...</div>';
+                    break;
+                    
+                default:
+                    // 默认显示控制面板
+                    pageTitle.textContent = '控制面板';
+                    document.getElementById('dashboard-content').style.display = 'block';
+                    loadDashboardData();
+            }
+        }
+        
+        /**
+         * 加载控制面板数据
+         */
+        function loadDashboardData() {
+            try {
+                // 获取模拟数据
+                const data = mockData.dashboard;
+                
+                // 填充数据
+                document.getElementById('total-users').textContent = data.users.total;
+                document.getElementById('user-growth').textContent = data.users.growth;
+                
+                document.getElementById('total-essays').textContent = data.essays.total;
+                document.getElementById('essay-growth').textContent = data.essays.growth;
+                
+                document.getElementById('total-memberships').textContent = data.memberships.total;
+                document.getElementById('conversion-rate').textContent = data.memberships.conversion_rate;
+                
+                document.getElementById('monthly-revenue').textContent = `¥${data.revenue.monthly}`;
+                document.getElementById('revenue-growth').textContent = data.revenue.growth;
+                
+                // 初始化图表
+                initDashboardCharts(data);
+                
+            } catch (error) {
+                console.error('加载控制面板数据失败:', error);
+                showToast('加载控制面板数据失败', 'danger');
+            }
+        }
+        
+        /**
+         * 初始化控制面板图表
+         * @param {Object} data - 仪表盘数据
+         */
+        function initDashboardCharts(data) {
+            // 用户增长趋势图
+            const usersChartCtx = document.getElementById('users-chart').getContext('2d');
+            
+            if (charts.usersChart) {
+                charts.usersChart.destroy();
+            }
+            
+            charts.usersChart = new Chart(usersChartCtx, {
+                type: 'line',
+                data: {
+                    labels: data.users.trend.labels,
+                    datasets: [{
+                        label: '用户数量',
+                        data: data.users.trend.data,
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                        tension: 0.1,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+            
+            // 收入趋势图
+            const revenueChartCtx = document.getElementById('revenue-chart').getContext('2d');
+            
+            if (charts.revenueChart) {
+                charts.revenueChart.destroy();
+            }
+            
+            charts.revenueChart = new Chart(revenueChartCtx, {
+                type: 'bar',
+                data: {
+                    labels: data.revenue.trend.labels,
+                    datasets: [{
+                        label: '月收入 (元)',
+                        data: data.revenue.trend.data,
+                        backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+        
+        /**
+         * 加载用户管理页面
+         * @param {number} page - 要加载的页码
+         * @param {string} searchTerm - 搜索关键词
+         */
+        function loadUsersPage(page = 1, searchTerm = '') {
+            const usersContent = document.getElementById('users-content');
+            usersContent.innerHTML = `<div class="loading"><i class="bi bi-arrow-repeat"></i> 加载中...</div>`;
+
+            try {
+                // 模拟API调用延迟
+                setTimeout(() => {
+                    // 过滤用户数据（如果有搜索词）
+                    let filteredUsers = [...mockData.users.data];
+                    if (searchTerm) {
+                        filteredUsers = filteredUsers.filter(user => 
+                            user.username.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                            user.email.toLowerCase().includes(searchTerm.toLowerCase())
+                        );
+                    }
+                    
+                    // 模拟分页
+                    const pagination = {...mockData.users.pagination};
+                    pagination.page = page;
+                    pagination.has_prev = page > 1;
+                    pagination.has_next = page < pagination.pages;
+                    pagination.prev_num = page > 1 ? page - 1 : null;
+                    pagination.next_num = page < pagination.pages ? page + 1 : null;
+                    pagination.search = searchTerm;
+                    
+                    // 渲染用户表格
+                    renderUsersTable(filteredUsers, pagination);
+                }, 500); // 500ms延迟模拟网络请求
+                
+            } catch (error) {
+                console.error('加载用户管理页面失败:', error);
+                usersContent.innerHTML = `<div class="alert alert-danger">加载用户数据失败: ${error.message}</div>`;
+                showToast('加载用户数据失败', 'danger');
+            }
+        }
+        
+        /**
+         * 渲染用户表格和分页
+         * @param {Array} users - 用户数据数组
+         * @param {Object} pagination - 分页信息
+         */
+        function renderUsersTable(users, pagination) {
+            const usersContent = document.getElementById('users-content');
+
+            // 搜索框
+            const searchBarHTML = `
+                <div class="mb-3">
+                    <div class="input-group">
+                        <input type="text" id="user-search-input" class="form-control" placeholder="搜索用户名或邮箱..." value="${pagination.search || ''}">
+                        <button class="btn btn-outline-secondary" type="button" id="user-search-button">搜索</button>
+                    </div>
+                </div>
+            `;
+
+            // 表格头
+            let tableHTML = `
+                <table class="table table-striped table-hover align-middle">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>用户名</th>
+                            <th>邮箱</th>
+                            <th>管理员</th>
+                            <th>会员状态</th>
+                            <th>注册时间</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            // 表格行
+            if (users && users.length > 0) {
+                users.forEach(user => {
+                    tableHTML += `
+                        <tr>
+                            <td>${user.id}</td>
+                            <td>${user.username}</td>
+                            <td>${user.email}</td>
+                            <td>${user.is_admin ? '<span class="badge bg-success">是</span>' : '<span class="badge bg-secondary">否</span>'}</td>
+                            <td>${user.membership_status || '非会员'}</td>
+                            <td>${new Date(user.created_at).toLocaleString()}</td>
+                            <td>
+                                <button class="btn btn-sm btn-info me-1 view-user-btn" data-user-id="${user.id}" title="查看详情"><i class="bi bi-eye"></i></button>
+                                <button class="btn btn-sm btn-warning me-1 edit-user-btn" data-user-id="${user.id}" title="编辑"><i class="bi bi-pencil-square"></i></button>
+                                <button class="btn btn-sm btn-danger delete-user-btn" data-user-id="${user.id}" title="删除"><i class="bi bi-trash"></i></button>
+                            </td>
+                        </tr>
+                    `;
+                });
+            } else {
+                tableHTML += '<tr><td colspan="7" class="text-center">没有找到用户</td></tr>';
+            }
+
+            tableHTML += '</tbody></table>';
+
+            // 分页控件
+            const paginationHTML = `
+                <nav aria-label="用户分页">
+                    <ul class="pagination justify-content-center">
+                        <li class="page-item ${pagination.has_prev ? '' : 'disabled'}">
+                            <a class="page-link" href="#" data-page="${pagination.prev_num}">上一页</a>
+                        </li>
+                        <li class="page-item disabled"><span class="page-link">第 ${pagination.page} / ${pagination.pages} 页</span></li>
+                        <li class="page-item ${pagination.has_next ? '' : 'disabled'}">
+                            <a class="page-link" href="#" data-page="${pagination.next_num}">下一页</a>
+                        </li>
+                    </ul>
+                </nav>
+            `;
+
+            usersContent.innerHTML = searchBarHTML + tableHTML + paginationHTML;
+
+            // 添加事件监听器
+            addUsersPageEventListeners(pagination.search);
+        }
+        
+        /**
+         * 为用户管理页面元素添加事件监听器
+         * @param {string} currentSearchTerm - 当前的搜索关键词
+         */
+        function addUsersPageEventListeners(currentSearchTerm = '') {
+            // 搜索按钮
+            const searchButton = document.getElementById('user-search-button');
+            const searchInput = document.getElementById('user-search-input');
+            if (searchButton) {
+                searchButton.addEventListener('click', () => {
+                    loadUsersPage(1, searchInput.value.trim());
+                });
+            }
+            if (searchInput) {
+                searchInput.addEventListener('keypress', (event) => {
+                    if (event.key === 'Enter') {
+                        loadUsersPage(1, searchInput.value.trim());
+                    }
+                });
+            }
+
+            // 分页链接
+            const pageLinks = document.querySelectorAll('.pagination .page-link');
+            pageLinks.forEach(link => {
+                if (link.dataset.page) { // 确保是有效的页码链接
+                    link.addEventListener('click', (event) => {
+                        event.preventDefault();
+                        const page = parseInt(link.dataset.page);
+                        loadUsersPage(page, currentSearchTerm);
+                    });
+                }
+            });
+
+            // 操作按钮 (查看, 编辑, 删除)
+            document.querySelectorAll('.view-user-btn').forEach(button => {
+                button.addEventListener('click', (event) => {
+                    const userId = event.currentTarget.dataset.userId;
+                    console.log(`查看用户: ${userId}`);
+                    showUserDetailModal(userId);
+                });
+            });
+
+            document.querySelectorAll('.edit-user-btn').forEach(button => {
+                button.addEventListener('click', (event) => {
+                    const userId = event.currentTarget.dataset.userId;
+                    console.log(`编辑用户: ${userId}`);
+                    showEditUserModal(userId);
+                });
+            });
+
+            document.querySelectorAll('.delete-user-btn').forEach(button => {
+                button.addEventListener('click', (event) => {
+                    const userId = event.currentTarget.dataset.userId;
+                    console.log(`删除用户: ${userId}`);
+                    if (confirm(`确定要删除用户 ${userId} 吗？此操作不可恢复！`)) {
+                        // 模拟删除用户
+                        deleteUser(userId, currentSearchTerm);
+                    } else {
+                        showToast('取消删除', 'secondary');
+                    }
+                });
+            });
+        }
+        
+        /**
+         * 显示用户详情模态框
+         * @param {number} userId - 用户ID
+         */
+        async function showUserDetailModal(userId) {
+            const modalElement = document.getElementById('commonModal');
+            const modalTitle = document.getElementById('modalTitle');
+            const modalBody = document.getElementById('modalBody');
+            const modalConfirmButton = document.getElementById('modalConfirm');
+            const modalInstance = new bootstrap.Modal(modalElement);
+
+            // 设置加载状态
+            modalTitle.textContent = '查看用户详情';
+            modalBody.innerHTML = '<div class="text-center"><div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">加载中...</span></div> 加载中...</div>';
+            modalConfirmButton.style.display = 'none'; // 隐藏确认按钮
+            modalInstance.show();
+
+            try {
+                // 模拟加载延迟
+                setTimeout(() => {
+                    // 从模拟数据中查找用户
+                    const user = mockData.users.data.find(u => u.id == userId);
+                    
+                    if (!user) {
+                        throw new Error('用户不存在');
+                    }
+
+                    // 填充模态框内容
+                    modalTitle.textContent = `用户详情: ${user.username} (ID: ${user.id})`;
+                    modalBody.innerHTML = `
+                        <dl class="row">
+                            <dt class="col-sm-3">ID</dt>
+                            <dd class="col-sm-9">${user.id}</dd>
+
+                            <dt class="col-sm-3">用户名</dt>
+                            <dd class="col-sm-9">${user.username}</dd>
+
+                            <dt class="col-sm-3">邮箱</dt>
+                            <dd class="col-sm-9">${user.email}</dd>
+
+                            <dt class="col-sm-3">管理员</dt>
+                            <dd class="col-sm-9">${user.is_admin ? '是' : '否'}</dd>
+
+                            <dt class="col-sm-3">会员状态</dt>
+                            <dd class="col-sm-9">${user.membership_status || '非会员'}</dd>
+                            
+                            <dt class="col-sm-3">会员到期</dt>
+                            <dd class="col-sm-9">${user.membership_expires_at ? new Date(user.membership_expires_at).toLocaleDateString() : '-'}</dd>
+
+                            <dt class="col-sm-3">注册时间</dt>
+                            <dd class="col-sm-9">${new Date(user.created_at).toLocaleString()}</dd>
+                            
+                            <dt class="col-sm-3">最后登录</dt>
+                            <dd class="col-sm-9">${user.last_login_at ? new Date(user.last_login_at).toLocaleString() : '从未登录'}</dd>
+                            
+                            <dt class="col-sm-3">作文数量</dt>
+                            <dd class="col-sm-9">${user.essay_count || 0}</dd>
+                        </dl>
+                    `;
+                }, 500);
+
+            } catch (error) {
+                console.error('加载用户详情失败:', error);
+                modalBody.innerHTML = `<div class="alert alert-danger">加载用户详情失败: ${error.message}</div>`;
+                showToast('加载用户详情失败', 'danger');
+            }
+        }
+        
+        /**
+         * 删除用户
+         * @param {number} userId - 要删除的用户ID
+         * @param {string} currentSearchTerm - 当前搜索词，用于删除后刷新列表
+         */
+        function deleteUser(userId, currentSearchTerm) {
+            try {
+                // 模拟删除延迟
+                setTimeout(() => {
+                    // 从模拟数据中删除用户
+                    const userIndex = mockData.users.data.findIndex(u => u.id == userId);
+                    
+                    if (userIndex === -1) {
+                        throw new Error('用户不存在');
+                    }
+                    
+                    // 从数组中删除用户
+                    mockData.users.data.splice(userIndex, 1);
+                    
+                    showToast('用户删除成功', 'success');
+                    
+                    // 刷新用户列表
+                    loadUsersPage(getCurrentPage(), getCurrentSearchTerm());
+                }, 500);
+
+            } catch (error) {
+                console.error('删除用户失败:', error);
+                showToast(`删除用户失败: ${error.message}`, 'danger');
+            }
+        }
+        
+        /**
+         * 显示toast通知
+         * @param {string} message - 通知消息
+         * @param {string} type - 通知类型 (success, info, warning, danger)
+         */
+        function showToast(message, type = 'info') {
+            const toastContainer = document.querySelector('.toast-container');
+            
+            const toastEl = document.createElement('div');
+            toastEl.className = `toast align-items-center text-white bg-${type} border-0`;
+            toastEl.setAttribute('role', 'alert');
+            toastEl.setAttribute('aria-live', 'assertive');
+            toastEl.setAttribute('aria-atomic', 'true');
+            
+            toastEl.innerHTML = `
+                <div class="d-flex">
+                    <div class="toast-body">
+                        ${message}
+                    </div>
+                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="关闭"></button>
+                </div>
+            `;
+            
+            toastContainer.appendChild(toastEl);
+            
+            const toast = new bootstrap.Toast(toastEl, {
+                animation: true,
+                autohide: true,
+                delay: 3000
+            });
+            
+            toast.show();
+            
+            // 自动移除元素
+            toastEl.addEventListener('hidden.bs.toast', () => {
+                toastEl.remove();
+            });
+        }
+
+        /**
+         * 显示编辑用户模态框
+         * @param {number} userId - 用户ID
+         */
+        function showEditUserModal(userId) {
+            const modalElement = document.getElementById('commonModal');
+            const modalTitle = document.getElementById('modalTitle');
+            const modalBody = document.getElementById('modalBody');
+            const modalConfirmButton = document.getElementById('modalConfirm');
+            const modalInstance = new bootstrap.Modal(modalElement);
+
+            // 设置加载状态
+            modalTitle.textContent = '编辑用户信息';
+            modalBody.innerHTML = '<div class="text-center"><div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">加载中...</span></div> 加载中...</div>';
+            modalConfirmButton.style.display = 'block'; // 显示确认按钮
+            modalConfirmButton.textContent = '保存'; // 修改按钮文本
+            modalInstance.show();
+
+            // 模拟API请求延迟
+            setTimeout(() => {
+                try {
+                    // 从模拟数据中获取用户
+                    const user = mockData.users.data.find(u => u.id == userId);
+                    
+                    if (!user) {
+                        throw new Error('用户不存在');
+                    }
+
+                    // 创建编辑表单
+                    const formHTML = `
+                        <form id="edit-user-form" class="needs-validation" novalidate>
+                            <input type="hidden" id="user-id" value="${user.id}">
+                            
+                            <div class="mb-3">
+                                <label for="username" class="form-label">用户名</label>
+                                <input type="text" class="form-control" id="username" value="${user.username}" required>
+                                <div class="invalid-feedback">请输入用户名</div>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="email" class="form-label">邮箱</label>
+                                <input type="email" class="form-control" id="email" value="${user.email}" required>
+                                <div class="invalid-feedback">请输入有效的邮箱地址</div>
+                            </div>
+                            
+                            <div class="mb-3 form-check">
+                                <input type="checkbox" class="form-check-input" id="is-admin" ${user.is_admin ? 'checked' : ''}>
+                                <label class="form-check-label" for="is-admin">管理员权限</label>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="membership-status" class="form-label">会员状态</label>
+                                <select class="form-select" id="membership-status">
+                                    <option value="" ${!user.membership_status ? 'selected' : ''}>非会员</option>
+                                    <option value="月度会员" ${user.membership_status === '月度会员' ? 'selected' : ''}>月度会员</option>
+                                    <option value="年度会员" ${user.membership_status === '年度会员' ? 'selected' : ''}>年度会员</option>
+                                </select>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="membership-expires" class="form-label">会员到期日期</label>
+                                <input type="date" class="form-control" id="membership-expires" 
+                                       value="${user.membership_expires_at ? new Date(user.membership_expires_at).toISOString().split('T')[0] : ''}">
+                                <div class="form-text">如果是会员，请设置到期日期</div>
+                            </div>
+                        </form>
+                    `;
+
+                    modalBody.innerHTML = formHTML;
+
+                    // 设置保存按钮点击事件
+                    modalConfirmButton.onclick = () => {
+                        saveUserChanges(userId);
+                    };
+
+                } catch (error) {
+                    console.error('获取用户信息失败:', error);
+                    modalBody.innerHTML = `<div class="alert alert-danger">获取用户信息失败: ${error.message}</div>`;
+                    modalConfirmButton.style.display = 'none';
+                    showToast('获取用户信息失败', 'danger');
+                }
+            }, 500);
+        }
+
+        /**
+         * 保存用户信息更改
+         * @param {number} userId - 用户ID
+         */
+        function saveUserChanges(userId) {
+            const form = document.getElementById('edit-user-form');
+            
+            // 表单验证
+            if (!form.checkValidity()) {
+                form.classList.add('was-validated');
+                return;
+            }
+            
+            // 收集表单数据
+            const updatedUser = {
+                username: document.getElementById('username').value,
+                email: document.getElementById('email').value,
+                is_admin: document.getElementById('is-admin').checked,
+                membership_status: document.getElementById('membership-status').value,
+                membership_expires_at: document.getElementById('membership-expires').value || null
+            };
+            
+            // 模拟保存操作
+            const modalConfirmButton = document.getElementById('modalConfirm');
+            const originalButtonText = modalConfirmButton.textContent;
+            modalConfirmButton.disabled = true;
+            modalConfirmButton.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> 保存中...';
+            
+            // 模拟API请求延迟
+            setTimeout(() => {
+                try {
+                    // 更新模拟数据中的用户信息
+                    const userIndex = mockData.users.data.findIndex(u => u.id == userId);
+                    
+                    if (userIndex === -1) {
+                        throw new Error('用户不存在');
+                    }
+                    
+                    // 更新用户数据
+                    mockData.users.data[userIndex] = {
+                        ...mockData.users.data[userIndex],
+                        ...updatedUser
+                    };
+                    
+                    // 关闭模态框
+                    const modalElement = document.getElementById('commonModal');
+                    const modalInstance = bootstrap.Modal.getInstance(modalElement);
+                    modalInstance.hide();
+                    
+                    showToast('用户信息更新成功', 'success');
+                    
+                    // 重新加载用户列表以显示更新
+                    loadUsersPage(getCurrentPage(), getCurrentSearchTerm());
+                    
+                } catch (error) {
+                    console.error('保存用户信息失败:', error);
+                    showToast(`保存用户信息失败: ${error.message}`, 'danger');
+                    
+                    // 恢复按钮状态
+                    modalConfirmButton.disabled = false;
+                    modalConfirmButton.textContent = '保存';
+                }
+            }, 1000);
+        }
+
+        /**
+         * 获取当前页码
+         * @returns {number} 当前页码
+         */
+        function getCurrentPage() {
+            const pageSpan = document.querySelector('.pagination .disabled .page-link');
+            if (pageSpan) {
+                const pageText = pageSpan.textContent.trim();
+                const match = pageText.match(/第\s*(\d+)\s*\/\s*\d+\s*页/);
+                if (match && match[1]) {
+                    return parseInt(match[1]);
+                }
+            }
+            return 1; // 默认返回第1页
+        }
+
+        /**
+         * 获取当前搜索词
+         * @returns {string} 当前搜索词
+         */
+        function getCurrentSearchTerm() {
+            const searchInput = document.getElementById('user-search-input');
+            return searchInput ? searchInput.value.trim() : '';
+        }
+
+        /**
+         * 加载会员管理页面
+         */
+        function loadMembershipPage() {
+            const membershipContent = document.getElementById('membership-content');
+            membershipContent.innerHTML = `<div class="loading"><i class="bi bi-arrow-repeat"></i> 加载中...</div>`;
+
+            // 模拟API调用延迟
+            setTimeout(() => {
+                try {
+                    // 从模拟数据中获取会员计划和会员列表
+                    const plans = mockData.membershipPlans;
+                    const memberships = mockData.memberships.data;
+                    const pagination = mockData.memberships.pagination;
+                    
+                    // 渲染会员管理页面
+                    renderMembershipPage(plans, memberships, pagination);
+                    
+                } catch (error) {
+                    console.error('加载会员管理页面失败:', error);
+                    membershipContent.innerHTML = `
+                        <div class="alert alert-danger">
+                            加载会员管理页面失败: ${error.message}
+                        </div>
+                    `;
+                    showToast('加载会员管理数据失败', 'danger');
+                }
+            }, 500);
+        }
+
+        /**
+         * 渲染会员管理页面内容
+         * @param {Array} plans - 会员计划数据
+         * @param {Array} memberships - 会员用户数据
+         * @param {Object} pagination - 分页信息
+         */
+        function renderMembershipPage(plans, memberships, pagination) {
+            const membershipContent = document.getElementById('membership-content');
+            
+            // 构建页面内容
+            let contentHTML = `
+                <div class="row mb-4">
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <h5 class="mb-0">会员计划管理</h5>
+                                <button class="btn btn-sm btn-primary" id="add-plan-btn">
+                                    <i class="bi bi-plus-circle"></i> 添加计划
+                                </button>
+                            </div>
+                            <div class="card-body">
+                                <div class="table-responsive">
+                                    <table class="table table-striped table-bordered">
+                                        <thead>
+                                            <tr>
+                                                <th>ID</th>
+                                                <th>计划名称</th>
+                                                <th>价格（元）</th>
+                                                <th>有效期（天）</th>
+                                                <th>每日提交上限</th>
+                                                <th>特殊权益</th>
+                                                <th>操作</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+            `;
+            
+            // 添加会员计划行
+            if (plans && plans.length > 0) {
+                plans.forEach(plan => {
+                    contentHTML += `
+                        <tr>
+                            <td>${plan.id}</td>
+                            <td>${plan.name}</td>
+                            <td>${plan.price}</td>
+                            <td>${plan.duration_days}</td>
+                            <td>${plan.daily_limit || '无限制'}</td>
+                            <td>${plan.features || '-'}</td>
+                            <td>
+                                <button class="btn btn-sm btn-warning edit-plan-btn" data-plan-id="${plan.id}">
+                                    <i class="bi bi-pencil-square"></i>
+                                </button>
+                                <button class="btn btn-sm btn-danger delete-plan-btn" data-plan-id="${plan.id}">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                });
+            } else {
+                contentHTML += '<tr><td colspan="7" class="text-center">暂无会员计划</td></tr>';
+            }
+            
+            contentHTML += `
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="row">
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <h5 class="mb-0">会员用户列表</h5>
+                                <div class="input-group w-50">
+                                    <input type="text" id="membership-search-input" class="form-control" placeholder="搜索用户名或邮箱...">
+                                    <button class="btn btn-outline-secondary" type="button" id="membership-search-btn">
+                                        <i class="bi bi-search"></i> 搜索
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div class="table-responsive">
+                                    <table class="table table-striped">
+                                        <thead>
+                                            <tr>
+                                                <th>用户ID</th>
+                                                <th>用户名</th>
+                                                <th>邮箱</th>
+                                                <th>会员计划</th>
+                                                <th>开始日期</th>
+                                                <th>到期日期</th>
+                                                <th>状态</th>
+                                                <th>操作</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+            `;
+            
+            // 添加会员用户行
+            if (memberships && memberships.length > 0) {
+                memberships.forEach(membership => {
+                    const now = new Date();
+                    const expiryDate = new Date(membership.expires_at);
+                    const isActive = expiryDate > now;
+                    
+                    contentHTML += `
+                        <tr>
+                            <td>${membership.user_id}</td>
+                            <td>${membership.username}</td>
+                            <td>${membership.email}</td>
+                            <td>${membership.plan_name}</td>
+                            <td>${new Date(membership.created_at).toLocaleDateString()}</td>
+                            <td>${new Date(membership.expires_at).toLocaleDateString()}</td>
+                            <td>
+                                <span class="badge ${isActive ? 'bg-success' : 'bg-danger'}">
+                                    ${isActive ? '有效' : '已过期'}
+                                </span>
+                            </td>
+                            <td>
+                                <button class="btn btn-sm btn-info view-membership-btn" data-user-id="${membership.user_id}">
+                                    <i class="bi bi-eye"></i>
+                                </button>
+                                <button class="btn btn-sm btn-success renew-membership-btn" data-user-id="${membership.user_id}">
+                                    <i class="bi bi-arrow-clockwise"></i>
+                                </button>
+                                <button class="btn btn-sm btn-danger cancel-membership-btn" data-user-id="${membership.user_id}">
+                                    <i class="bi bi-x-circle"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                });
+            } else {
+                contentHTML += '<tr><td colspan="8" class="text-center">没有找到会员用户</td></tr>';
+            }
+            
+            contentHTML += `
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                            <div class="card-footer">
+                                <nav aria-label="会员用户分页">
+                                    <ul class="pagination justify-content-center">
+                                        <li class="page-item ${pagination.has_prev ? '' : 'disabled'}">
+                                            <a class="page-link" href="#" data-page="${pagination.prev_num}">上一页</a>
+                                        </li>
+                                        <li class="page-item disabled"><span class="page-link">第 ${pagination.page} / ${pagination.pages} 页</span></li>
+                                        <li class="page-item ${pagination.has_next ? '' : 'disabled'}">
+                                            <a class="page-link" href="#" data-page="${pagination.next_num}">下一页</a>
+                                        </li>
+                                    </ul>
+                                </nav>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // 更新页面内容
+            membershipContent.innerHTML = contentHTML;
+            
+            // 绑定事件监听器
+            addMembershipEventListeners();
+        }
+
+        /**
+         * 添加会员管理页面的事件监听器
+         */
+        function addMembershipEventListeners() {
+            // 会员计划操作按钮
+            const addPlanBtn = document.getElementById('add-plan-btn');
+            if (addPlanBtn) {
+                addPlanBtn.addEventListener('click', () => {
+                    showPlanModal();
+                });
+            }
+            
+            document.querySelectorAll('.edit-plan-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const planId = e.currentTarget.dataset.planId;
+                    showPlanModal(planId);
+                });
+            });
+            
+            document.querySelectorAll('.delete-plan-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const planId = e.currentTarget.dataset.planId;
+                    if (confirm(`确定要删除该会员计划吗？ID: ${planId}`)) {
+                        deletePlan(planId);
+                    }
+                });
+            });
+            
+            // 会员用户操作按钮
+            document.querySelectorAll('.view-membership-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const userId = e.currentTarget.dataset.userId;
+                    showMembershipDetailModal(userId);
+                });
+            });
+            
+            document.querySelectorAll('.renew-membership-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const userId = e.currentTarget.dataset.userId;
+                    showRenewMembershipModal(userId);
+                });
+            });
+            
+            document.querySelectorAll('.cancel-membership-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const userId = e.currentTarget.dataset.userId;
+                    if (confirm(`确定要取消该用户的会员资格吗？用户ID: ${userId}`)) {
+                        cancelMembership(userId);
+                    }
+                });
+            });
+            
+            // 搜索和分页
+            const searchBtn = document.getElementById('membership-search-btn');
+            if (searchBtn) {
+                searchBtn.addEventListener('click', () => {
+                    const searchTerm = document.getElementById('membership-search-input').value;
+                    loadMembershipsWithParams(1, searchTerm);
+                });
+            }
+            
+            const searchInput = document.getElementById('membership-search-input');
+            if (searchInput) {
+                searchInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        const searchTerm = searchInput.value;
+                        loadMembershipsWithParams(1, searchTerm);
+                    }
+                });
+            }
+            
+            document.querySelectorAll('.pagination .page-link').forEach(link => {
+                if (link.dataset.page) {
+                    link.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        const page = parseInt(link.dataset.page);
+                        const searchTerm = document.getElementById('membership-search-input')?.value || '';
+                        loadMembershipsWithParams(page, searchTerm);
+                    });
+                }
+            });
+        }
+
+        /**
+         * 加载会员用户列表，支持分页和搜索
+         * @param {number} page - 页码
+         * @param {string} searchTerm - 搜索关键词
+         */
+        function loadMembershipsWithParams(page, searchTerm = '') {
+            const membershipContent = document.getElementById('membership-content');
+            membershipContent.innerHTML = `<div class="loading"><i class="bi bi-arrow-repeat"></i> 加载中...</div>`;
+
+            // 模拟API调用延迟
+            setTimeout(() => {
+                try {
+                    // 从模拟数据中获取会员计划
+                    const plans = mockData.membershipPlans;
+                    
+                    // 过滤会员数据（如果有搜索词）
+                    let filteredMemberships = [...mockData.memberships.data];
+                    if (searchTerm) {
+                        filteredMemberships = filteredMemberships.filter(membership => 
+                            membership.username.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                            membership.email.toLowerCase().includes(searchTerm.toLowerCase())
+                        );
+                    }
+                    
+                    // 模拟分页
+                    const pagination = {...mockData.memberships.pagination};
+                    pagination.page = page;
+                    pagination.has_prev = page > 1;
+                    pagination.has_next = page < pagination.pages;
+                    pagination.prev_num = page > 1 ? page - 1 : null;
+                    pagination.next_num = page < pagination.pages ? page + 1 : null;
+                    pagination.search = searchTerm;
+                    
+                    // 渲染会员管理页面
+                    renderMembershipPage(plans, filteredMemberships, pagination);
+                    
+                } catch (error) {
+                    console.error('加载会员数据失败:', error);
+                    membershipContent.innerHTML = `
+                        <div class="alert alert-danger">
+                            加载会员数据失败: ${error.message}
+                        </div>
+                    `;
+                    showToast('加载会员数据失败', 'danger');
+                }
+            }, 500);
+        }
+
+        /**
+         * 显示会员计划编辑/添加模态框
+         * @param {string|null} planId - 会员计划ID，为null时表示添加新计划
+         */
+        function showPlanModal(planId = null) {
+            // 查找现有模态框或创建新模态框
+            let modalElement = document.getElementById('planModal');
+            if (!modalElement) {
+                const modalHTML = `
+                <div class="modal fade" id="planModal" tabindex="-1" aria-labelledby="planModalLabel" aria-hidden="true">
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title" id="planModalLabel">${planId ? '编辑' : '添加'}会员计划</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                            </div>
+                            <div class="modal-body">
+                                <form id="planForm">
+                                    <div class="mb-3">
+                                        <label for="planName" class="form-label">计划名称</label>
+                                        <input type="text" class="form-control" id="planName" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="planPrice" class="form-label">价格（元）</label>
+                                        <input type="number" class="form-control" id="planPrice" step="0.01" min="0" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="planDuration" class="form-label">有效期（天）</label>
+                                        <input type="number" class="form-control" id="planDuration" min="1" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="planDailyLimit" class="form-label">每日提交上限</label>
+                                        <input type="number" class="form-control" id="planDailyLimit" min="0">
+                                        <small class="form-text text-muted">0表示无限制</small>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="planFeatures" class="form-label">特殊权益</label>
+                                        <textarea class="form-control" id="planFeatures" rows="3"></textarea>
+                                        <small class="form-text text-muted">使用逗号分隔多个权益</small>
+                                    </div>
+                                </form>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                                <button type="button" class="btn btn-primary" id="savePlanBtn">保存</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                `;
+                document.body.insertAdjacentHTML('beforeend', modalHTML);
+                modalElement = document.getElementById('planModal');
+            }
+
+            // 创建Bootstrap模态框对象
+            const planModal = new bootstrap.Modal(modalElement);
+            
+            // 如果是编辑模式，填充表单数据
+            if (planId) {
+                const plan = mockData.membershipPlans.find(p => p.id == planId);
+                if (plan) {
+                    document.getElementById('planName').value = plan.name;
+                    document.getElementById('planPrice').value = plan.price;
+                    document.getElementById('planDuration').value = plan.duration_days;
+                    document.getElementById('planDailyLimit').value = plan.daily_limit || 0;
+                    document.getElementById('planFeatures').value = plan.features || '';
+                }
+            } else {
+                // 清空表单
+                document.getElementById('planForm').reset();
+            }
+            
+            // 绑定保存按钮事件
+            const savePlanBtn = document.getElementById('savePlanBtn');
+            savePlanBtn.onclick = () => {
+                if (validatePlanForm()) {
+                    savePlan(planId);
+                    planModal.hide();
+                }
+            };
+            
+            // 显示模态框
+            planModal.show();
+        }
+
+        /**
+         * 验证会员计划表单
+         * @returns {boolean} 验证结果
+         */
+        function validatePlanForm() {
+            const planForm = document.getElementById('planForm');
+            if (!planForm.checkValidity()) {
+                planForm.reportValidity();
+                return false;
+            }
+            return true;
+        }
+
+        /**
+         * 保存会员计划
+         * @param {string|null} planId - 计划ID，为null时表示新增
+         */
+        function savePlan(planId = null) {
+            // 收集表单数据
+            const planData = {
+                name: document.getElementById('planName').value,
+                price: parseFloat(document.getElementById('planPrice').value),
+                duration_days: parseInt(document.getElementById('planDuration').value),
+                daily_limit: parseInt(document.getElementById('planDailyLimit').value) || 0,
+                features: document.getElementById('planFeatures').value
+            };
+            
+            // 模拟API调用保存数据
+            console.log('保存会员计划:', planData);
+            
+            // 模拟更新本地数据
+            if (planId) {
+                // 编辑现有计划
+                const planIndex = mockData.membershipPlans.findIndex(p => p.id == planId);
+                if (planIndex !== -1) {
+                    mockData.membershipPlans[planIndex] = { ...mockData.membershipPlans[planIndex], ...planData };
+                }
+                showToast('会员计划更新成功', 'success');
+            } else {
+                // 添加新计划
+                const newId = Math.max(...mockData.membershipPlans.map(p => p.id)) + 1;
+                mockData.membershipPlans.push({ id: newId, ...planData });
+                showToast('新会员计划添加成功', 'success');
+            }
+            
+            // 重新加载会员管理页面
+            loadMembershipPage();
+        }
+
+        /**
+         * 删除会员计划
+         * @param {string} planId - 计划ID
+         */
+        function deletePlan(planId) {
+            // 模拟API调用删除数据
+            console.log('删除会员计划:', planId);
+            
+            // 模拟更新本地数据
+            const planIndex = mockData.membershipPlans.findIndex(p => p.id == planId);
+            if (planIndex !== -1) {
+                mockData.membershipPlans.splice(planIndex, 1);
+            }
+            
+            showToast('会员计划删除成功', 'success');
+            
+            // 重新加载会员管理页面
+            loadMembershipPage();
+        }
+
+        /**
+         * 显示会员详情模态框
+         * @param {string} userId - 用户ID
+         */
+        function showMembershipDetailModal(userId) {
+            // 查找用户会员信息
+            const membership = mockData.memberships.data.find(m => m.user_id == userId);
+            if (!membership) {
+                showToast('未找到用户会员信息', 'danger');
+                return;
+            }
+            
+            // 查找或创建模态框
+            let modalElement = document.getElementById('membershipDetailModal');
+            if (!modalElement) {
+                const modalHTML = `
+                <div class="modal fade" id="membershipDetailModal" tabindex="-1" aria-labelledby="membershipDetailModalLabel" aria-hidden="true">
+                    <div class="modal-dialog modal-lg">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title" id="membershipDetailModalLabel">会员详情</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                            </div>
+                            <div class="modal-body" id="membershipDetailContent">
+                                <!-- 内容将动态填充 -->
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                `;
+                document.body.insertAdjacentHTML('beforeend', modalHTML);
+                modalElement = document.getElementById('membershipDetailModal');
+            }
+
+            // 填充会员详情
+            const detailContent = document.getElementById('membershipDetailContent');
+            const now = new Date();
+            const expiryDate = new Date(membership.expires_at);
+            const isActive = expiryDate > now;
+            
+            const detailHTML = `
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6>用户信息</h6>
+                        <table class="table">
+                            <tr>
+                                <th>用户ID</th>
+                                <td>${membership.user_id}</td>
+                            </tr>
+                            <tr>
+                                <th>用户名</th>
+                                <td>${membership.username}</td>
+                            </tr>
+                            <tr>
+                                <th>邮箱</th>
+                                <td>${membership.email}</td>
+                            </tr>
+                        </table>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>会员信息</h6>
+                        <table class="table">
+                            <tr>
+                                <th>会员计划</th>
+                                <td>${membership.plan_name}</td>
+                            </tr>
+                            <tr>
+                                <th>开始日期</th>
+                                <td>${new Date(membership.created_at).toLocaleString()}</td>
+                            </tr>
+                            <tr>
+                                <th>到期日期</th>
+                                <td>${new Date(membership.expires_at).toLocaleString()}</td>
+                            </tr>
+                            <tr>
+                                <th>状态</th>
+                                <td>
+                                    <span class="badge ${isActive ? 'bg-success' : 'bg-danger'}">
+                                        ${isActive ? '有效' : '已过期'}
+                                    </span>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>每日提交上限</th>
+                                <td>${membership.daily_limit || '无限制'}</td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
+                <div class="row mt-3">
+                    <div class="col-12">
+                        <h6>支付信息</h6>
+                        <table class="table">
+                            <tr>
+                                <th>支付方式</th>
+                                <td>${membership.payment_method}</td>
+                            </tr>
+                            <tr>
+                                <th>支付金额</th>
+                                <td>¥${membership.amount.toFixed(2)}</td>
+                            </tr>
+                            <tr>
+                                <th>交易编号</th>
+                                <td>${membership.transaction_id}</td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
+                <div class="row mt-3">
+                    <div class="col-12">
+                        <h6>会员权益</h6>
+                        <ul>
+                            ${(membership.features || '无').split(',').map(feature => `<li>${feature.trim()}</li>`).join('')}
+                        </ul>
+                    </div>
+                </div>
+            `;
+            
+            detailContent.innerHTML = detailHTML;
+            
+            // 显示模态框
+            const modal = new bootstrap.Modal(modalElement);
+            modal.show();
+        }
+
+        /**
+         * 显示续费会员模态框
+         * @param {string} userId - 用户ID
+         */
+        function showRenewMembershipModal(userId) {
+            // 查找用户会员信息
+            const membership = mockData.memberships.data.find(m => m.user_id == userId);
+            if (!membership) {
+                showToast('未找到用户会员信息', 'danger');
+                return;
+            }
+            
+            // 查找或创建模态框
+            let modalElement = document.getElementById('renewMembershipModal');
+            if (!modalElement) {
+                const modalHTML = `
+                <div class="modal fade" id="renewMembershipModal" tabindex="-1" aria-labelledby="renewMembershipModalLabel" aria-hidden="true">
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title" id="renewMembershipModalLabel">续费会员</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                            </div>
+                            <div class="modal-body">
+                                <form id="renewMembershipForm">
+                                    <div class="mb-3">
+                                        <label for="membershipPlan" class="form-label">会员计划</label>
+                                        <select class="form-select" id="membershipPlan" required>
+                                            <!-- 选项将动态填充 -->
+                                        </select>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="paymentMethod" class="form-label">支付方式</label>
+                                        <select class="form-select" id="paymentMethod" required>
+                                            <option value="支付宝">支付宝</option>
+                                            <option value="微信支付">微信支付</option>
+                                            <option value="银行卡">银行卡</option>
+                                        </select>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="transactionAmount" class="form-label">支付金额</label>
+                                        <div class="input-group">
+                                            <span class="input-group-text">¥</span>
+                                            <input type="number" class="form-control" id="transactionAmount" step="0.01" required readonly>
+                                        </div>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="transactionId" class="form-label">交易编号</label>
+                                        <input type="text" class="form-control" id="transactionId" value="TX-${Date.now()}" required>
+                                    </div>
+                                </form>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                                <button type="button" class="btn btn-primary" id="renewMembershipBtn">确认续费</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                `;
+                document.body.insertAdjacentHTML('beforeend', modalHTML);
+                modalElement = document.getElementById('renewMembershipModal');
+                
+                // 为会员计划选择添加变更事件
+                const planSelect = document.getElementById('membershipPlan');
+                planSelect.addEventListener('change', () => {
+                    const selectedPlan = mockData.membershipPlans.find(p => p.id == planSelect.value);
+                    if (selectedPlan) {
+                        document.getElementById('transactionAmount').value = selectedPlan.price;
+                    }
+                });
+            }
+
+            // 填充会员计划选项
+            const planSelect = document.getElementById('membershipPlan');
+            planSelect.innerHTML = '';
+            mockData.membershipPlans.forEach(plan => {
+                const option = document.createElement('option');
+                option.value = plan.id;
+                option.text = `${plan.name} - ¥${plan.price} (${plan.duration_days}天)`;
+                planSelect.appendChild(option);
+            });
+            
+            // 默认选择当前会员计划
+            const currentPlan = mockData.membershipPlans.find(p => p.id == membership.plan_id);
+            if (currentPlan) {
+                planSelect.value = currentPlan.id;
+                document.getElementById('transactionAmount').value = currentPlan.price;
+            }
+            
+            // 绑定续费按钮事件
+            const renewBtn = document.getElementById('renewMembershipBtn');
+            renewBtn.onclick = () => {
+                if (document.getElementById('renewMembershipForm').checkValidity()) {
+                    renewMembership(userId);
+                    bootstrap.Modal.getInstance(modalElement).hide();
+                } else {
+                    document.getElementById('renewMembershipForm').reportValidity();
+                }
+            };
+            
+            // 显示模态框
+            const modal = new bootstrap.Modal(modalElement);
+            modal.show();
+        }
+
+        /**
+         * 续费会员
+         * @param {string} userId - 用户ID
+         */
+        function renewMembership(userId) {
+            // 收集表单数据
+            const planId = document.getElementById('membershipPlan').value;
+            const paymentMethod = document.getElementById('paymentMethod').value;
+            const amount = parseFloat(document.getElementById('transactionAmount').value);
+            const transactionId = document.getElementById('transactionId').value;
+            
+            // 查找对应计划信息
+            const plan = mockData.membershipPlans.find(p => p.id == planId);
+            if (!plan) {
+                showToast('会员计划不存在', 'danger');
+                return;
+            }
+            
+            // 查找用户会员信息
+            const membershipIndex = mockData.memberships.data.findIndex(m => m.user_id == userId);
+            if (membershipIndex === -1) {
+                showToast('未找到用户会员信息', 'danger');
+                return;
+            }
+            
+            // 更新到期时间
+            const currentMembership = mockData.memberships.data[membershipIndex];
+            const now = new Date();
+            let newExpiryDate;
+            
+            // 如果当前会员已过期，从当前时间开始计算新的到期时间
+            // 如果当前会员未过期，从当前到期时间开始延长
+            const currentExpiryDate = new Date(currentMembership.expires_at);
+            if (currentExpiryDate < now) {
+                newExpiryDate = new Date(now);
+            } else {
+                newExpiryDate = new Date(currentExpiryDate);
+            }
+            
+            // 增加新计划的有效期
+            newExpiryDate.setDate(newExpiryDate.getDate() + plan.duration_days);
+            
+            // 更新会员信息
+            mockData.memberships.data[membershipIndex] = {
+                ...currentMembership,
+                plan_id: plan.id,
+                plan_name: plan.name,
+                expires_at: newExpiryDate.toISOString(),
+                payment_method: paymentMethod,
+                amount: amount,
+                transaction_id: transactionId,
+                daily_limit: plan.daily_limit,
+                features: plan.features
+            };
+            
+            showToast('会员续费成功', 'success');
+            
+            // 重新加载会员管理页面
+            loadMembershipPage();
+        }
+
+        /**
+         * 取消用户会员资格
+         * @param {string} userId - 用户ID
+         */
+        function cancelMembership(userId) {
+            // 查找用户会员信息
+            const membershipIndex = mockData.memberships.data.findIndex(m => m.user_id == userId);
+            if (membershipIndex === -1) {
+                showToast('未找到用户会员信息', 'danger');
+                return;
+            }
+            
+            // 将到期时间设为当前时间，相当于立即取消会员资格
+            const now = new Date();
+            mockData.memberships.data[membershipIndex].expires_at = now.toISOString();
+            
+            showToast('已取消用户会员资格', 'success');
+            
+            // 重新加载会员管理页面
+            loadMembershipPage();
+        }
+
+        /**
+         * 加载作文管理页面
+         * @param {number} page - 要加载的页码
+         * @param {string} searchTerm - 搜索关键词
+         */
+        function loadEssaysPage(page = 1, searchTerm = '') {
+            const essaysContent = document.getElementById('essays-content');
+            essaysContent.innerHTML = `<div class="loading"><i class="bi bi-arrow-repeat"></i> 加载中...</div>`;
+
+            try {
+                // 模拟API调用延迟
+                setTimeout(() => {
+                    // 过滤作文数据（如果有搜索词）
+                    let filteredEssays = [...mockData.essays.data];
+                    if (searchTerm) {
+                        filteredEssays = filteredEssays.filter(essay => 
+                            essay.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                            essay.username.toLowerCase().includes(searchTerm.toLowerCase())
+                        );
+                    }
+                    
+                    // 模拟分页
+                    const pagination = {...mockData.essays.pagination};
+                    pagination.page = page;
+                    pagination.has_prev = page > 1;
+                    pagination.has_next = page < pagination.pages;
+                    pagination.prev_num = page > 1 ? page - 1 : null;
+                    pagination.next_num = page < pagination.pages ? page + 1 : null;
+                    pagination.search = searchTerm;
+                    
+                    // 渲染作文表格
+                    renderEssaysTable(filteredEssays, pagination);
+                }, 500); // 500ms延迟模拟网络请求
+                
+            } catch (error) {
+                console.error('加载作文管理页面失败:', error);
+                essaysContent.innerHTML = `<div class="alert alert-danger">加载作文数据失败: ${error.message}</div>`;
+                showToast('加载作文数据失败', 'danger');
+            }
+        }
+        
+        /**
+         * 渲染作文表格和分页
+         * @param {Array} essays - 作文数据数组
+         * @param {Object} pagination - 分页信息
+         */
+        function renderEssaysTable(essays, pagination) {
+            const essaysContent = document.getElementById('essays-content');
+
+            // 构建过滤和搜索栏
+            const filterBarHTML = `
+                <div class="row mb-3">
+                    <div class="col-md-8">
+                        <div class="btn-group" role="group" aria-label="作文状态过滤">
+                            <button type="button" class="btn btn-outline-secondary active" data-filter="all">全部</button>
+                            <button type="button" class="btn btn-outline-secondary" data-filter="待批改">待批改</button>
+                            <button type="button" class="btn btn-outline-secondary" data-filter="已批改">已批改</button>
+                            <button type="button" class="btn btn-outline-secondary" data-filter="系统批改">系统批改</button>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="input-group">
+                            <input type="text" id="essay-search-input" class="form-control" placeholder="搜索标题或作者..." value="${pagination.search || ''}">
+                            <button class="btn btn-outline-secondary" type="button" id="essay-search-button">
+                                <i class="bi bi-search"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // 表格头
+            let tableHTML = `
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover align-middle">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>标题</th>
+                                <th>作者</th>
+                                <th>状态</th>
+                                <th>字数</th>
+                                <th>等级</th>
+                                <th>分数</th>
+                                <th>提交时间</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+
+            // 表格行
+            if (essays && essays.length > 0) {
+                essays.forEach(essay => {
+                    // 根据状态设置徽章颜色
+                    let statusClass = 'bg-secondary';
+                    if (essay.status === '已批改') statusClass = 'bg-success';
+                    else if (essay.status === '待批改') statusClass = 'bg-warning';
+                    else if (essay.status === '系统批改') statusClass = 'bg-info';
+                    
+                    tableHTML += `
+                        <tr>
+                            <td>${essay.id}</td>
+                            <td>${essay.title}</td>
+                            <td>${essay.username}</td>
+                            <td><span class="badge ${statusClass}">${essay.status}</span></td>
+                            <td>${essay.word_count}</td>
+                            <td>${essay.grade_level}</td>
+                            <td>${essay.score !== null ? essay.score : '-'}</td>
+                            <td>${new Date(essay.created_at).toLocaleString()}</td>
+                            <td>
+                                <button class="btn btn-sm btn-info me-1 view-essay-btn" data-essay-id="${essay.id}" title="查看详情"><i class="bi bi-eye"></i></button>
+                                ${essay.status === '待批改' ? 
+                                    `<button class="btn btn-sm btn-success me-1 grade-essay-btn" data-essay-id="${essay.id}" title="批改作文"><i class="bi bi-pencil"></i></button>` : 
+                                    ''}
+                                <button class="btn btn-sm btn-danger delete-essay-btn" data-essay-id="${essay.id}" title="删除作文"><i class="bi bi-trash"></i></button>
+                            </td>
+                        </tr>
+                    `;
+                });
+            } else {
+                tableHTML += '<tr><td colspan="9" class="text-center">没有找到作文</td></tr>';
+            }
+
+            tableHTML += '</tbody></table></div>';
+
+            // 分页控件
+            const paginationHTML = `
+                <nav aria-label="作文分页">
+                    <ul class="pagination justify-content-center">
+                        <li class="page-item ${pagination.has_prev ? '' : 'disabled'}">
+                            <a class="page-link" href="#" data-page="${pagination.prev_num}">上一页</a>
+                        </li>
+                        <li class="page-item disabled"><span class="page-link">第 ${pagination.page} / ${pagination.pages} 页</span></li>
+                        <li class="page-item ${pagination.has_next ? '' : 'disabled'}">
+                            <a class="page-link" href="#" data-page="${pagination.next_num}">下一页</a>
+                        </li>
+                    </ul>
+                </nav>
+            `;
+
+            essaysContent.innerHTML = filterBarHTML + tableHTML + paginationHTML;
+
+            // 添加事件监听器
+            addEssaysPageEventListeners(pagination.search);
+        }
+        
+        /**
+         * 为作文管理页面元素添加事件监听器
+         * @param {string} currentSearchTerm - 当前的搜索关键词
+         */
+        function addEssaysPageEventListeners(currentSearchTerm = '') {
+            // 搜索按钮
+            const searchButton = document.getElementById('essay-search-button');
+            const searchInput = document.getElementById('essay-search-input');
+            if (searchButton) {
+                searchButton.addEventListener('click', () => {
+                    loadEssaysPage(1, searchInput.value.trim());
+                });
+            }
+            if (searchInput) {
+                searchInput.addEventListener('keypress', (event) => {
+                    if (event.key === 'Enter') {
+                        loadEssaysPage(1, searchInput.value.trim());
+                    }
+                });
+            }
+
+            // 状态过滤按钮
+            const filterButtons = document.querySelectorAll('.btn-group [data-filter]');
+            filterButtons.forEach(button => {
+                button.addEventListener('click', () => {
+                    // 移除所有活动按钮的active类
+                    filterButtons.forEach(btn => btn.classList.remove('active'));
+                    
+                    // 为当前按钮添加active类
+                    button.classList.add('active');
+                    
+                    // 获取过滤值
+                    const filter = button.dataset.filter;
+                    
+                    // 进行过滤
+                    filterEssays(filter, currentSearchTerm);
+                });
+            });
+
+            // 分页链接
+            const pageLinks = document.querySelectorAll('.pagination .page-link');
+            pageLinks.forEach(link => {
+                if (link.dataset.page) { // 确保是有效的页码链接
+                    link.addEventListener('click', (event) => {
+                        event.preventDefault();
+                        const page = parseInt(link.dataset.page);
+                        loadEssaysPage(page, currentSearchTerm);
+                    });
+                }
+            });
+
+            // 操作按钮 (查看, 批改, 删除)
+            document.querySelectorAll('.view-essay-btn').forEach(button => {
+                button.addEventListener('click', (event) => {
+                    const essayId = event.currentTarget.dataset.essayId;
+                    showEssayDetailModal(essayId);
+                });
+            });
+
+            document.querySelectorAll('.grade-essay-btn').forEach(button => {
+                button.addEventListener('click', (event) => {
+                    const essayId = event.currentTarget.dataset.essayId;
+                    showEssayGradeModal(essayId);
+                });
+            });
+
+            document.querySelectorAll('.delete-essay-btn').forEach(button => {
+                button.addEventListener('click', (event) => {
+                    const essayId = event.currentTarget.dataset.essayId;
+                    if (confirm(`确定要删除作文 #${essayId} 吗？此操作不可恢复！`)) {
+                        deleteEssay(essayId);
+                    }
+                });
+            });
+        }
+        
+        /**
+         * 根据状态过滤作文列表
+         * @param {string} filter - 过滤条件
+         * @param {string} searchTerm - 搜索关键词
+         */
+        function filterEssays(filter, searchTerm = '') {
+            const essaysContent = document.getElementById('essays-content');
+            essaysContent.innerHTML = `<div class="loading"><i class="bi bi-arrow-repeat"></i> 加载中...</div>`;
+            
+            // 模拟API调用延迟
+            setTimeout(() => {
+                try {
+                    // 过滤作文数据
+                    let filteredEssays = [...mockData.essays.data];
+                    
+                    // 先按状态过滤
+                    if (filter !== 'all') {
+                        filteredEssays = filteredEssays.filter(essay => essay.status === filter);
+                    }
+                    
+                    // 再按搜索词过滤
+                    if (searchTerm) {
+                        filteredEssays = filteredEssays.filter(essay => 
+                            essay.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                            essay.username.toLowerCase().includes(searchTerm.toLowerCase())
+                        );
+                    }
+                    
+                    // 使用默认分页
+                    const pagination = {...mockData.essays.pagination, search: searchTerm};
+                    
+                    // 渲染作文表格
+                    renderEssaysTable(filteredEssays, pagination);
+                    
+                } catch (error) {
+                    console.error('过滤作文失败:', error);
+                    essaysContent.innerHTML = `<div class="alert alert-danger">过滤作文失败: ${error.message}</div>`;
+                    showToast('过滤作文失败', 'danger');
+                }
+            }, 300);
+        }
+        
+        /**
+         * 显示作文详情模态框
+         * @param {number} essayId - 作文ID
+         */
+        function showEssayDetailModal(essayId) {
+            // 假设我们从mockData.essayDetails获取作文详情
+            // 在实际应用中，这里应该从API获取特定ID的作文详情
+            
+            const essayDetails = {...mockData.essayDetails, id: essayId};
+            
+            // 查找或创建模态框
+            let modalElement = document.getElementById('essayDetailModal');
+            if (!modalElement) {
+                const modalHTML = `
+                <div class="modal fade" id="essayDetailModal" tabindex="-1" aria-labelledby="essayDetailModalLabel" aria-hidden="true">
+                    <div class="modal-dialog modal-xl">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title" id="essayDetailModalLabel">作文详情</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+                            </div>
+                            <div class="modal-body" id="essayDetailContent">
+                                <!-- 内容将动态填充 -->
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                `;
+                document.body.insertAdjacentHTML('beforeend', modalHTML);
+                modalElement = document.getElementById('essayDetailModal');
+            }
+            
+            // 填充作文详情
+            const detailContent = document.getElementById('essayDetailContent');
+            
+            // 设置加载状态
+            detailContent.innerHTML = '<div class="text-center"><div class="spinner-border" role="status"><span class="visually-hidden">加载中...</span></div></div>';
+            
+            // 显示模态框
+            const modal = new bootstrap.Modal(modalElement);
+            modal.show();
+            
+            // 模拟加载延迟
+            setTimeout(() => {
+                // 构建详情HTML
+                const detailHTML = `
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <h6>基本信息</h6>
+                            <table class="table table-bordered">
+                                <tr>
+                                    <th width="30%">标题</th>
+                                    <td>${essayDetails.title}</td>
+                                </tr>
+                                <tr>
+                                    <th>作者</th>
+                                    <td>${essayDetails.username}</td>
+                                </tr>
+                                <tr>
+                                    <th>状态</th>
+                                    <td><span class="badge ${essayDetails.status === '已批改' ? 'bg-success' : essayDetails.status === '待批改' ? 'bg-warning' : 'bg-info'}">${essayDetails.status}</span></td>
+                                </tr>
+                                <tr>
+                                    <th>字数</th>
+                                    <td>${essayDetails.word_count}</td>
+                                </tr>
+                                <tr>
+                                    <th>等级</th>
+                                    <td>${essayDetails.grade_level}</td>
+                                </tr>
+                                <tr>
+                                    <th>提交时间</th>
+                                    <td>${new Date(essayDetails.created_at).toLocaleString()}</td>
+                                </tr>
+                            </table>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <h6>批改信息</h6>
+                            <table class="table table-bordered">
+                                <tr>
+                                    <th width="30%">分数</th>
+                                    <td>${essayDetails.score !== null ? essayDetails.score : '-'}</td>
+                                </tr>
+                                <tr>
+                                    <th>批改者</th>
+                                    <td>${essayDetails.grader || '-'}</td>
+                                </tr>
+                                <tr>
+                                    <th>批改时间</th>
+                                    <td>${essayDetails.graded_at ? new Date(essayDetails.graded_at).toLocaleString() : '-'}</td>
+                                </tr>
+                                <tr>
+                                    <th>最后更新</th>
+                                    <td>${new Date(essayDetails.updated_at).toLocaleString()}</td>
+                                </tr>
+                            </table>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-4">
+                        <h6>作文内容</h6>
+                        <div class="p-3 border rounded bg-light">
+                            ${essayDetails.content.split('\n').map(paragraph => `<p>${paragraph}</p>`).join('')}
+                        </div>
+                    </div>
+                    
+                    ${essayDetails.status === '已批改' || essayDetails.status === '系统批改' ? `
+                        <div class="mb-4">
+                            <h6>总体评价</h6>
+                            <div class="p-3 border rounded">
+                                ${essayDetails.overall_comment || '无总体评价'}
+                            </div>
+                        </div>
+                        
+                        <div class="mb-4">
+                            <h6>具体修改建议</h6>
+                            <div class="table-responsive">
+                                <table class="table table-bordered">
+                                    <thead>
+                                        <tr>
+                                            <th>原文</th>
+                                            <th>修改建议</th>
+                                            <th>原因</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${essayDetails.corrections && essayDetails.corrections.length > 0 ? 
+                                            essayDetails.corrections.map(correction => `
+                                                <tr>
+                                                    <td>${correction.original}</td>
+                                                    <td>${correction.corrected}</td>
+                                                    <td>${correction.reason}</td>
+                                                </tr>
+                                            `).join('') : 
+                                            '<tr><td colspan="3" class="text-center">无具体修改建议</td></tr>'
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <h6>段落评论</h6>
+                            <div class="table-responsive">
+                                <table class="table table-bordered">
+                                    <thead>
+                                        <tr>
+                                            <th>段落</th>
+                                            <th>评论</th>
+                                            <th>类型</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${essayDetails.comments && essayDetails.comments.length > 0 ? 
+                                            essayDetails.comments.map(comment => `
+                                                <tr>
+                                                    <td>段落 ${comment.paragraph_index + 1}</td>
+                                                    <td>${comment.comment}</td>
+                                                    <td>${comment.type === 'suggestion' ? '建议' : '修正'}</td>
+                                                </tr>
+                                            `).join('') : 
+                                            '<tr><td colspan="3" class="text-center">无段落评论</td></tr>'
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    ` : '<div class="alert alert-info">该作文尚未批改</div>'}
+                `;
+                
+                detailContent.innerHTML = detailHTML;
+            }, 500);
+        }
+        
+        /**
+         * 显示作文批改模态框
+         * @param {number} essayId - 作文ID
+         */
+        function showEssayGradeModal(essayId) {
+            // 假设我们从mockData.essayDetails获取作文详情
+            const essayDetails = {...mockData.essayDetails, id: essayId, status: '待批改', score: null, graded_at: null, grader: null};
+            
+            // 查找或创建模态框
+            let modalElement = document.getElementById('essayGradeModal');
+            if (!modalElement) {
+                const modalHTML = `
+                <div class="modal fade" id="essayGradeModal" tabindex="-1" aria-labelledby="essayGradeModalLabel" aria-hidden="true">
+                    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title" id="essayGradeModalLabel">批改作文</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+                            </div>
+                            <div class="modal-body" id="essayGradeContent">
+                                <!-- 内容将动态填充 -->
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                                <button type="button" class="btn btn-primary" id="saveGradeBtn">保存批改</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                `;
+                document.body.insertAdjacentHTML('beforeend', modalHTML);
+                modalElement = document.getElementById('essayGradeModal');
+            }
+            
+            // 填充批改表单
+            const gradeContent = document.getElementById('essayGradeContent');
+            
+            // 设置加载状态
+            gradeContent.innerHTML = '<div class="text-center"><div class="spinner-border" role="status"><span class="visually-hidden">加载中...</span></div></div>';
+            
+            // 显示模态框
+            const modal = new bootstrap.Modal(modalElement);
+            modal.show();
+            
+            // 模拟加载延迟
+            setTimeout(() => {
+                // 构建批改表单HTML
+                const gradeFormHTML = `
+                    <form id="gradeForm">
+                        <div class="row mb-3">
+                            <div class="col-md-8">
+                                <h6>作文信息</h6>
+                                <table class="table table-bordered">
+                                    <tr>
+                                        <th width="20%">标题</th>
+                                        <td>${essayDetails.title}</td>
+                                    </tr>
+                                    <tr>
+                                        <th>作者</th>
+                                        <td>${essayDetails.username}</td>
+                                    </tr>
+                                    <tr>
+                                        <th>等级</th>
+                                        <td>${essayDetails.grade_level}</td>
+                                    </tr>
+                                    <tr>
+                                        <th>字数</th>
+                                        <td>${essayDetails.word_count}</td>
+                                    </tr>
+                                </table>
+                            </div>
+                            <div class="col-md-4">
+                                <h6>评分</h6>
+                                <div class="mb-3">
+                                    <label for="essayScore" class="form-label">分数 (0-100)</label>
+                                    <input type="number" class="form-control" id="essayScore" min="0" max="100" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="essayGrader" class="form-label">批改者</label>
+                                    <input type="text" class="form-control" id="essayGrader" value="李老师" required>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <h6>作文内容</h6>
+                            <div class="p-3 border rounded bg-light">
+                                ${essayDetails.content.split('\n').map(paragraph => `<p>${paragraph}</p>`).join('')}
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="overallComment" class="form-label">总体评价</label>
+                            <textarea class="form-control" id="overallComment" rows="4" required></textarea>
+                        </div>
+                        
+                        <h6>具体修改建议</h6>
+                        <div id="corrections-container">
+                            <div class="correction-item border rounded p-3 mb-2">
+                                <div class="row">
+                                    <div class="col-md-4 mb-2">
+                                        <label class="form-label">原文</label>
+                                        <input type="text" class="form-control correction-original" required>
+                                    </div>
+                                    <div class="col-md-4 mb-2">
+                                        <label class="form-label">修改建议</label>
+                                        <input type="text" class="form-control correction-corrected" required>
+                                    </div>
+                                    <div class="col-md-4 mb-2">
+                                        <label class="form-label">原因</label>
+                                        <input type="text" class="form-control correction-reason" required>
+                                    </div>
+                                </div>
+                                <button type="button" class="btn btn-sm btn-outline-danger remove-correction-btn">删除</button>
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-outline-secondary mt-2" id="add-correction-btn">
+                            <i class="bi bi-plus"></i> 添加修改建议
+                        </button>
+                        
+                        <h6 class="mt-4">段落评论</h6>
+                        <div id="comments-container">
+                            <div class="comment-item border rounded p-3 mb-2">
+                                <div class="row">
+                                    <div class="col-md-2 mb-2">
+                                        <label class="form-label">段落</label>
+                                        <select class="form-select comment-paragraph" required>
+                                            <option value="0">段落 1</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-8 mb-2">
+                                        <label class="form-label">评论</label>
+                                        <input type="text" class="form-control comment-text" required>
+                                    </div>
+                                    <div class="col-md-2 mb-2">
+                                        <label class="form-label">类型</label>
+                                        <select class="form-select comment-type" required>
+                                            <option value="suggestion">建议</option>
+                                            <option value="correction">修正</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <button type="button" class="btn btn-sm btn-outline-danger remove-comment-btn">删除</button>
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-outline-secondary mt-2" id="add-comment-btn">
+                            <i class="bi bi-plus"></i> 添加段落评论
+                        </button>
+                    </form>
+                `;
+                
+                gradeContent.innerHTML = gradeFormHTML;
+                
+                // 添加和删除修改建议的事件处理
+                document.getElementById('add-correction-btn').addEventListener('click', () => {
+                    const container = document.getElementById('corrections-container');
+                    const newItem = document.querySelector('.correction-item').cloneNode(true);
+                    
+                    // 清空克隆项的输入值
+                    newItem.querySelectorAll('input').forEach(input => input.value = '');
+                    
+                    // 添加删除按钮事件
+                    newItem.querySelector('.remove-correction-btn').addEventListener('click', (e) => {
+                        if (document.querySelectorAll('.correction-item').length > 1) {
+                            e.target.closest('.correction-item').remove();
+                        } else {
+                            showToast('至少需要保留一项修改建议', 'warning');
+                        }
+                    });
+                    
+                    container.appendChild(newItem);
+                });
+                
+                // 为初始的删除按钮添加事件
+                document.querySelector('.remove-correction-btn').addEventListener('click', (e) => {
+                    if (document.querySelectorAll('.correction-item').length > 1) {
+                        e.target.closest('.correction-item').remove();
+                    } else {
+                        showToast('至少需要保留一项修改建议', 'warning');
+                    }
+                });
+                
+                // 添加和删除段落评论的事件处理
+                document.getElementById('add-comment-btn').addEventListener('click', () => {
+                    const container = document.getElementById('comments-container');
+                    const newItem = document.querySelector('.comment-item').cloneNode(true);
+                    
+                    // 清空克隆项的输入值
+                    newItem.querySelectorAll('input').forEach(input => input.value = '');
+                    
+                    // 添加删除按钮事件
+                    newItem.querySelector('.remove-comment-btn').addEventListener('click', (e) => {
+                        if (document.querySelectorAll('.comment-item').length > 1) {
+                            e.target.closest('.comment-item').remove();
+                        } else {
+                            showToast('至少需要保留一项段落评论', 'warning');
+                        }
+                    });
+                    
+                    container.appendChild(newItem);
+                });
+                
+                // 为初始的删除按钮添加事件
+                document.querySelector('.remove-comment-btn').addEventListener('click', (e) => {
+                    if (document.querySelectorAll('.comment-item').length > 1) {
+                        e.target.closest('.comment-item').remove();
+                    } else {
+                        showToast('至少需要保留一项段落评论', 'warning');
+                    }
+                });
+                
+                // 保存批改按钮事件
+                document.getElementById('saveGradeBtn').addEventListener('click', () => {
+                    saveEssayGrade(essayId);
+                });
+            }, 500);
+        }
+        
+        /**
+         * 保存作文批改结果
+         * @param {number} essayId - 作文ID
+         */
+        function saveEssayGrade(essayId) {
+            // 表单验证
+            const form = document.getElementById('gradeForm');
+            if (!form.checkValidity()) {
+                form.reportValidity();
+                return;
+            }
+            
+            // 收集表单数据
+            const gradeData = {
+                score: parseInt(document.getElementById('essayScore').value),
+                grader: document.getElementById('essayGrader').value,
+                overall_comment: document.getElementById('overallComment').value,
+                corrections: [],
+                comments: []
+            };
+            
+            // 收集修改建议
+            document.querySelectorAll('.correction-item').forEach(item => {
+                gradeData.corrections.push({
+                    original: item.querySelector('.correction-original').value,
+                    corrected: item.querySelector('.correction-corrected').value,
+                    reason: item.querySelector('.correction-reason').value
+                });
+            });
+            
+            // 收集段落评论
+            document.querySelectorAll('.comment-item').forEach(item => {
+                gradeData.comments.push({
+                    paragraph_index: parseInt(item.querySelector('.comment-paragraph').value),
+                    comment: item.querySelector('.comment-text').value,
+                    type: item.querySelector('.comment-type').value
+                });
+            });
+            
+            // 设置保存按钮状态
+            const saveButton = document.getElementById('saveGradeBtn');
+            const originalText = saveButton.textContent;
+            saveButton.disabled = true;
+            saveButton.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> 保存中...';
+            
+            // 模拟API调用保存批改结果
+            setTimeout(() => {
+                try {
+                    // 在实际应用中，这里应该调用API保存批改结果
+                    // 这里我们只更新模拟数据
+                    
+                    // 更新作文列表中的作文状态
+                    const essayIndex = mockData.essays.data.findIndex(essay => essay.id == essayId);
+                    if (essayIndex !== -1) {
+                        mockData.essays.data[essayIndex].status = '已批改';
+                        mockData.essays.data[essayIndex].score = gradeData.score;
+                        mockData.essays.data[essayIndex].updated_at = new Date().toISOString();
+                    }
+                    
+                    // 更新作文详情
+                    // 注意：实际应用中，这里应该是通过API更新服务器数据
+                    mockData.essayDetails = {
+                        ...mockData.essayDetails,
+                        status: '已批改',
+                        score: gradeData.score,
+                        grader: gradeData.grader,
+                        graded_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString(),
+                        overall_comment: gradeData.overall_comment,
+                        corrections: gradeData.corrections,
+                        comments: gradeData.comments
+                    };
+                    
+                    // 关闭模态框
+                    const modalElement = document.getElementById('essayGradeModal');
+                    const modal = bootstrap.Modal.getInstance(modalElement);
+                    modal.hide();
+                    
+                    showToast('作文批改保存成功', 'success');
+                    
+                    // 刷新作文列表
+                    loadEssaysPage();
+                    
+                } catch (error) {
+                    console.error('保存批改结果失败:', error);
+                    showToast('保存批改结果失败: ' + error.message, 'danger');
+                    
+                    // 恢复按钮状态
+                    saveButton.disabled = false;
+                    saveButton.textContent = originalText;
+                }
+            }, 1000);
+        }
+        
+        /**
+         * 删除作文
+         * @param {number} essayId - 作文ID
+         */
+        function deleteEssay(essayId) {
+            // 模拟API调用删除作文
+            setTimeout(() => {
+                try {
+                    // 从模拟数据中删除作文
+                    const essayIndex = mockData.essays.data.findIndex(essay => essay.id == essayId);
+                    
+                    if (essayIndex === -1) {
+                        throw new Error('作文不存在');
+                    }
+                    
+                    // 从数组中删除作文
+                    mockData.essays.data.splice(essayIndex, 1);
+                    
+                    showToast('作文删除成功', 'success');
+                    
+                    // 刷新作文列表
+                    loadEssaysPage();
+                    
+                } catch (error) {
+                    console.error('删除作文失败:', error);
+                    showToast(`删除作文失败: ${error.message}`, 'danger');
+                }
+            }, 500);
+        }
+    </script>
+</body>
+</html> 

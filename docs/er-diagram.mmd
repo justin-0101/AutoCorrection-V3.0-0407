@@ -1,0 +1,28 @@
+erDiagram
+    角色 ||--o{ 授权 : "1:n"
+    授权 }o--|| 用户 : "n:1"
+    角色 ||--o{ 分配 : "1:n"
+    分配 }o--|| 菜单 : "n:1"
+    菜单 ||--o{ 使用 : "1:n"
+    使用 }o--|| 用户 : "n:1"
+
+    角色 {
+        string 角色名
+        string 级别
+    }
+
+    用户 {
+        string 用户名
+        string 姓名
+        string 联系方式
+        string 密码
+    }
+
+    菜单 {
+        string 菜单名
+        string 路径
+        string 子系统
+        string 父节点
+        int 顺序
+        string 权限
+    }

@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>订单历史 - 小园丁作文批改</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .navbar-brand {
+            font-weight: bold;
+        }
+        .main-content {
+            flex: 1;
+        }
+        .footer {
+            background-color: #212529;
+            color: rgba(255,255,255,0.6);
+            padding: 20px 0;
+            margin-top: auto;
+        }
+        .footer-link {
+            color: rgba(255,255,255,0.6);
+            text-decoration: none;
+        }
+        .footer-link:hover {
+            color: white;
+        }
+        .order-card {
+            transition: all 0.2s ease;
+            border-left: 4px solid #dee2e6;
+        }
+        .order-card.completed {
+            border-left-color: #198754;
+        }
+        .order-card.pending {
+            border-left-color: #ffc107;
+        }
+        .order-card.failed {
+            border-left-color: #dc3545;
+        }
+        .order-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        .badge-regular {
+            background-color: #2196f3;
+            color: white;
+        }
+        .badge-premium {
+            background-color: #9c27b0;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <!-- 导航栏 -->
+    {% include 'navbar.html' %}
+    
+    <div class="main-content py-5">
+        <div class="container">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2>会员订单历史</h2>
+                <a href="{{ url_for('membership') }}" class="btn btn-primary">
+                    <i class="bi bi-arrow-left-circle"></i> 返回会员中心
+                </a>
+            </div>
+            
+            {% if orders|length == 0 %}
+            <div class="alert alert-info">
+                <i class="bi bi-info-circle"></i> 您还没有购买过会员，前往<a href="{{ url_for('membership') }}" class="alert-link">会员中心</a>选择适合您的套餐。
+            </div>
+            {% else %}
+            <div class="card mb-4">
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>订单号</th>
+                                    <th>会员类型</th>
+                                    <th>金额</th>
+                                    <th>状态</th>
+                                    <th>购买时间</th>
+                                    <th>到期时间</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for order in orders %}
+                                <tr>
+                                    <td>{{ order.order_number }}</td>
+                                    <td>
+                                        <span class="badge 
+                                            {% if order.membership_type == 'regular' %}badge-regular
+                                            {% elif order.membership_type == 'premium' %}badge-premium{% endif %}">
+                                            {{ '普通会员' if order.membership_type == 'regular' else '高级会员' }}
+                                        </span>
+                                    </td>
+                                    <td>¥{{ order.amount }}</td>
+                                    <td>
+                                        <span class="badge 
+                                            {% if order.payment_status == 'completed' %}bg-success
+                                            {% elif order.payment_status == 'pending' %}bg-warning text-dark
+                                            {% else %}bg-danger{% endif %}">
+                                            {{ '支付成功' if order.payment_status == 'completed' else 
+                                               '待支付' if order.payment_status == 'pending' else '支付失败' }}
+                                        </span>
+                                    </td>
+                                    <td>{{ order.created_at }}</td>
+                                    <td>{{ order.expiry_date }}</td>
+                                    <td>
+                                        {% if order.payment_status == 'pending' %}
+                                        <button class="btn btn-sm btn-outline-primary pay-button" 
+                                                data-order="{{ order.order_number }}">
+                                            支付
+                                        </button>
+                                        {% elif order.payment_status == 'completed' %}
+                                        <button class="btn btn-sm btn-outline-secondary" 
+                                                onclick="showOrderDetails('{{ order.order_number }}')">
+                                            详情
+                                        </button>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 分页控件 -->
+            {% if pagination and pagination.pages > 1 %}
+            <nav aria-label="Page navigation" class="mt-4">
+                <ul class="pagination justify-content-center">
+                    <li class="page-item {% if pagination.current_page == 1 %}disabled{% endif %}">
+                        <a class="page-link" href="{{ url_for('order_history', page=pagination.current_page-1) }}">上一页</a>
+                    </li>
+                    
+                    {% for page_num in range(1, pagination.pages + 1) %}
+                    <li class="page-item {% if page_num == pagination.current_page %}active{% endif %}">
+                        <a class="page-link" href="{{ url_for('order_history', page=page_num) }}">
+                            {{ page_num }}
+                        </a>
+                    </li>
+                    {% endfor %}
+                    
+                    <li class="page-item {% if pagination.current_page == pagination.pages %}disabled{% endif %}">
+                        <a class="page-link" href="{{ url_for('order_history', page=pagination.current_page+1) }}">下一页</a>
+                    </li>
+                </ul>
+            </nav>
+            {% endif %}
+            
+            <!-- 会员权益说明 -->
+            <div class="card mt-4">
+                <div class="card-header bg-light">
+                    <h5 class="mb-0">会员订单说明</h5>
+                </div>
+                <div class="card-body">
+                    <ul>
+                        <li>会员订单一旦支付成功，将立即生效。</li>
+                        <li>会员有效期从支付成功当天开始计算，为期30天。</li>
+                        <li>订单支付后不支持退款，请确认后再购买。</li>
+                        <li>如需续费，可在会员到期前任何时间进行，新的有效期将从当前有效期结束后开始计算。</li>
+                        <li>如有任何支付问题，请联系客服处理。</li>
+                    </ul>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    
+    <!-- 订单详情模态框 -->
+    <div class="modal fade" id="orderDetailModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">订单详情</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="orderDetailContent">
+                        <!-- 订单详情内容将通过JS动态添加 -->
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 页脚 -->
+    <footer class="footer py-3">
+        <div class="container">
+            <div class="text-center">
+                <p class="small mb-0">&copy; 2025 小园丁作文批改系统</p>
+            </div>
+        </div>
+    </footer>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 订单详情查询
+        function showOrderDetails(orderNumber) {
+            // 在实际应用中，这里应该是一个AJAX请求来获取订单详情
+            // 简化版，直接显示已有信息
+            const modalContent = document.getElementById('orderDetailContent');
+            
+            // 找到对应订单的信息
+            // 这里简化处理，实际应用中应通过AJAX获取详细数据
+            const orderDetails = `
+                <div class="p-3">
+                    <p><strong>订单号:</strong> ${orderNumber}</p>
+                    <p><strong>购买时间:</strong> ${'{{ orders[0].created_at }}'.replace('{{ orders[0].order_number }}', orderNumber)}</p>
+                    <p><strong>支付状态:</strong> <span class="badge bg-success">支付成功</span></p>
+                    <p><strong>发票状态:</strong> <span class="badge bg-secondary">未开具</span></p>
+                    
+                    <div class="mt-3">
+                        <button class="btn btn-sm btn-outline-primary" onclick="requestInvoice('${orderNumber}')">
+                            申请开具发票
+                        </button>
+                    </div>
+                </div>
+            `;
+            
+            modalContent.innerHTML = orderDetails;
+            
+            // 显示模态框
+            const modal = new bootstrap.Modal(document.getElementById('orderDetailModal'));
+            modal.show();
+        }
+        
+        // 申请开具发票
+        function requestInvoice(orderNumber) {
+            alert(`功能开发中: 暂不支持为订单 ${orderNumber} 开具发票`);
+        }
+        
+        // 订单支付
+        document.querySelectorAll('.pay-button').forEach(button => {
+            button.addEventListener('click', function() {
+                const orderNumber = this.getAttribute('data-order');
+                
+                // 这里应该跳转到支付页面或打开支付窗口
+                // 简化版只显示提示
+                alert(`正在为订单 ${orderNumber} 跳转支付页面，此功能尚在开发中`);
+                
+                // 实际情况应该跳转：
+                // window.location.href = "/pay_order/" + orderNumber;
+            });
+        });
+    </script>
+</body>
+</html> 

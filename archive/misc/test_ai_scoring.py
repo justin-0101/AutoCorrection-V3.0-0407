@@ -1,0 +1,102 @@
+import asyncio
+import json
+import os
+import sys
+from datetime import datetime
+
+# 导入AI评分函数
+try:
+    pass  # 自动修复的空块
+except Exception as e:
+    logger.error(f"发生错误: {str(e)}")
+except Exception as e:
+    logger.error(f"发生错误: {str(e)}")
+    from app import ai_analyze_content
+    print("成功导入AI评分函数")
+except ImportError as e:
+    print(f"导入AI评分函数失败: {e}")
+    sys.exit(1)
+
+async def test_ai_scoring():
+    """测试AI评分功能"""
+    print("\n" + "="*50)
+    print("开始测试AI评分功能")
+    print("="*50)
+    
+    # 测试文本
+    test_title = "测试作文标题"
+    test_content = """
+    这是一篇测试作文，用于验证AI评分功能是否正常工作。
+    
+    作文是语言文字表达的重要形式，也是学生展示思想和写作能力的重要途径。
+    一篇好的作文应该包含明确的主题、合理的结构、丰富的内容和流畅的语言。
+    
+    在内容方面，作文应该观点鲜明，论据充分，能够围绕主题展开充分论述。
+    同时，作文的语言应该准确、生动、流畅，能够准确表达作者的思想。
+    
+    在结构方面，作文应该有清晰的开头、主体和结尾，段落之间衔接自然，
+    论述过程符合逻辑，让读者容易理解和接受。
+    
+    总之，作文是学生综合素质的体现，需要在平时多读多写，不断提高自己的写作水平。
+    """
+    
+    # 清理文本（去除前导空格）
+    test_content = "\n".join([line.strip() for line in test_content.split("\n")])
+    
+    try:
+        pass  # 自动修复的空块
+    except Exception as e:
+        logger.error(f"发生错误: {str(e)}")
+    except Exception as e:
+        logger.error(f"发生错误: {str(e)}")
+        print(f"开始分析作文，标题: '{test_title}'，内容长度: {len(test_content)}字符")
+        print(f"作文内容前100字符: {test_content[:100]}...")
+        
+        # 调用AI评分函数
+        start_time = datetime.now()
+        print(f"开始调用AI评分函数: {start_time}")
+        
+        result = await ai_analyze_content(test_content, test_title)
+        
+        end_time = datetime.now()
+        duration = (end_time - start_time).total_seconds()
+        print(f"AI评分完成，耗时: {duration:.2f}秒")
+        
+        # 打印评分结果
+        print("\n" + "="*30 + " 评分结果 " + "="*30)
+        print(f"总分: {result['total_score']}")
+        print(f"等级: {result['grade']}")
+        print(f"内容得分: {result['content_score']}")
+        print(f"语言得分: {result['language_score']}")
+        print(f"结构得分: {result['structure_score']}")
+        print(f"书写得分: {result['writing_score']}")
+        print(f"错别字数量: {result['error_count']}")
+        
+        # 打印评价内容
+        print("\n" + "="*30 + " 评价内容 " + "="*30)
+        print(f"总体评价: {result['overall_assessment'][:200]}...")
+        print(f"内容分析: {result['content_analysis'][:200]}...")
+        print(f"语言分析: {result['language_analysis'][:200]}...")
+        print(f"结构分析: {result['structure_analysis'][:200]}...")
+        print(f"书写分析: {result['writing_analysis'][:200]}...")
+        
+        # 保存完整结果到文件
+        with open("ai_scoring_result.json", "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+        print(f"\n完整评分结果已保存到: ai_scoring_result.json")
+        
+        print("\n测试完成！")
+        return result
+    
+    except Exception as e:
+        print(f"测试过程中出现错误: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+if __name__ == "__main__":
+    # 运行测试
+    print("启动测试脚本...")
+    loop = asyncio.get_event_loop()
+    result = loop.run_until_complete(test_ai_scoring())
+    loop.close() 

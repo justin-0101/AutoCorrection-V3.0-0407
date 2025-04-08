@@ -1,0 +1,44 @@
+from PIL import Image, ImageDraw, ImageFont
+import os
+
+def create_test_image():
+    """创建一个带有中文文字的测试图片"""
+    
+    # 确保static目录存在
+    os.makedirs("static", exist_ok=True)
+    
+    # 创建图片
+    img = Image.new('RGB', (800, 600), color=(255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    
+    # 尝试加载字体(如果失败则使用默认字体)
+    try:
+        font = ImageFont.truetype("simhei.ttf", 24)
+    except:
+        font = ImageFont.load_default()
+    
+    # 添加文字
+    test_text = """这是一段中文测试文本
+    用于测试OCR图像识别功能
+    包含多行文字
+    希望能够正确识别
+    
+    测试一下标点符号：
+    逗号、句号。问号？感叹号！
+    
+    1234567890
+    abcdefghijklmnopqrstuvwxyz
+    ABCDEFGHIJKLMNOPQRSTUVWXYZ"""
+    
+    # 绘制文字
+    draw.text((50, 50), test_text, font=font, fill=(0, 0, 0))
+    
+    # 保存图片
+    output_path = os.path.join("static", "test_image.jpg")
+    img.save(output_path)
+    
+    print(f"已创建测试图片: {output_path}")
+    return output_path
+
+if __name__ == "__main__":
+    create_test_image() 

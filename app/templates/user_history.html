@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我的作文 - 小园丁作文批改</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .navbar-brand {
+            font-weight: bold;
+        }
+        .main-content {
+            flex: 1;
+        }
+        .footer {
+            background-color: #212529;
+            color: rgba(255,255,255,0.6);
+            padding: 20px 0;
+            margin-top: auto;
+        }
+        .footer-link {
+            color: rgba(255,255,255,0.6);
+            text-decoration: none;
+        }
+        .footer-link:hover {
+            color: white;
+        }
+        .essay-card {
+            transition: transform 0.2s;
+            border: none;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .essay-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+        }
+        .score-badge {
+            font-size: 0.9rem;
+            padding: 3px 8px;
+            border-radius: 20px;
+        }
+        .score-box {
+            background: #fff;
+            border-radius: 8px;
+            padding: 10px;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            height: 100%;
+        }
+        .score-box h3, .score-box h5 {
+            margin: 0;
+            color: #333;
+        }
+        .score-box small {
+            color: #666;
+            font-size: 0.8rem;
+        }
+        .score-total {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 15px;
+        }
+        .score-total h3 {
+            color: #0d6efd;
+            font-size: 2rem;
+            margin: 0;
+        }
+        .status-badge {
+            font-size: 0.85rem;
+            padding: 0.35rem 0.8rem;
+            border-radius: 20px;
+        }
+        .essay-title {
+            font-size: 1.25rem;
+            font-weight: 500;
+            color: #333;
+            margin-bottom: 0.5rem;
+            display: -webkit-box;
+            -webkit-line-clamp: 1;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        .score-excellent {
+            background-color: #198754;
+            color: white;
+        }
+        .score-good {
+            background-color: #0dcaf0;
+            color: white;
+        }
+        .score-average {
+            background-color: #ffc107;
+            color: white;
+        }
+        .score-below {
+            background-color: #dc3545;
+            color: white;
+        }
+        .essay-list {
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        .essay-item {
+            padding: 1.5rem;
+            border-bottom: 1px solid #eee;
+            transition: all 0.2s ease;
+        }
+        .essay-item:last-child {
+            border-bottom: none;
+        }
+        .essay-item:hover {
+            background-color: #f8f9fa;
+        }
+        .essay-meta {
+            font-size: 0.9rem;
+            color: #6c757d;
+        }
+        .progress-bar {
+            height: 6px;
+            border-radius: 3px;
+        }
+        .score-box {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 0.5rem 1rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .score-box .score {
+            font-size: 1.25rem;
+            font-weight: 500;
+            color: #0d6efd;
+        }
+        .actions {
+            opacity: 0.8;
+            transition: opacity 0.2s ease;
+        }
+        .essay-item:hover .actions {
+            opacity: 1;
+        }
+        .btn-icon {
+            padding: 0.375rem;
+            line-height: 1;
+            border-radius: 6px;
+        }
+        .status-badge.bg-success {
+            background-color: rgba(25, 135, 84, 0.15) !important;
+            color: #0a6c3c !important;
+            border: 1px solid rgba(25, 135, 84, 0.2);
+        }
+        .status-badge.bg-info {
+            background-color: rgba(13, 202, 240, 0.15) !important;
+            color: #087990 !important;
+            border: 1px solid rgba(13, 202, 240, 0.2);
+        }
+        .status-badge.bg-warning {
+            background-color: rgba(255, 193, 7, 0.15) !important;
+            color: #997404 !important;
+            border: 1px solid rgba(255, 193, 7, 0.2);
+        }
+        .status-badge.bg-danger {
+            background-color: rgba(220, 53, 69, 0.15) !important;
+            color: #b02a37 !important;
+            border: 1px solid rgba(220, 53, 69, 0.2);
+        }
+        .score-display {
+            display: flex;
+            align-items: center;
+            gap: 2rem;
+        }
+        .total-score {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #0d6efd;
+            line-height: 1;
+            margin-bottom: 0.25rem;
+        }
+        .score-breakdown {
+            display: flex;
+            gap: 1.5rem;
+            align-items: center;
+        }
+        .score-item {
+            text-align: center;
+            min-width: 3rem;
+        }
+        .score-item .value {
+            font-size: 1.1rem;
+            font-weight: 500;
+            color: #495057;
+            line-height: 1;
+            margin-bottom: 0.25rem;
+        }
+        .score-item .label {
+            font-size: 0.8rem;
+            color: #6c757d;
+            white-space: nowrap;
+        }
+    </style>
+</head>
+<body>
+    <!-- 导航栏 -->
+    {% include 'navbar.html' %}
+    
+    <div class="main-content py-5">
+        <div class="container">
+            <!-- 添加消息提示区域 -->
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                            {{ message }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                        </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2 class="mb-0">我的作文历史</h2>
+                <div>
+                    <button id="batchDeleteBtn" class="btn btn-danger me-2" style="display: none;">
+                        <i class="bi bi-trash"></i> 批量删除
+                    </button>
+                    <a href="{{ url_for('main.correction') }}" class="btn btn-primary">
+                        <i class="bi bi-plus-circle"></i> 新建批改
+                    </a>
+                </div>
+            </div>
+            
+            {% if essays|length == 0 %}
+            <div class="alert alert-info">
+                <i class="bi bi-info-circle"></i> 您还没有提交过作文，点击"新建批改"按钮开始您的第一次批改。
+            </div>
+            {% else %}
+            <div class="essay-list">
+                {% for essay in essays %}
+                <div class="essay-item">
+                    <div class="row align-items-center">
+                        <div class="col-md-4">
+                            <div class="d-flex align-items-center">
+                                <div class="form-check me-2">
+                                    <input class="form-check-input essay-checkbox" type="checkbox" value="{{ essay.id }}" style="display: none;">
+                                </div>
+                                <div>
+                                    <h3 class="essay-title">{{ essay.title }}</h3>
+                                    <div class="essay-meta d-flex align-items-center gap-3">
+                                        <span><i class="bi bi-clock me-1"></i>{{ essay.created_at_formatted }}</span>
+                                        {% if essay.status == 'completed' %}
+                                            <span class="status-badge bg-success">批改完成</span>
+                                        {% elif essay.status == 'processing' %}
+                                            <span class="status-badge bg-info">批改中</span>
+                                        {% elif essay.status == 'pending' %}
+                                            <span class="status-badge bg-warning">等待批改</span>
+                                        {% elif essay.status == 'failed' %}
+                                            <span class="status-badge bg-danger">批改失败</span>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            {% if essay.status == 'completed' %}
+                            <div class="score-display">
+                                <div>
+                                    <div class="total-score">{{ essay.total_score }}</div>
+                                    <small class="text-muted">总分</small>
+                                </div>
+                                <div class="score-breakdown">
+                                    <div class="score-item">
+                                        <div class="value">{{ essay.content_score }}</div>
+                                        <div class="label">内容主旨</div>
+                                    </div>
+                                    <div class="score-item">
+                                        <div class="value">{{ essay.language_score }}</div>
+                                        <div class="label">语言文采</div>
+                                    </div>
+                                    <div class="score-item">
+                                        <div class="value">{{ essay.structure_score }}</div>
+                                        <div class="label">文章结构</div>
+                                    </div>
+                                    <div class="score-item">
+                                        <div class="value">{{ essay.writing_score }}</div>
+                                        <div class="label">文面书写</div>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endif %}
+                        </div>
+                        
+                        <div class="col-md-2">
+                            <div class="actions d-flex justify-content-end gap-2">
+                                {% if essay.status == 'completed' %}
+                                    <a href="{{ url_for('main.results', essay_id=essay.id) }}" 
+                                       class="btn btn-primary">
+                                        <i class="bi bi-eye"></i> 查看详情
+                                    </a>
+                                {% elif essay.status == 'failed' %}
+                                    <a href="{{ url_for('main.retry_correction', essay_id=essay.id) }}" 
+                                       class="btn btn-warning">
+                                        <i class="bi bi-arrow-clockwise"></i> 重新批改
+                                    </a>
+                                {% endif %}
+                                <button type="button" 
+                                        class="btn btn-outline-danger" 
+                                        data-bs-toggle="modal" 
+                                        data-bs-target="#deleteModal{{ essay.id }}">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 删除确认对话框 -->
+                <div class="modal fade" id="deleteModal{{ essay.id }}" tabindex="-1">
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title">确认删除</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body">
+                                <p>您确定要删除这篇作文吗？此操作不可恢复。</p>
+                                <p><strong>作文标题：</strong>{{ essay.title }}</p>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                                <form action="{{ url_for('main.delete_essay', essay_id=essay.id) }}" method="POST" style="display: inline;">
+                                    <button type="submit" class="btn btn-danger">确认删除</button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+
+            <!-- 分页控件 -->
+            {% if pagination and pagination.pages > 1 %}
+            <nav aria-label="Page navigation" class="mt-4">
+                <ul class="pagination justify-content-center">
+                    <li class="page-item {% if pagination.page == 1 %}disabled{% endif %}">
+                        <a class="page-link" href="{{ url_for('main.user_history', page=pagination.page-1) }}">上一页</a>
+                    </li>
+                    {% for page_num in range(1, pagination.pages + 1) %}
+                    <li class="page-item {% if page_num == pagination.page %}active{% endif %}">
+                        <a class="page-link" href="{{ url_for('main.user_history', page=page_num) }}">{{ page_num }}</a>
+                    </li>
+                    {% endfor %}
+                    <li class="page-item {% if pagination.page == pagination.pages %}disabled{% endif %}">
+                        <a class="page-link" href="{{ url_for('main.user_history', page=pagination.page+1) }}">下一页</a>
+                    </li>
+                </ul>
+            </nav>
+            {% endif %}
+            {% endif %}
+        </div>
+    </div>
+    
+    <!-- 批量删除确认对话框 -->
+    <div class="modal fade" id="batchDeleteModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">批量删除确认</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>您确定要删除选中的作文吗？此操作不可恢复。</p>
+                    <p><strong>选中数量：</strong><span id="selectedCount">0</span></p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <form id="batchDeleteForm" action="{{ url_for('main.batch_delete_essays') }}" method="POST">
+                        <input type="hidden" name="essay_ids" id="selectedEssayIds">
+                        <button type="submit" class="btn btn-danger">确认删除</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 页脚 -->
+    <footer class="footer">
+        <div class="container text-center">
+            <p>&copy; 2024 小园丁作文批改. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- 批量删除功能的JavaScript -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const checkboxes = document.querySelectorAll('.essay-checkbox');
+            const batchDeleteBtn = document.getElementById('batchDeleteBtn');
+            const selectedEssayIds = document.getElementById('selectedEssayIds');
+            const selectedCount = document.getElementById('selectedCount');
+            let isSelectionMode = false;
+
+            // 长按事件处理
+            let pressTimer;
+            const essays = document.querySelectorAll('.essay-item');
+            essays.forEach(essay => {
+                essay.addEventListener('mousedown', function() {
+                    pressTimer = setTimeout(() => {
+                        if (!isSelectionMode) {
+                            enterSelectionMode();
+                        }
+                    }, 500);
+                });
+                
+                essay.addEventListener('mouseup', function() {
+                    clearTimeout(pressTimer);
+                });
+                
+                essay.addEventListener('mouseleave', function() {
+                    clearTimeout(pressTimer);
+                });
+            });
+
+            function enterSelectionMode() {
+                isSelectionMode = true;
+                checkboxes.forEach(cb => {
+                    cb.style.display = 'block';
+                });
+                batchDeleteBtn.style.display = 'inline-block';
+            }
+
+            function exitSelectionMode() {
+                isSelectionMode = false;
+                checkboxes.forEach(cb => {
+                    cb.style.display = 'none';
+                    cb.checked = false;
+                });
+                batchDeleteBtn.style.display = 'none';
+                updateSelectedCount();
+            }
+
+            function updateSelectedCount() {
+                const selectedBoxes = document.querySelectorAll('.essay-checkbox:checked');
+                const count = selectedBoxes.length;
+                selectedCount.textContent = count;
+                
+                // 更新隐藏输入字段的值
+                const selectedIds = Array.from(selectedBoxes).map(cb => cb.value);
+                selectedEssayIds.value = selectedIds.join(',');
+                
+                // 更新批量删除按钮状态
+                batchDeleteBtn.disabled = count === 0;
+            }
+
+            // 监听复选框变化
+            checkboxes.forEach(checkbox => {
+                checkbox.addEventListener('change', updateSelectedCount);
+            });
+
+            // 批量删除按钮点击事件
+            batchDeleteBtn.addEventListener('click', function() {
+                const selectedBoxes = document.querySelectorAll('.essay-checkbox:checked');
+                if (selectedBoxes.length > 0) {
+                    new bootstrap.Modal(document.getElementById('batchDeleteModal')).show();
+                }
+            });
+
+            // 点击页面空白处退出选择模式
+            document.addEventListener('click', function(e) {
+                if (isSelectionMode && !e.target.closest('.essay-item') && !e.target.closest('#batchDeleteModal')) {
+                    exitSelectionMode();
+                }
+            });
+        });
+    </script>
+</body>
+</html> 

@@ -1,0 +1,277 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+全面修复app.py中的缩进问题，特别是correction函数的完整重写
+"""
+
+import re
+import sys
+import os
+import logging
+from datetime import datetime
+
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("fix_indentation.log"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+def fix_correction_function():
+    """完全重写和修复correction函数中的缩进问题"""
+    try:
+        # 读取app.py文件
+        logger.info("读取app.py文件...")
+        with open('app.py', 'r', encoding='utf-8') as file:
+            content = file.read()
+        
+        # 创建备份
+        backup_filename = f'app.py.{datetime.now().strftime("%Y%m%d_%H%M%S")}.bak'
+        with open(backup_filename, 'w', encoding='utf-8') as file:
+            file.write(content)
+        logger.info(f"创建备份文件 {backup_filename}")
+        
+        # 使用正则表达式查找correction函数
+        correction_pattern = r'(@app\.route\([\s\S]*?def correction\(\):[\s\S]*?)(?=@app\.route|$)'
+        match = re.search(correction_pattern, content)
+        
+        if not match:
+            logger.error("无法找到correction函数")
+            return False
+        
+        # 获取原函数文本
+        old_function = match.group(1)
+        logger.info(f"找到correction函数，长度: {len(old_function)}字符")
+        
+        # 准备新的函数文本
+        new_function = '''@app.route('/correction', methods=['GET', 'POST'])
+def correction():
+    """作文批改页面：接收用户提交的作文并进行批改"""
+    if request.method == 'POST':
+        try:
+            # 检查用户登录状态
+            user_id = session.get('user_id')
+            if not user_id:
+                flash('请先登录后再进行作文批改', 'warning')
+                return redirect(url_for('login'))
+    
+            # 检查用户剩余次数
+            connection = get_db()
+            cursor = connection.cursor()
+            
+            # 获取用户信息和会员状态
+            cursor.execute("SELECT user_type, membership_expiry FROM users WHERE user_id = ?", (user_id,))
+            user_info = cursor.fetchone()
+            
+            # 如果用户不存在，给出错误提示
+            if not user_info:
+                flash('用户信息无效，请重新登录', 'danger')
+                return redirect(url_for('login'))
+    
+            user_type = user_info[0]
+            membership_expiry = user_info[1]
+            
+            # 检查会员是否有效
+            is_premium = False
+            if membership_expiry:
+                try:
+                    expiry_date = datetime.strptime(membership_expiry, '%Y-%m-%d').date()
+                    is_premium = expiry_date >= date.today() and user_type in ['regular', 'premium']
+                    logger.info(f"用户ID {user_id} 会员状态: {user_type}, 到期日: {expiry_date}, 当前有效: {is_premium}")
+                except ValueError as e:
+                    logger.error(f"会员到期日期解析错误: {e}")
+                    flash('系统错误: 会员信息异常', 'danger')
+                    return redirect(url_for('index'))
+            
+            # 获取当天已批改的作文数量
+            today = date.today().strftime('%Y-%m-%d')
+            cursor.execute("""
+                SELECT COUNT(*) FROM essays 
+                WHERE user_id = ? AND DATE(submission_time) = ?
+            """, (user_id, today))
+            daily_count = cursor.fetchone()[0]
+            
+            # 获取当月已批改的作文数量
+            current_month = date.today().strftime('%Y-%m')
+            cursor.execute("""
+                SELECT COUNT(*) FROM essays 
+                WHERE user_id = ? AND strftime('%Y-%m', submission_time) = ?
+            """, (user_id, current_month))
+            monthly_count = cursor.fetchone()[0]
+            
+            # 检查剩余量
+            daily_limit, monthly_limit = get_user_limits(user_type)
+            logger.info(f"用户ID {user_id} 限制: 每日{daily_limit}, 每月{monthly_limit}, 已用: 今日{daily_count}, 本月{monthly_count}")
+            
+            # 检查是否超出限制
+            if daily_count >= daily_limit:
+                flash(f'您今日批改已达上限({daily_limit}篇)，请明天再试或升级会员', 'warning')
+                return redirect(url_for('membership'))
+            
+            if monthly_count >= monthly_limit:
+                flash(f'您本月批改已达上限({monthly_limit}篇)，请下月再试或升级会员', 'warning')
+                return redirect(url_for('membership'))
+            
+            # 获取表单数据
+            subject = request.form.get('subject', '无标题').strip()
+            article = request.form.get('article', '').strip()
+            file = request.files.get('file')
+            use_file_content = request.form.get('useFileContent') == 'on'
+            
+            # 如果选择了使用文件内容且有上传文件
+            if use_file_content and file and file.filename:
+                file_content = None
+                file_extension = os.path.splitext(file.filename)[1].lower()
+
+                try:
+                    # 根据文件扩展名处理不同格式
+                    if file_extension == '.txt':
+                        file_content = file.read().decode('utf-8')
+                    elif file_extension == '.docx':
+                        import docx
+                        doc = docx.Document(file)
+                        file_content = '\n'.join([para.text for para in doc.paragraphs])
+                    else:
+                        flash('不支持的文件格式，请上传.txt或.docx文件', 'danger')
+                        return redirect(url_for('correction'))
+                    
+                    # 如果成功获取了文件内容
+                    if file_content:
+                        article = file_content
+                        # 如果没有提供标题，尝试使用文件名作为标题
+                        if not subject:
+                            subject = os.path.splitext(file.filename)[0]
+                except Exception as e:
+                    logger.error(f"文件处理出错: {str(e)}")
+                    flash(f'文件读取失败: {str(e)}', 'danger')
+                    return redirect(url_for('correction'))
+            
+            # 验证内容是否为空
+            if not article.strip():
+                flash('作文内容不能为空，请输入作文内容', 'danger')
+                return redirect(url_for('correction'))
+            
+            # 如果没有标题，尝试从内容的第一行提取
+            if not subject:
+                first_line = article.strip().split('\\n')[0].strip()
+                if len(first_line) <= 30:  # 如果第一行不太长，可能是标题
+                    subject = first_line
+                else:
+                    subject = '无标题'
+            
+            # 获取字数
+            word_count = len(article)
+            
+            # 记录到数据库
+            submission_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            
+            try:
+                cursor.execute("""
+                    INSERT INTO essays 
+                    (user_id, title, content, submission_time, word_count) 
+                    VALUES (?, ?, ?, ?, ?)
+                """, (user_id, subject, article, submission_time, word_count))
+                
+                essay_id = cursor.lastrowid
+                connection.commit()
+                
+                # 调用AI评分服务
+                try:
+                    ai_result = unified_ai_scoring(subject, article)
+                
+                    # 确保等级正确，特别是对空作文
+                    grade = ai_result.get('grade_assessment', ai_result.get('grade', 'E-未完成'))
+                    if len(article.strip()) == 0 or int(ai_result.get('total_score', 0)) == 0:
+                        grade = "E-未完成"
+                
+                    # 获取错别字数组
+                    spelling_errors = json.dumps(ai_result.get('spelling_errors', []), ensure_ascii=False)
+                    
+                    # 更新评分结果到数据库
+                    cursor.execute("""
+                        UPDATE essays SET 
+                            total_score = ?, grade = ?, content_score = ?, 
+                            language_score = ?, structure_score = ?, writing_score = ?,
+                            spelling_errors = ?, overall_assessment = ?, 
+                            content_analysis = ?, language_analysis = ?,
+                            structure_analysis = ?, writing_analysis = ?
+                        WHERE id = ?
+                    """, (
+                        ai_result.get('total_score', 0),
+                        grade,
+                        ai_result.get('content_score', 0),
+                        ai_result.get('language_score', 0),
+                        ai_result.get('structure_score', 0),
+                        ai_result.get('writing_score', 0),
+                        spelling_errors,
+                        ai_result.get('overall_comment', ''),
+                        ai_result.get('detailed_analysis', {}).get('内容分析', ''),
+                        ai_result.get('detailed_analysis', {}).get('表达分析', ''),
+                        ai_result.get('detailed_analysis', {}).get('结构分析', ''),
+                        ai_result.get('detailed_analysis', {}).get('书写分析', ''),
+                        essay_id
+                    ))
+                    connection.commit()
+                
+                    # 准备模板渲染数据
+                    template_data = {
+                        'title': subject,
+                        'content': article,
+                        'total_score': ai_result.get('total_score', 0),
+                        'grade': grade,
+                        'content_score': ai_result.get('content_score', 0),
+                        'language_score': ai_result.get('language_score', 0),
+                        'structure_score': ai_result.get('structure_score', 0),
+                        'writing_score': ai_result.get('writing_score', 0),
+                        'spelling_errors': json.loads(spelling_errors),
+                        'word_count': word_count,
+                        'overall_assessment': ai_result.get('overall_comment', ''),
+                        'content_analysis': ai_result.get('detailed_analysis', {}).get('内容分析', ''),
+                        'language_analysis': ai_result.get('detailed_analysis', {}).get('表达分析', ''),
+                        'structure_analysis': ai_result.get('detailed_analysis', {}).get('结构分析', ''),
+                        'writing_analysis': ai_result.get('detailed_analysis', {}).get('书写分析', '')
+                    }
+                    
+                    # 渲染结果页面
+                    return render_template('results.html', **template_data)
+                except Exception as e:
+                    logger.error(f"AI评分过程中发生错误: {str(e)}")
+                    flash(f'AI评分失败，请稍后再试: {str(e)}', 'danger')
+                    return redirect(url_for('correction'))
+            
+            except sqlite3.Error as e:
+                logger.error(f"数据库错误: {str(e)}")
+                connection.rollback()
+                flash('系统错误，请稍后再试', 'danger')
+                return redirect(url_for('correction'))
+        
+        except Exception as e:
+            logger.error(f"处理作文提交时发生错误: {str(e)}")
+            flash(f'处理作文提交时发生错误: {str(e)}', 'danger')
+            return redirect(url_for('correction'))
+            
+    # GET请求直接返回批改页面
+    return render_template('correction.html')
+'''
+        
+        # 替换原函数
+        new_content = content.replace(old_function, new_function)
+        
+        # 写入修复后的文件
+        with open('app.py', 'w', encoding='utf-8') as file:
+            file.write(new_content)
+        
+        logger.info("修复完成！app.py已更新，correction函数已重写。")
+        return True
+    
+    except Exception as e:
+        logger.error(f"修复过程中出错: {str(e)}")
+        return False
+
+if __name__ == "__main__":
+    fix_correction_function() 

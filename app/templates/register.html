@@ -1,0 +1,145 @@
+{% extends 'base.html' %}
+
+{% block title %}注册账号{% endblock %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="row justify-content-center">
+        <div class="col-md-6">
+            <div class="card shadow">
+                <div class="card-header bg-primary text-white">
+                    <h4 class="mb-0">注册新账号</h4>
+                </div>
+                <div class="card-body">
+                    {% with messages = get_flashed_messages(with_categories=true) %}
+                        {% if messages %}
+                            {% for category, message in messages %}
+                                <div class="alert alert-{{ category }}">{{ message }}</div>
+                            {% endfor %}
+                        {% endif %}
+                    {% endwith %}
+                    
+                    <form method="post" action="{{ url_for('main.register') }}">
+                        <div class="mb-3">
+                            <label for="username" class="form-label">用户名</label>
+                            <input type="text" class="form-control" id="username" name="username" required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="email" class="form-label">电子邮箱</label>
+                            <input type="email" class="form-control" id="email" name="email" required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="password" class="form-label">密码</label>
+                            <input type="password" class="form-control" id="password" name="password" minlength="6" required>
+                            <div class="form-text">密码长度至少6个字符</div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="confirm_password" class="form-label">确认密码</label>
+                            <input type="password" class="form-control" id="confirm_password" name="confirm_password" required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="verification_code" class="form-label">验证码 (选填)</label>
+                            <input type="text" class="form-control" id="verification_code" name="verification_code">
+                            <div class="form-text">
+                                如果您有验证码，请输入以完成注册
+                                <a href="#" id="sendVerificationBtn" class="btn btn-sm btn-outline-primary">发送验证码</a>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="terms" required>
+                            <label class="form-check-label" for="terms">
+                                我已阅读并同意<a href="#" data-bs-toggle="modal" data-bs-target="#termsModal">用户协议</a>
+                            </label>
+                        </div>
+                        
+                        <div class="d-grid gap-2">
+                            <button type="submit" class="btn btn-primary">注册</button>
+                        </div>
+                    </form>
+                    
+                    <div class="mt-3 text-center">
+                        已有账号？<a href="{{ url_for('main.login') }}">立即登录</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 用户协议模态框 -->
+<div class="modal fade" id="termsModal" tabindex="-1" aria-labelledby="termsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="termsModalLabel">用户协议</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <h6>服务条款</h6>
+                <p>欢迎使用作文批改平台！在使用我们的服务前，请仔细阅读以下条款：</p>
+                <ol>
+                    <li>您必须年满13岁或在您所在地区达到相应法定年龄才能使用本服务。</li>
+                    <li>您对您的账户和密码负有完全责任，应妥善保管。</li>
+                    <li>您提交的作文内容必须是您自己创作或有权授权使用的内容。</li>
+                    <li>我们会保护您的个人信息，不会未经您同意向第三方披露。</li>
+                    <li>我们保留在必要时修改服务条款的权利，重大变更会提前通知。</li>
+                </ol>
+                
+                <h6>隐私政策</h6>
+                <p>我们重视您的隐私保护，收集的信息仅用于提供和改进服务：</p>
+                <ul>
+                    <li>我们收集您提供的注册信息和作文内容。</li>
+                    <li>我们使用Cookie和类似技术来优化用户体验。</li>
+                    <li>我们采取多项措施保护您的数据安全。</li>
+                    <li>未经您的许可，我们不会将您的个人信息分享给第三方。</li>
+                </ul>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal" id="agreeBtn">我已阅读并同意</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // 同意条款和勾选复选框
+        const agreeBtn = document.getElementById('agreeBtn');
+        const termsCheckbox = document.getElementById('terms');
+        
+        if (agreeBtn && termsCheckbox) {
+            agreeBtn.addEventListener('click', function() {
+                termsCheckbox.checked = true;
+            });
+        }
+        
+        // 发送验证码功能
+        const sendVerificationBtn = document.getElementById('sendVerificationBtn');
+        const emailInput = document.getElementById('email');
+        
+        if (sendVerificationBtn && emailInput) {
+            sendVerificationBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                
+                const email = emailInput.value.trim();
+                if (!email) {
+                    alert('请先填写邮箱地址');
+                    return;
+                }
+                
+                // 这里应该添加发送验证码的AJAX请求
+                alert('验证码发送功能待实现，请联系管理员获取验证码');
+            });
+        }
+    });
+</script>
+{% endblock %} 

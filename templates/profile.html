@@ -1,0 +1,187 @@
+{% extends 'base.html' %}
+
+{% block title %}个人资料{% endblock %}
+
+{% block style %}
+.profile-card {
+    max-width: 900px;
+    margin: 0 auto;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+.info-item {
+    padding: 10px 0;
+    border-bottom: 1px solid #eee;
+}
+.info-label {
+    font-weight: bold;
+    color: #495057;
+}
+.nav-tabs .nav-link {
+    color: #495057;
+}
+.nav-tabs .nav-link.active {
+    font-weight: bold;
+    color: #0d6efd;
+    border-bottom: 3px solid #0d6efd;
+}
+{% endblock %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="card profile-card">
+        <div class="card-header bg-primary text-white">
+            <h4 class="mb-0">个人资料</h4>
+        </div>
+        <div class="card-body">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="alert alert-{{ category }}">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+            
+            <!-- 标签选项卡 -->
+            <ul class="nav nav-tabs mb-4" id="profileTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="info-tab" data-bs-toggle="tab" data-bs-target="#info-content" type="button" role="tab">基本信息</button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="password-tab" data-bs-toggle="tab" data-bs-target="#password-content" type="button" role="tab">修改密码</button>
+                </li>
+            </ul>
+            
+            <!-- 标签内容 -->
+            <div class="tab-content" id="profileTabContent">
+                <!-- 基本信息 -->
+                <div class="tab-pane fade show active" id="info-content" role="tabpanel">
+                    <div class="row mb-4">
+                        <div class="col-md-4">
+                            <div class="text-center mb-3">
+                                <div class="avatar-container mb-3">
+                                    <img src="{{ url_for('static', filename='images/default_avatar.png') }}" alt="头像" class="rounded-circle" style="width: 120px; height: 120px; object-fit: cover; border: 3px solid #eee;">
+                                </div>
+                                <h4>{{ user.username }}</h4>
+                                <p class="text-muted">{{ profile.full_name or '未设置姓名' }}</p>
+                            </div>
+                            
+                            <div class="info-item">
+                                <span class="info-label">注册时间：</span>
+                                {{ user.created_at }}
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">上次登录：</span>
+                                {{ profile.last_login if profile.last_login else '未知' }}
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">用户角色：</span>
+                                {{ {'user': '普通用户', 'teacher': '教师', 'admin': '管理员'}.get(user.role, '普通用户') }}
+                            </div>
+                        </div>
+                        
+                        <div class="col-md-8">
+                            <form method="post" action="{{ url_for('profile') }}">
+                                <input type="hidden" name="form_type" value="profile">
+                                
+                                <div class="mb-3">
+                                    <label for="email" class="form-label">电子邮箱</label>
+                                    <input type="email" class="form-control" id="email" value="{{ user.email }}" readonly>
+                                    <div class="form-text">邮箱地址不可修改</div>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="full_name" class="form-label">姓名</label>
+                                    <input type="text" class="form-control" id="full_name" name="full_name" value="{{ profile.full_name or '' }}">
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="school" class="form-label">学校</label>
+                                    <input type="text" class="form-control" id="school" name="school" value="{{ profile.school or '' }}">
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="grade" class="form-label">年级</label>
+                                    <select class="form-select" id="grade" name="grade">
+                                        <option value="">请选择</option>
+                                        <option value="小学一年级" {% if profile.grade == '小学一年级' %}selected{% endif %}>小学一年级</option>
+                                        <option value="小学二年级" {% if profile.grade == '小学二年级' %}selected{% endif %}>小学二年级</option>
+                                        <option value="小学三年级" {% if profile.grade == '小学三年级' %}selected{% endif %}>小学三年级</option>
+                                        <option value="小学四年级" {% if profile.grade == '小学四年级' %}selected{% endif %}>小学四年级</option>
+                                        <option value="小学五年级" {% if profile.grade == '小学五年级' %}selected{% endif %}>小学五年级</option>
+                                        <option value="小学六年级" {% if profile.grade == '小学六年级' %}selected{% endif %}>小学六年级</option>
+                                        <option value="初中一年级" {% if profile.grade == '初中一年级' %}selected{% endif %}>初中一年级</option>
+                                        <option value="初中二年级" {% if profile.grade == '初中二年级' %}selected{% endif %}>初中二年级</option>
+                                        <option value="初中三年级" {% if profile.grade == '初中三年级' %}selected{% endif %}>初中三年级</option>
+                                        <option value="高中一年级" {% if profile.grade == '高中一年级' %}selected{% endif %}>高中一年级</option>
+                                        <option value="高中二年级" {% if profile.grade == '高中二年级' %}selected{% endif %}>高中二年级</option>
+                                        <option value="高中三年级" {% if profile.grade == '高中三年级' %}selected{% endif %}>高中三年级</option>
+                                    </select>
+                                </div>
+                                
+                                <div class="d-grid gap-2">
+                                    <button type="submit" class="btn btn-primary">保存信息</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 修改密码 -->
+                <div class="tab-pane fade" id="password-content" role="tabpanel">
+                    <form method="post" action="{{ url_for('profile') }}" id="passwordForm">
+                        <input type="hidden" name="form_type" value="password">
+                        
+                        <div class="mb-3">
+                            <label for="current_password" class="form-label">当前密码</label>
+                            <input type="password" class="form-control" id="current_password" name="current_password" required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="new_password" class="form-label">新密码</label>
+                            <input type="password" class="form-control" id="new_password" name="new_password" minlength="6" required>
+                            <div class="form-text">至少6个字符</div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="confirm_password" class="form-label">确认新密码</label>
+                            <input type="password" class="form-control" id="confirm_password" name="confirm_password" minlength="6" required>
+                        </div>
+                        
+                        <div class="d-grid gap-2">
+                            <button type="submit" class="btn btn-primary">修改密码</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // 修改密码表单验证
+        const passwordForm = document.getElementById('passwordForm');
+        
+        if (passwordForm) {
+            passwordForm.addEventListener('submit', function(e) {
+                const newPassword = document.getElementById('new_password').value;
+                const confirmPassword = document.getElementById('confirm_password').value;
+                
+                if (newPassword.length < 6) {
+                    e.preventDefault();
+                    alert('新密码长度不能少于6个字符');
+                    return;
+                }
+                
+                if (newPassword !== confirmPassword) {
+                    e.preventDefault();
+                    alert('两次输入的密码不一致');
+                    return;
+                }
+            });
+        }
+    });
+</script>
+{% endblock %} 

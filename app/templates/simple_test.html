@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>简易作文上传测试</title>
+    <style>
+        body {
+            font-family: 'Microsoft YaHei', 'SimHei', sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1, h2 {
+            color: #2c3e50;
+        }
+        .container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+        .upload-section {
+            flex: 1;
+            min-width: 300px;
+            border: 1px solid #ddd;
+            padding: 20px;
+            border-radius: 5px;
+        }
+        .result-section {
+            flex: 2;
+            min-width: 400px;
+            border: 1px solid #ddd;
+            padding: 20px;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+        }
+        .score-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .score-item {
+            padding: 10px;
+            background-color: #fff;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .score-label {
+            font-weight: bold;
+            color: #7f8c8d;
+        }
+        .score-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #2980b9;
+        }
+        .total-score {
+            font-size: 32px;
+            font-weight: bold;
+            color: #e74c3c;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .comments {
+            background-color: #fff;
+            padding: 15px;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            cursor: pointer;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        textarea {
+            width: 100%;
+            height: 200px;
+            margin-bottom: 10px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .file-upload {
+            margin-bottom: 20px;
+        }
+        .lists-container {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+        }
+        .list-box {
+            background-color: #fff;
+            padding: 10px;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .list-title {
+            color: #16a085;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .list-content {
+            list-style-position: inside;
+            padding-left: 0;
+        }
+        #loading {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .spinner {
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #3498db;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 2s linear infinite;
+            margin: 0 auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .error {
+            background-color: #fadbd8;
+            color: #c0392b;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+        .raw-json {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            margin-top: 20px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>作文批改测试系统</h1>
+    
+    <div class="container">
+        <div class="upload-section">
+            <h2>上传作文</h2>
+            
+            <form id="uploadForm">
+                <div class="file-upload">
+                    <label for="fileUpload">上传Word或TXT文件：</label>
+                    <input type="file" id="fileUpload" name="file" accept=".docx,.txt">
+                </div>
+                
+                <p>或直接输入文本：</p>
+                <textarea id="articleText" placeholder="在此输入文章内容..."></textarea>
+                
+                <button type="submit">提交批改</button>
+            </form>
+            
+            <div id="loading">
+                <div class="spinner"></div>
+                <p>正在批改，请稍候...</p>
+            </div>
+            
+            <div id="errorMessage" class="error" style="display: none;"></div>
+        </div>
+        
+        <div class="result-section">
+            <h2>批改结果</h2>
+            
+            <div id="resultContent" style="display: none;">
+                <div class="total-score">
+                    总分：<span id="totalScore">0</span>
+                </div>
+                
+                <div class="score-grid">
+                    <div class="score-item">
+                        <div class="score-label">内容得分</div>
+                        <div class="score-value" id="contentScore">0</div>
+                    </div>
+                    <div class="score-item">
+                        <div class="score-label">语言得分</div>
+                        <div class="score-value" id="languageScore">0</div>
+                    </div>
+                    <div class="score-item">
+                        <div class="score-label">结构得分</div>
+                        <div class="score-value" id="structureScore">0</div>
+                    </div>
+                    <div class="score-item">
+                        <div class="score-label">写作得分</div>
+                        <div class="score-value" id="writingScore">0</div>
+                    </div>
+                </div>
+                
+                <div class="comments">
+                    <h3>点评</h3>
+                    <p id="comments"></p>
+                </div>
+                
+                <div class="lists-container">
+                    <div class="list-box">
+                        <div class="list-title">优点</div>
+                        <ul class="list-content" id="strengths"></ul>
+                    </div>
+                    <div class="list-box">
+                        <div class="list-title">不足</div>
+                        <ul class="list-content" id="weaknesses"></ul>
+                    </div>
+                    <div class="list-box">
+                        <div class="list-title">建议</div>
+                        <ul class="list-content" id="suggestions"></ul>
+                    </div>
+                </div>
+                
+                <button id="showJsonBtn" style="margin-top: 20px;">显示原始JSON</button>
+                <div id="rawJson" class="raw-json"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const uploadForm = document.getElementById('uploadForm');
+            const loading = document.getElementById('loading');
+            const errorMessage = document.getElementById('errorMessage');
+            const resultContent = document.getElementById('resultContent');
+            const showJsonBtn = document.getElementById('showJsonBtn');
+            const rawJson = document.getElementById('rawJson');
+            
+            uploadForm.addEventListener('submit', function(e) {
+                e.preventDefault();
+                
+                const fileInput = document.getElementById('fileUpload');
+                const textInput = document.getElementById('articleText');
+                const formData = new FormData();
+                
+                // 检查是否有文件上传
+                if (fileInput.files.length > 0) {
+                    formData.append('file', fileInput.files[0]);
+                } 
+                // 或者是否有文本输入
+                else if (textInput.value.trim() !== '') {
+                    formData.append('article', textInput.value);
+                } else {
+                    errorMessage.textContent = '请上传文件或输入文章内容';
+                    errorMessage.style.display = 'block';
+                    return;
+                }
+                
+                // 隐藏错误消息和结果，显示加载动画
+                errorMessage.style.display = 'none';
+                resultContent.style.display = 'none';
+                loading.style.display = 'block';
+                
+                // 发送请求
+                fetch('/correct', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! Status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    // 记录原始JSON以备查看
+                    rawJson.textContent = JSON.stringify(data, null, 2);
+                    
+                    // 填充评分结果
+                    document.getElementById('totalScore').textContent = data.total_score || '0';
+                    document.getElementById('contentScore').textContent = data.content_score || '0';
+                    document.getElementById('languageScore').textContent = data.language_score || '0';
+                    document.getElementById('structureScore').textContent = data.structure_score || '0';
+                    document.getElementById('writingScore').textContent = data.writing_score || '0';
+                    document.getElementById('comments').textContent = data.comments || '无评论';
+                    
+                    // 填充列表
+                    fillList('strengths', data.strengths || []);
+                    fillList('weaknesses', data.weaknesses || []);
+                    fillList('suggestions', data.suggestions || []);
+                    
+                    // 显示结果，隐藏加载动画
+                    loading.style.display = 'none';
+                    resultContent.style.display = 'block';
+                    
+                    // 如果有错误信息，显示在错误区域
+                    if (data.error) {
+                        errorMessage.textContent = data.error;
+                        errorMessage.style.display = 'block';
+                    }
+                })
+                .catch(error => {
+                    loading.style.display = 'none';
+                    errorMessage.textContent = '提交失败: ' + error.message;
+                    errorMessage.style.display = 'block';
+                    console.error('Error:', error);
+                });
+            });
+            
+            // 填充列表的辅助函数
+            function fillList(elementId, items) {
+                const element = document.getElementById(elementId);
+                element.innerHTML = '';
+                
+                if (items.length === 0) {
+                    const li = document.createElement('li');
+                    li.textContent = '无';
+                    element.appendChild(li);
+                    return;
+                }
+                
+                items.forEach(item => {
+                    const li = document.createElement('li');
+                    li.textContent = item;
+                    element.appendChild(li);
+                });
+            }
+            
+            // 显示/隐藏原始JSON
+            showJsonBtn.addEventListener('click', function() {
+                if (rawJson.style.display === 'none' || rawJson.style.display === '') {
+                    rawJson.style.display = 'block';
+                    showJsonBtn.textContent = '隐藏原始JSON';
+                } else {
+                    rawJson.style.display = 'none';
+                    showJsonBtn.textContent = '显示原始JSON';
+                }
+            });
+        });
+    </script>
+</body>
+</html> 

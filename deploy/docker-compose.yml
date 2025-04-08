@@ -1,0 +1,71 @@
+version: "3"
+
+networks:
+  gitea:
+    external: false
+
+services:
+  db:
+    container_name: curretion2.0_db
+    image: mysql:8
+    restart: always
+    environment:
+      - MYSQL_ROOT_PASSWORD=你的root密码
+      - MYSQL_USER=gitea
+      - MYSQL_PASSWORD=你的gitea用户密码
+      - MYSQL_DATABASE=gitea
+      - MYSQL_ROOT_HOST=%
+    networks:
+      - gitea
+    volumes:
+      - ./mysql:/var/lib/mysql
+    ports:
+      - "127.0.0.1:3306:3306"
+    command: 
+      - --default-authentication-plugin=mysql_native_password
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+  gitea:
+    container_name: curretion2.0
+    image: gitea/gitea:latest
+    restart: always
+    networks:
+      - gitea
+    volumes:
+      - ./gitea:/data
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - "127.0.0.1:4001:3000"
+    depends_on:
+      - db
+    environment:
+      - USER_UID=1000
+      - USER_GID=1000
+      - GITEA__database__DB_TYPE=mysql
+      - GITEA__database__HOST=db:3306
+      - GITEA__database__NAME=gitea
+      - GITEA__database__USER=gitea
+      - GITEA__database__PASSWD=你的gitea用户密码
+      - GITEA__server__DOMAIN=learning.vin
+      - GITEA__server__ROOT_URL=https://learning.vin/
+      - GITEA__server__SSH_DOMAIN=learning.vin
+      - GITEA__server__HTTP_PORT=3000
+      - GITEA__server__DISABLE_SSH=true
+  autocorrection:
+    container_name: autocorrection
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    networks:
+      - gitea
+    volumes:
+      - ./static:/app/static
+      - ./templates:/app/templates
+      - ./logs:/app/logs
+    ports:
+      - "127.0.0.1:5000:5000"
+    environment:
+      - FLASK_APP=final_combined_server.py
+      - FLASK_ENV=production

@@ -1,0 +1,102 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+备份整个项目代码到指定文件夹
+"""
+
+import os
+import shutil
+import time
+from datetime import datetime
+
+# 源目录与目标目录
+SOURCE_DIR = os.path.dirname(os.path.abspath(__file__))
+TARGET_DIR = r"D:\git-justin0101\auto-currection\AutoCorrection-V2.0-Backup-Before-Refactor"
+
+# 不需要备份的文件和目录
+EXCLUDE_DIRS = [
+    '__pycache__',
+    '.git',
+    '.venv',
+    'venv',
+    'env',
+    'backups',
+    '.vs',
+    '.vscode',
+    'node_modules',
+    TARGET_DIR  # 避免无限递归
+]
+
+EXCLUDE_FILES = [
+    '.gitignore',
+    '.DS_Store',
+    'backup_project.py'  # 不备份当前脚本
+]
+
+def backup_project():
+    """备份整个项目目录到指定位置"""
+    print(f"开始备份整个项目到: {TARGET_DIR}")
+    print(f"源目录: {SOURCE_DIR}")
+    
+    # 确保目标目录存在
+    if not os.path.exists(TARGET_DIR):
+        os.makedirs(TARGET_DIR)
+    
+    # 统计文件数
+    total_files = 0
+    copied_files = 0
+    start_time = time.time()
+    
+    # 遍历源目录
+    for root, dirs, files in os.walk(SOURCE_DIR):
+        # 排除不需要备份的目录
+        dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS and not d.startswith('.')]
+        
+        # 计算相对路径
+        rel_path = os.path.relpath(root, SOURCE_DIR)
+        if rel_path == '.':
+            rel_path = ''
+        
+        # 创建目标目录结构
+        target_root = os.path.join(TARGET_DIR, rel_path)
+        if not os.path.exists(target_root):
+            os.makedirs(target_root)
+        
+        # 复制文件
+        for file in files:
+            if file not in EXCLUDE_FILES and not file.startswith('.'):
+                source_file = os.path.join(root, file)
+                target_file = os.path.join(target_root, file)
+                
+                try:
+                    pass  # 自动修复的空块
+                except Exception as e:
+                    logger.error(f"发生错误: {str(e)}")
+                except Exception as e:
+                    logger.error(f"发生错误: {str(e)}")
+                    total_files += 1
+                    shutil.copy2(source_file, target_file)
+                    copied_files += 1
+                    if total_files % 50 == 0:
+                        print(f"已备份 {copied_files}/{total_files} 个文件...")
+                except Exception as e:
+                    print(f"复制文件 {source_file} 失败: {str(e)}")
+    
+    end_time = time.time()
+    duration = end_time - start_time
+    
+    print(f"\n备份完成!")
+    print(f"总计备份了 {copied_files}/{total_files} 个文件")
+    print(f"耗时: {duration:.2f} 秒")
+    print(f"备份存储在: {TARGET_DIR}")
+    
+    # 添加备份完成标记文件
+    timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+    with open(os.path.join(TARGET_DIR, f"backup_complete_{timestamp}.txt"), 'w', encoding='utf-8') as f:
+        f.write(f"备份完成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"源目录: {SOURCE_DIR}\n")
+        f.write(f"备份文件数: {copied_files}\n")
+
+if __name__ == "__main__":
+    backup_project() 

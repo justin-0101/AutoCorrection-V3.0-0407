@@ -1,0 +1,160 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+初始化作文批改系统数据库
+创建必要的表结构
+"""
+
+import sqlite3
+import os
+import datetime
+
+# 数据库文件路径
+DB_FILE = 'instance/essay_correction.db'
+
+def init_db():
+    """初始化数据库结构"""
+    # 确保instance目录存在
+    if not os.path.exists('instance'):
+        os.makedirs('instance')
+        
+    # 检查数据库文件是否已存在
+    db_exists = os.path.exists(DB_FILE)
+    
+    # 连接数据库（如果不存在则创建）
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    
+    # 创建用户表
+    c.execute('''CREATE TABLE IF NOT EXISTS users (
+        user_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL UNIQUE,
+        email TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        last_login TIMESTAMP,
+        role TEXT DEFAULT 'user',
+        is_active BOOLEAN DEFAULT 1
+    )''')
+    
+    # 创建用户资料表
+    c.execute('''CREATE TABLE IF NOT EXISTS user_profiles (
+        profile_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        full_name TEXT,
+        school TEXT,
+        grade TEXT,
+        avatar_path TEXT,
+        FOREIGN KEY (user_id) REFERENCES users(user_id)
+    )''')
+    
+    # 创建验证码表
+    c.execute('''CREATE TABLE IF NOT EXISTS verification_codes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT NOT NULL,
+        code TEXT NOT NULL,
+        purpose TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        expires_at TIMESTAMP,
+        is_used BOOLEAN DEFAULT 0
+    )''')
+    
+    # 创建登录历史表
+    c.execute('''CREATE TABLE IF NOT EXISTS login_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        login_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        ip_address TEXT,
+        user_agent TEXT,
+        FOREIGN KEY (user_id) REFERENCES users(user_id)
+    )''')
+    
+    # 创建作文批改记录表
+    c.execute('''CREATE TABLE IF NOT EXISTS essay_submissions (
+        submission_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER DEFAULT NULL,
+        title TEXT,
+        content TEXT NOT NULL,
+        word_count INTEGER,
+        submission_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        file_path TEXT,
+        batch_id TEXT,
+        FOREIGN KEY (user_id) REFERENCES users(user_id)
+    )''')
+    
+    # 创建评分结果表
+    c.execute('''CREATE TABLE IF NOT EXISTS essay_results (
+        result_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        submission_id INTEGER NOT NULL,
+        total_score REAL NOT NULL,
+        grade TEXT,
+        content_score REAL,
+        language_score REAL,
+        structure_score REAL,
+        writing_score REAL,
+        error_count INTEGER DEFAULT 0,
+        overall_assessment TEXT,
+        content_analysis TEXT,
+        language_analysis TEXT,
+        structure_analysis TEXT,
+        writing_analysis TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (submission_id) REFERENCES essay_submissions(submission_id)
+    )''')
+    
+    # 创建系统清理记录表（用于追踪自动清理操作）
+    c.execute('''CREATE TABLE IF NOT EXISTS system_cleanup_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cleanup_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        records_deleted INTEGER,
+        cleanup_type TEXT,
+        details TEXT
+    )''')
+    
+    # 提交事务
+    conn.commit()
+    
+    # 如果是新创建的数据库，添加管理员账户
+    if not db_exists:
+        from werkzeug.security import generate_password_hash
+        # 生成默认管理员账号
+        admin_password = 'admin123'  # 默认密码
+        admin_hash = generate_password_hash(admin_password)
+        
+        try:
+            c.execute("""
+                INSERT INTO users (username, email, password_hash, role)
+                VALUES (?, ?, ?, ?)
+            """, ('admin', 'admin@system.local', admin_hash, 'admin'))
+            
+            admin_id = c.lastrowid
+            
+            c.execute("""
+                INSERT INTO user_profiles (user_id, full_name)
+                VALUES (?, ?)
+            """, (admin_id, '系统管理员'))
+            
+            conn.commit()
+            print(f"创建了默认管理员账号，用户名: admin，密码: {admin_password}")
+            print("请登录后立即修改默认密码！")
+        except sqlite3.IntegrityError:
+            print("管理员账号已存在，跳过创建")
+    
+    # 关闭连接
+    conn.close()
+    
+    # 返回是否是新创建的数据库
+    return not db_exists
+
+def main():
+    """主函数"""
+    print("初始化数据库...")
+    is_new = init_db()
+    if is_new:
+        print(f"数据库 {DB_FILE} 已创建并初始化完成")
+    else:
+        print(f"数据库 {DB_FILE} 已存在，表结构已更新")
+    
+if __name__ == "__main__":
+    main() 

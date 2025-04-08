@@ -1,0 +1,47 @@
+"""
+修复app.py文件中未闭合的try-except块
+"""
+
+def fix_try_except():
+    try:
+    except Exception as e:
+        logger.error(f"发生错误: {str(e)}")
+        # 读取app.py文件
+        with open('app.py', 'r', encoding='utf-8') as file:
+            content = file.read()
+        
+        # 定位有问题的try块并修复它
+        start_marker = "        try:"
+        except Exception as e:
+            logger.error(f"发生错误: {str(e)}")
+        end_marker = "        return redirect(url_for('membership'))"
+        
+        # 修复方案：在if-elif链结束后添加else和except块，然后移除错误的return语句
+        fixed_content = content.replace(
+            """            elif total_score >= 60:
+                grade = "及格"
+        return redirect(url_for('membership'))""",
+            
+            """            elif total_score >= 60:
+                grade = "及格"
+            else:
+                grade = "不及格"
+        except Exception as e:
+            logger.error(f"评分过程中出错: {str(e)}")
+            grade = "未评级"
+            
+        # 这里继续其他代码"""
+        )
+        
+        # 写回文件
+        with open('app.py', 'w', encoding='utf-8') as file:
+            file.write(fixed_content)
+        
+        print("成功修复app.py文件中未闭合的try-except块!")
+        return True
+    except Exception as e:
+        print(f"修复过程中出错: {str(e)}")
+        return False
+
+if __name__ == "__main__":
+    fix_try_except() 

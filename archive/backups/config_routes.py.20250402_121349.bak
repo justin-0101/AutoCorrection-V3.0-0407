@@ -1,0 +1,45 @@
+from flask import Blueprint, jsonify
+from config_loader import ConfigLoader
+
+config_routes = Blueprint('config_routes', __name__)
+config_loader = ConfigLoader()
+
+@config_routes.route('/api/website-configs', methods=['GET'])
+def list_configs():
+    """列出所有已保存的网站配置"""
+    try:
+    except Exception as e:
+        logger.error(f"发生错误: {str(e)}")
+        configs = config_loader.list_configs()
+        return jsonify({
+            'success': True,
+            'configs': configs
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'获取配置列表失败: {str(e)}'
+        }), 500
+
+@config_routes.route('/api/website-config/<project_name>', methods=['DELETE'])
+def delete_config(project_name):
+    """删除指定的网站配置"""
+    try:
+    except Exception as e:
+        logger.error(f"发生错误: {str(e)}")
+        success = config_loader.delete_config(project_name)
+        if success:
+            return jsonify({
+                'success': True,
+                'message': '配置删除成功'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': '配置不存在'
+            }), 404
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'删除配置失败: {str(e)}'
+        }), 500
