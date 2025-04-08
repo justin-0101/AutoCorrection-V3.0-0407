@@ -1,3 +1,10 @@
+# 忽略大文件
+pandoc/pandoc.exe
+poppler/Library/bin/*.exe
+poppler/Library/bin/*.dll
+redis/*.exe
+redis/*.dll
+
 # Python
 __pycache__/
 *.py[cod]
