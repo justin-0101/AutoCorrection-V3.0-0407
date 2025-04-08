@@ -247,3 +247,31 @@ AutoCorrection-V2.0/
 ## 致谢
 
 感谢所有为本项目做出贡献的开发者和用户。
+
+## 快速提交代码
+
+为了简化git提交流程，项目提供了一个批处理脚本 `git-push.bat`。使用方法：
+
+1. 双击运行 `git-push.bat`
+2. 在提示时输入提交信息
+3. 等待脚本完成提交和推送
+
+注意事项：
+- 每次提交前请确保代码修改是完整的
+- 提交信息应该简明扼要地描述本次修改内容
+- 如果遇到冲突或其他错误，请手动解决后再使用脚本
+
+## Pandoc说明
+
+本项目使用Pandoc进行文档转换，但由于文件大小限制，`pandoc.exe`不包含在代码库中。
+
+### 安装Pandoc
+
+1. 访问Pandoc官方网站：https://pandoc.org/installing.html
+2. 下载并安装适合您系统的版本
+3. 将pandoc添加到系统环境变量中
+
+或者直接下载项目所需版本：
+[Pandoc 2.19.2 Windows x64](https://github.com/jgm/pandoc/releases/download/2.19.2/pandoc-2.19.2-windows-x86_64.msi)
+
+安装完成后，请将pandoc.exe放置在项目的`pandoc`目录下。
