@@ -42,7 +42,7 @@ except ImportError:
         HAS_PYMUPDF = False
 
 from app.config import config
-from app.services.ai_service import AIService
+from app.core.ai import AIClientFactory
 
 logger = logging.getLogger(__name__)
 
@@ -58,8 +58,9 @@ class FileHandler:
         # 确保上传目录存在
         os.makedirs(self.upload_folder, exist_ok=True)
         
-        # 初始化AI服务
-        self.ai_service = AIService()
+        # 初始化AI客户端
+        ai_factory = AIClientFactory()
+        self.ai_client = ai_factory.get_client()
     
     def allowed_file(self, filename):
         """
@@ -224,13 +225,13 @@ class FileHandler:
             # 使用AI服务提取图片中的文本
             image_file = file_path if file_path and os.path.exists(file_path) else content
             
-            # 调用AI服务进行图片识别
-            result = self.ai_service.recognize_text_from_image(image_file)
+            # 调用AI客户端进行图片识别
+            result = self.ai_client.recognize_image(image_file)
             
             if result and result.get('status') == 'success':
                 return result.get('text', '')
             else:
-                logger.warning(f"AI服务提取图片内容失败: {result.get('message', '未知错误')}")
+                logger.warning(f"AI客户端提取图片内容失败: {result.get('message', '未知错误')}")
                 return ""
         
         except Exception as e:

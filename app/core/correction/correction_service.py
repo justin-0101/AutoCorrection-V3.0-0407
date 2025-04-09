@@ -19,7 +19,6 @@ import time
 from sqlalchemy.exc import SQLAlchemyError
 from app.config import config
 from app.utils import FileHandler
-from app.services.ai_service import AIService
 from app.core.user.user_service import UserService
 from app.models.essay import Essay, EssayStatus
 from app.models.user import User, MembershipLevel
@@ -42,7 +41,6 @@ class CorrectionService:
     def __init__(self):
         """初始化批改服务"""
         self.file_handler = FileHandler()
-        self.ai_service = AIService()
         self.user_service = UserService()
         self.ai_corrector = AICorrectionService()
         self.report_generator = ReportGenerator()
@@ -464,102 +462,147 @@ class CorrectionService:
         
         Args:
             essay_id: 作文ID
-        
+            
         Returns:
             dict: 批改结果
         """
-        logger.info(f"开始批改作文，ID: {essay_id}")
+        logger.info(f"开始批改作文 {essay_id}")
         
+        # 获取作文
         try:
-            # 获取作文信息
             essay = Essay.query.get(essay_id)
             if not essay:
-                logger.error(f"未找到作文，ID: {essay_id}")
-                return {"status": "error", "message": f"未找到作文，ID: {essay_id}"}
-            
-            # 更新作文状态
-            essay.status = EssayStatus.CORRECTING.value
-            db.session.commit()
-            
-            # 检查是否已有批改记录
-            correction = Correction.query.filter_by(essay_id=essay_id).first()
-            
-            # 如果没有批改记录，创建一个新的
-            if not correction:
-                correction = Correction(
-                    essay_id=essay_id,
-                    type='ai',
-                    status='processing'  # 设置初始状态为processing
-                )
-                db.session.add(correction)
-                db.session.commit()
-            else:
-                # 更新现有批改记录的状态
-                correction.status = 'processing'
-                db.session.commit()
-            
-            # 执行AI批改
-            try:
-                # 调用AI服务进行批改
-                correction_results = self.ai_corrector.correct_essay(essay.content)
+                logger.error(f"找不到作文: {essay_id}")
+                return {
+                    'status': 'error',
+                    'message': f"找不到作文: {essay_id}"
+                }
                 
-                # 仅当API返回成功时更新批改记录
-                if correction_results["status"] == "success" and correction_results.get("result"):
-                    result_data = correction_results["result"]
-                    
-                    # 更新批改记录
-                    correction.score = result_data.get('总得分', 0)
-                    correction.content = json.dumps(result_data)
-                    correction.comments = result_data.get('总体评价', '')
-                    correction.error_analysis = json.dumps(result_data.get('错别字', []))
-                    correction.improvement_suggestions = result_data.get('improvement_suggestions', '')
-                    correction.extra_data = result_data
-                    correction.status = 'completed'  # 更新状态为completed
-                    correction.results = json.dumps(result_data)  # 存储完整结果
-                    
-                    # 更新作文状态
-                    essay.status = EssayStatus.COMPLETED.value
-                    
+            logger.info(f"成功获取作文，标题: {essay.title}, 作者: {essay.user_id}, 长度: {len(essay.content or '')}")
+            
+            # 删除记录
+            try:
+                # 更新作文状态
+                essay.status = EssayStatus.CORRECTING.value
+                db.session.commit()
+                
+                # 检查是否已有批改记录
+                correction = Correction.query.filter_by(essay_id=essay_id).first()
+                
+                # 如果没有批改记录，创建一个新的
+                if not correction:
+                    correction = Correction(
+                        essay_id=essay_id,
+                        type='ai',
+                        status='processing'  # 设置初始状态为processing
+                    )
+                    db.session.add(correction)
                     db.session.commit()
-                    logger.info(f"批改完成，作文ID: {essay_id}")
-                    
-                    return {
-                        "status": "success",
-                        "essay_id": essay_id,
-                        "correction_id": correction.id,
-                        "results": result_data
-                    }
                 else:
-                    error_msg = correction_results.get("message", "AI批改返回无效结果")
-                    logger.error(f"AI批改失败，作文ID: {essay_id}, 错误: {error_msg}")
+                    # 更新现有批改记录的状态
+                    correction.status = 'processing'
+                    db.session.commit()
+                
+                # 调用AI服务前记录
+                logger.info(f"准备调用AI服务批改作文 {essay_id}")
+                logger.debug(f"AI批改输入: 标题={essay.title}, 内容长度={len(essay.content or '')}")
+                
+                # 获取AI服务客户端
+                ai_client = self.ai_corrector
+                if not ai_client:
+                    logger.error("无法获取AI客户端")
+                    return {
+                        'status': 'error',
+                        'message': "无法获取AI客户端"
+                    }
+                    
+                logger.info(f"已获取AI客户端: {type(ai_client).__name__}")
+                
+                # 调用AI服务进行批改
+                try:
+                    start_time = time.time()
+                    logger.info(f"开始AI批改，作文ID: {essay_id}")
+                    result = ai_client.correct_essay(
+                        content=essay.content
+                    )
+                    elapsed_time = time.time() - start_time
+                    logger.info(f"AI批改完成，耗时: {elapsed_time:.2f}秒，结果大小: {len(str(result))}")
+                    logger.debug(f"AI批改结果包含字段: {', '.join(result.keys() if isinstance(result, dict) else [])}")
+                    
+                    # 提取AI批改回复中的关键信息
+                    if isinstance(result, dict):
+                        if 'scores' in result:
+                            logger.info(f"批改得分: 总分={result['scores'].get('total_score', '未知')}, 内容={result['scores'].get('content_score', '未知')}, 语言={result['scores'].get('language_score', '未知')}")
+                        else:
+                            logger.warning("AI批改结果中未包含分数信息")
+                    else:
+                        logger.warning(f"AI批改结果格式异常: {type(result)}")
+                        
+                    # 仅当API返回成功时更新批改记录
+                    if result["status"] == "success" and result.get("result"):
+                        result_data = result["result"]
+                        
+                        # 更新批改记录
+                        correction.score = result_data.get('总得分', 0)
+                        correction.content = json.dumps(result_data)
+                        correction.comments = result_data.get('总体评价', '')
+                        correction.error_analysis = json.dumps(result_data.get('错别字', []))
+                        correction.improvement_suggestions = result_data.get('improvement_suggestions', '')
+                        correction.extra_data = result_data
+                        correction.status = 'completed'  # 更新状态为completed
+                        correction.results = json.dumps(result_data)  # 存储完整结果
+                        
+                        # 更新作文状态
+                        essay.status = EssayStatus.COMPLETED.value
+                        
+                        db.session.commit()
+                        logger.info(f"批改完成，作文ID: {essay_id}")
+                        
+                        return {
+                            "status": "success",
+                            "essay_id": essay_id,
+                            "correction_id": correction.id,
+                            "results": result_data
+                        }
+                    else:
+                        error_msg = result.get("message", "AI批改返回无效结果")
+                        logger.error(f"AI批改失败，作文ID: {essay_id}, 错误: {error_msg}")
+                        
+                        # 更新批改记录和作文状态为失败
+                        correction.status = 'failed'  # 更新状态为failed
+                        essay.status = EssayStatus.FAILED.value  # 标记为失败
+                        
+                        correction.extra_data = correction.extra_data or {}
+                        correction.extra_data['error'] = error_msg
+                        
+                        db.session.commit()
+                        
+                        return {
+                            "status": "error",
+                            "message": f"AI批改失败: {error_msg}",
+                            "essay_id": essay_id
+                        }
+                        
+                except Exception as e:
+                    logger.error(f"批改过程中发生错误，作文ID: {essay_id}, 错误: {str(e)}")
                     
                     # 更新批改记录和作文状态为失败
                     correction.status = 'failed'  # 更新状态为failed
                     essay.status = EssayStatus.FAILED.value  # 标记为失败
                     
                     correction.extra_data = correction.extra_data or {}
-                    correction.extra_data['error'] = error_msg
+                    correction.extra_data['error'] = str(e)
                     
                     db.session.commit()
                     
                     return {
                         "status": "error",
-                        "message": f"AI批改失败: {error_msg}",
+                        "message": f"批改过程中发生错误: {str(e)}",
                         "essay_id": essay_id
                     }
-                    
+                
             except Exception as e:
                 logger.error(f"批改过程中发生错误，作文ID: {essay_id}, 错误: {str(e)}")
-                
-                # 更新批改记录和作文状态为失败
-                correction.status = 'failed'  # 更新状态为failed
-                essay.status = EssayStatus.FAILED.value  # 标记为失败
-                
-                correction.extra_data = correction.extra_data or {}
-                correction.extra_data['error'] = str(e)
-                
-                db.session.commit()
-                
                 return {
                     "status": "error",
                     "message": f"批改过程中发生错误: {str(e)}",

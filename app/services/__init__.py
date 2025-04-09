@@ -3,9 +3,8 @@
 
 """
 服务模块
-包含与外部系统集成的服务实现
+提供应用的各种服务功能
 """
 
-from app.services.ai_service import AIService
-
-__all__ = ['AIService'] 
+# 这里导入可以直接从services访问的服务
+# 从各个服务模块导入需要对外暴露的类 
