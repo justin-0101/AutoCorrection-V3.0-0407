@@ -36,6 +36,14 @@ def create_celery_app():
 
 celery_app = create_celery_app()
 
+# 导入信号处理器，确保它们被注册
+try:
+    from app.tasks.signal_handlers import register_signal_handlers
+    register_signal_handlers()
+    logging.getLogger(__name__).info("任务状态跟踪信号处理器已加载")
+except Exception as e:
+    logging.getLogger(__name__).warning(f"加载任务状态跟踪信号处理器失败: {str(e)}")
+
 logger = logging.getLogger(__name__)
 
 # 全局应用实例，确保在进程间共享
@@ -159,6 +167,14 @@ def worker_ready_handler(sender, **kwargs):
     当Celery工作进程准备好接收任务时执行
     """
     logger.info(f"Celery工作进程准备就绪: {sender.hostname}")
+    
+    # 再次确保任务状态跟踪信号处理器已注册
+    try:
+        from app.tasks.signal_handlers import register_signal_handlers
+        register_signal_handlers()
+        logger.info("任务状态跟踪信号处理器已在worker启动时重新注册")
+    except Exception as e:
+        logger.warning(f"重新注册任务状态跟踪信号处理器失败: {str(e)}")
 
 @worker_process_shutdown.connect
 def worker_shutdown(sender, **kwargs):

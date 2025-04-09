@@ -98,7 +98,7 @@ def process_essay_correction(self, essay_id):
     # 创建Flask应用上下文
     from app import create_app
     from flask import current_app
-    from app.core.ai.init_services import ensure_services
+    from app.core.services.init_services import ensure_services
     
     app = create_app()
     

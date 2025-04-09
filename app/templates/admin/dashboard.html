@@ -170,6 +170,13 @@
                             <span class="badge bg-danger">异常</span>
                             {% endif %}
                         </p>
+                        <p><strong>Redis状态：</strong> 
+                            {% if system_info is defined and system_info.redis_available %}
+                            <span class="badge bg-success">正常</span>
+                            {% else %}
+                            <span class="badge bg-warning">模拟模式</span>
+                            {% endif %}
+                        </p>
                         <p><strong>数据库状态：</strong> 
                             <span class="badge bg-success">正常</span>
                         </p>
@@ -194,15 +201,18 @@
 {% block scripts %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // 确保jQuery已加载
+    // 确保jQuery已加载并记录状态
     if (typeof $ !== 'undefined') {
-        console.log("jQuery is properly loaded!");
-        $(document).ready(function() {
-            console.log("Dashboard loaded successfully");
-        });
+        console.log("jQuery已加载，控制面板初始化成功");
     } else {
-        console.error("jQuery is not loaded properly!");
+        console.error("jQuery未加载，控制面板可能无法正常工作");
     }
+    
+    // 错误处理 - 防止任何JS错误导致页面崩溃
+    window.onerror = function(message, source, lineno, colno, error) {
+        console.error("控制面板JS错误: ", message);
+        return true; // 防止默认错误处理
+    };
 });
 </script>
 {% endblock %} 

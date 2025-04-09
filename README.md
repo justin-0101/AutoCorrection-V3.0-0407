@@ -275,3 +275,6 @@ AutoCorrection-V2.0/
 [Pandoc 2.19.2 Windows x64](https://github.com/jgm/pandoc/releases/download/2.19.2/pandoc-2.19.2-windows-x86_64.msi)
 
 安装完成后，请将pandoc.exe放置在项目的`pandoc`目录下。
+
+##特别说明
+1、本项目截止2025年4月8日，功能仍不完善，提交作文、批改作文和管理后台的运行报错还未解决。

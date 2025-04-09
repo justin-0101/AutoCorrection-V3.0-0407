@@ -17,7 +17,17 @@ __all__ = ['ServiceContainer', 'container', 'RedisService', 'init_services',
 
 def get_redis_service() -> Optional[RedisService]:
     """获取Redis服务实例"""
-    return container.get("redis_service")
+    try:
+        redis_service = container.get("redis_service")
+        if redis_service is None:
+            logger.warning("Redis服务未找到，尝试动态初始化")
+            from app.core.services.init_services import init_redis_service
+            init_redis_service()
+            redis_service = container.get("redis_service")
+        return redis_service
+    except Exception as e:
+        logger.error(f"获取Redis服务失败: {str(e)}")
+        return None
 
 def get_ai_client_factory():
     """获取AI客户端工厂实例"""

@@ -112,6 +112,20 @@ class QuotaExceededError(APIError):
     def __init__(self, message="已超出使用配额限制", status_code=None, payload=None):
         super().__init__(message, status_code, payload)
 
+class LimitExceededError(APIError):
+    """限制超限错误"""
+    status_code = 429
+    
+    def __init__(self, message="已超出限制", status_code=None, payload=None):
+        super().__init__(message, status_code, payload)
+
+class ServiceUnavailableError(APIError):
+    """服务不可用错误"""
+    status_code = 503
+    
+    def __init__(self, message="服务暂时不可用", status_code=None, payload=None):
+        super().__init__(message, status_code, payload)
+
 def api_error_handler(f):
     """API错误处理装饰器"""
     @wraps(f)

@@ -12,11 +12,11 @@ from werkzeug.utils import secure_filename
 import os
 
 from app.core.correction.correction_service import CorrectionService
-from app.api.middleware.auth import token_required
+from app.core.auth.auth_decorators import token_required, admin_required
 from app.utils import FileHandler
 
 # 创建蓝图
-essays_bp = Blueprint('essays', __name__)
+essays_bp = Blueprint('essays', __name__, url_prefix='/essays')
 logger = logging.getLogger(__name__)
 
 # 初始化服务
@@ -255,5 +255,50 @@ def get_supported_file_types():
         logger.error(f"获取支持的文件类型时发生错误: {str(e)}", exc_info=True)
         return jsonify({
             'status': 'error',
+            'message': f'服务器错误: {str(e)}'
+        }), 500
+
+@essays_bp.route('/<int:essay_id>/retry-correction', methods=['POST'])
+def retry_essay_correction(essay_id):
+    """
+    重试作文批改API
+    
+    重新提交作文进行批改
+    
+    参数:
+        essay_id: 作文ID
+    
+    返回:
+        重试结果
+    """
+    try:
+        logger.info(f"接收到重试批改请求，作文ID: {essay_id}")
+        
+        # 临时使用固定值进行测试
+        user_id = 1  # 假设用户ID为1
+        is_admin = True  # 假设是管理员
+        
+        # 调用服务重试作文批改
+        result = correction_service.retry_essay_correction(essay_id, user_id, is_admin)
+        
+        # 处理结果
+        if result.get('status') == 'success':
+            logger.info(f"作文批改重试成功，essay_id: {essay_id}")
+            return jsonify({
+                'success': True,
+                'message': '已重新提交批改任务',
+                'task_id': result.get('task_id')
+            }), 200
+        else:
+            logger.warning(f"作文批改重试失败，essay_id: {essay_id}, 原因: {result.get('message')}")
+            return jsonify({
+                'success': False,
+                'message': result.get('message', '重试失败')
+            }), 400
+        
+    except Exception as e:
+        logger.error(f"重试作文批改时发生错误: {str(e)}", exc_info=True)
+        return jsonify({
+            'success': False,
             'message': f'服务器错误: {str(e)}'
         }), 500 

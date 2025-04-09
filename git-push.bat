@@ -20,8 +20,14 @@ set /p commit_msg=
 echo 正在提交更改...
 git commit -m "%commit_msg%"
 
-echo 正在推送到远程仓库...
-git push
+set /p force_push=是否需要强制推送？(Y/N): 
+if /i "%force_push%"=="Y" (
+    echo 正在强制推送到远程仓库...
+    git push origin master -f
+) else (
+    echo 正在推送到远程仓库...
+    git push origin master
+)
 
 echo 完成！
 pause 

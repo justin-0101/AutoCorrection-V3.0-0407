@@ -5,6 +5,7 @@ class EssayStatus(str, enum.Enum):
     DRAFT = 'draft'           # 草稿
     PENDING = 'pending'       # 等待批改
     CORRECTING = 'correcting' # 批改中
+    PROCESSING = 'correcting' # 批改中（别名，与CORRECTING相同）
     COMPLETED = 'completed'   # 已完成
     FAILED = 'failed'        # 失败
     ARCHIVED = 'archived'    # 已归档

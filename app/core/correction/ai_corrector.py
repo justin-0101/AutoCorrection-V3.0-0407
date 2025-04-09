@@ -13,7 +13,7 @@ import os
 from datetime import datetime
 
 from app.core.ai import AIClientFactory
-from app.core.services import container
+from app.core.services.container import container, ServiceScope
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,9 @@ class AICorrectionService:
         if ai_factory is None:
             logger.warning("未能从服务容器获取AI客户端工厂，创建新实例")
             ai_factory = AIClientFactory()
-            container.register("ai_client_factory", ai_factory)
+            # 确保使用单例模式注册到服务容器中
+            container.register("ai_client_factory", ai_factory, ServiceScope.SINGLETON)
+            logger.info("AI客户端工厂已成功注册到服务容器")
         
         # 使用工厂获取客户端
         self.client = ai_factory.get_client(self.ai_service)

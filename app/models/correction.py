@@ -10,6 +10,10 @@ from datetime import datetime
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, JSON, Enum
 from sqlalchemy.orm import relationship, validates
 from sqlalchemy.ext.hybrid import hybrid_property
+import logging
+
+# 创建logger实例
+logger = logging.getLogger(__name__)
 
 from app.models.db import db, BaseModel
 from app.utils.input_sanitizer import sanitize_input

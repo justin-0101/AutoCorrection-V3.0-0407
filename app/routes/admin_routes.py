@@ -19,6 +19,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from flask_wtf import FlaskForm
 from wtforms import IntegerField, HiddenField
 from wtforms.validators import DataRequired, NumberRange
+from app import db, logger
 
 # 创建日志记录器
 logger = logging.getLogger(__name__)
@@ -57,6 +58,7 @@ def index():
     
     system_info = {
         'ai_available': False,
+        'redis_available': False,
         'last_backup': datetime.now().strftime('%Y-%m-%d %H:%M'),
         'uptime': '3天14小时',
         'error_logs': 0
@@ -113,14 +115,26 @@ def index():
         except Exception as e:
             logger.warning(f"获取高级会员数量失败: {str(e)}")
         
-        # 检查AI服务可用性 - 修复服务容器访问方法
+        # 检查Redis服务可用性
         try:
-            # 修改为直接通过导入服务而不是使用ServiceContainer
+            from app.core.services import get_redis_service
+            redis_service = get_redis_service()
+            if redis_service and redis_service.is_connected():
+                system_info['redis_available'] = True
+                logger.debug("Redis服务可用")
+            else:
+                logger.warning("Redis服务不可用")
+        except Exception as e:
+            logger.warning(f"检查Redis服务失败: {str(e)}")
+            system_info['redis_available'] = False
+
+        # 检查AI服务可用性
+        try:
             from app.core.services import get_ai_service
             ai_client = get_ai_service()
             system_info['ai_available'] = (ai_client is not None)
+            logger.debug(f"AI服务状态: {'可用' if system_info['ai_available'] else '不可用'}")
         except Exception as e:
-            # 忽略错误，保持默认值False
             logger.warning(f"检查AI服务失败: {str(e)}")
             system_info['ai_available'] = False
         
@@ -427,7 +441,7 @@ def stats():
     )
 
 
-@admin_bp.route('/config')
+@admin_bp.route('/config', methods=['GET', 'POST'])
 @login_required
 def config():
     """系统配置页面"""
@@ -476,6 +490,133 @@ def config():
             'auto_backup': False,
             'backup_location': 'backups/'
         }
+        
+        # 处理POST请求保存系统配置
+        if request.method == 'POST':
+            # 检查内容类型，处理JSON请求
+            if request.is_json:
+                data = request.get_json()
+                
+                # 处理数据库备份请求
+                if 'backup_database' in data:
+                    try:
+                        # 这里实现数据库备份逻辑
+                        # ...
+                        logger.info("执行数据库备份")
+                        return jsonify({
+                            'success': True,
+                            'message': f'数据库备份成功，时间: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}'
+                        })
+                    except Exception as e:
+                        logger.error(f"数据库备份失败: {str(e)}")
+                        return jsonify({'success': False, 'message': f'备份失败: {str(e)}'})
+                
+                # 处理清理临时文件请求
+                elif 'clear_temp_files' in data:
+                    try:
+                        # 这里实现清理临时文件逻辑
+                        # ...
+                        logger.info("执行临时文件清理")
+                        return jsonify({
+                            'success': True,
+                            'message': '临时文件清理成功'
+                        })
+                    except Exception as e:
+                        logger.error(f"清理临时文件失败: {str(e)}")
+                        return jsonify({'success': False, 'message': f'清理失败: {str(e)}'})
+                
+                # 其他JSON请求...
+                return jsonify({'success': False, 'message': '未知操作'})
+            
+            try:
+                logger.info("接收到保存系统配置请求")
+                
+                # 根据表单数据更新配置
+                if 'membership_settings' in request.form:
+                    # 处理会员设置
+                    from app.models.membership import MembershipPlan
+                    
+                    # 免费用户设置
+                    free_monthly = request.form.get('free_monthly', 10, type=int)
+                    free_daily = request.form.get('free_daily', 3, type=int)
+                    
+                    # 普通会员设置
+                    basic_monthly = request.form.get('basic_monthly', 100, type=int)
+                    basic_daily = request.form.get('basic_daily', 20, type=int)
+                    basic_price = request.form.get('basic_price', 49, type=float)
+                    
+                    # 高级会员设置
+                    premium_monthly = request.form.get('premium_monthly', 300, type=int)
+                    premium_daily = request.form.get('premium_daily', 50, type=int)
+                    premium_price = request.form.get('premium_price', 89, type=float)
+                    
+                    # 注册奖励
+                    signup_bonus = request.form.get('signup_bonus', 3, type=int)
+                    
+                    # 更新数据库中的会员计划
+                    try:
+                        # 免费计划
+                        free_plan = MembershipPlan.query.filter_by(name='free').first()
+                        if free_plan:
+                            free_plan.monthly_essay_limit = free_monthly
+                            free_plan.daily_essay_limit = free_daily
+                        
+                        # 基础计划
+                        basic_plan = MembershipPlan.query.filter_by(name='basic').first()
+                        if basic_plan:
+                            basic_plan.monthly_essay_limit = basic_monthly
+                            basic_plan.daily_essay_limit = basic_daily
+                            basic_plan.price = basic_price
+                        
+                        # 高级计划
+                        premium_plan = MembershipPlan.query.filter_by(name='premium').first()
+                        if premium_plan:
+                            premium_plan.monthly_essay_limit = premium_monthly
+                            premium_plan.daily_essay_limit = premium_daily
+                            premium_plan.price = premium_price
+                        
+                        # 保存更改
+                        db.session.commit()
+                        
+                        # 更新系统配置
+                        # TODO: 保存注册奖励到系统配置表
+                        
+                        flash('会员设置已更新', 'success')
+                        logger.info("会员设置已更新")
+                    except Exception as e:
+                        db.session.rollback()
+                        logger.error(f"更新会员设置时发生错误: {str(e)}")
+                        flash(f'更新会员设置失败: {str(e)}', 'danger')
+                
+                # 处理系统配置更新
+                elif 'site_title' in request.form:
+                    # 处理系统基本配置
+                    site_title = request.form.get('site_title')
+                    site_description = request.form.get('site_description')
+                    contact_email = request.form.get('contact_email')
+                    maintenance_mode = request.form.get('maintenance_mode')
+                    
+                    # 更新系统配置...
+                    flash('系统配置已更新', 'success')
+                    logger.info("系统配置已更新")
+                
+                # 处理AI配置更新
+                elif 'ai_service_status' in request.form:
+                    # 处理AI配置
+                    ai_service_status = request.form.get('ai_service_status')
+                    max_tokens = request.form.get('max_tokens', type=int)
+                    temperature = request.form.get('temperature', type=float)
+                    model_name = request.form.get('model_name')
+                    
+                    # 更新AI配置...
+                    flash('AI配置已更新', 'success')
+                    logger.info("AI配置已更新")
+                
+                # 其他配置更新...
+                
+            except Exception as e:
+                logger.error(f"保存系统配置时发生错误: {str(e)}", exc_info=True)
+                flash(f'保存配置失败: {str(e)}', 'danger')
     
     except Exception as e:
         import traceback

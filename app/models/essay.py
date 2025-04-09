@@ -7,9 +7,12 @@
 
 import enum
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, Float, ForeignKey, JSON, Enum
+from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, Float, ForeignKey, JSON, Enum, event
 from sqlalchemy.orm import relationship, validates
 import logging
+
+# 创建logger实例
+logger = logging.getLogger(__name__)
 
 from app.models.db import db, BaseModel
 from app.utils.input_sanitizer import sanitize_input, sanitize_enum_input
@@ -19,6 +22,8 @@ except ImportError:
     # 如果监控模块未加载，提供一个空函数
     def track_source_type(source_type):
         pass
+
+from app.models.correction import Correction, CorrectionStatus
 
 class EssayStatus(str, enum.Enum):
     """作文状态枚举"""
@@ -313,6 +318,35 @@ class Essay(BaseModel):
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
+
+    @classmethod
+    def __declare_last__(cls):
+        """在模型声明完成后设置事件监听器"""
+        event.listen(cls, 'after_insert', cls._create_correction_record)
+    
+    @staticmethod
+    def _create_correction_record(mapper, connection, target):
+        """在Essay创建后自动创建对应的Correction记录"""
+        try:
+            # 创建新的批改记录
+            correction = Correction(
+                essay_id=target.id,
+                status=CorrectionStatus.PENDING.value,
+                created_at=datetime.utcnow()
+            )
+            
+            # 使用同一个连接添加记录
+            connection.execute(
+                Correction.__table__.insert().values(
+                    essay_id=target.id,
+                    status=CorrectionStatus.PENDING.value,
+                    created_at=datetime.utcnow()
+                )
+            )
+            
+        except Exception as e:
+            # 记录错误但不影响Essay的创建
+            logger.error(f"创建批改记录失败: {str(e)}")
 
 class UserFeedback(BaseModel):
     """用户反馈模型"""

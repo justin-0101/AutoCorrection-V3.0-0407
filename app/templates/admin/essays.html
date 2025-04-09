@@ -1,0 +1,220 @@
+{% extends 'admin/layout.html' %}
+
+{% block title %}作文管理{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">作文管理</h3>
+                    <div class="card-tools">
+                        <form class="form-inline" method="get">
+                            <div class="input-group input-group-sm mr-2">
+                                <select name="status" class="form-control">
+                                    <option value="" {% if not status %}selected{% endif %}>所有状态</option>
+                                    <option value="draft" {% if status == 'draft' %}selected{% endif %}>草稿</option>
+                                    <option value="pending" {% if status == 'pending' %}selected{% endif %}>待批改</option>
+                                    <option value="correcting" {% if status == 'correcting' %}selected{% endif %}>批改中</option>
+                                    <option value="completed" {% if status == 'completed' %}selected{% endif %}>已完成</option>
+                                    <option value="failed" {% if status == 'failed' %}selected{% endif %}>失败</option>
+                                    <option value="archived" {% if status == 'archived' %}selected{% endif %}>已归档</option>
+                                </select>
+                            </div>
+                            <div class="input-group input-group-sm mr-2">
+                                <input type="text" name="user_id" class="form-control" placeholder="用户ID" value="{{ user_id }}">
+                            </div>
+                            <div class="input-group input-group-sm">
+                                <button type="submit" class="btn btn-primary btn-sm">筛选</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+                <div class="card-body table-responsive p-0">
+                    <table class="table table-hover text-nowrap">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>标题</th>
+                                <th>用户</th>
+                                <th>状态</th>
+                                <th>字数</th>
+                                <th>总分</th>
+                                <th>创建时间</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for essay in essays %}
+                            <tr>
+                                <td>{{ essay.id }}</td>
+                                <td>{{ essay.title }}</td>
+                                <td>{{ essay.user_id }}</td>
+                                <td>
+                                    {% if essay.status == 'draft' %}
+                                    <span class="badge badge-secondary text-dark">草稿</span>
+                                    {% elif essay.status == 'pending' %}
+                                    <span class="badge badge-warning text-dark">待批改</span>
+                                    {% elif essay.status == 'correcting' %}
+                                    <span class="badge badge-info text-dark">批改中</span>
+                                    {% elif essay.status == 'completed' %}
+                                    <span class="badge badge-success text-dark">已完成</span>
+                                    {% elif essay.status == 'failed' %}
+                                    <span class="badge badge-danger text-dark">失败</span>
+                                    {% elif essay.status == 'archived' %}
+                                    <span class="badge badge-dark text-white">已归档</span>
+                                    {% else %}
+                                    <span class="badge badge-light text-dark">{{ essay.status }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ essay.word_count or 0 }}</td>
+                                <td>{{ essay.total_score or '--' }}</td>
+                                <td>{{ essay.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                                <td>
+                                    <a href="{{ url_for('main.results', essay_id=essay.id) }}" class="btn btn-sm btn-info" target="_blank">
+                                        查看
+                                    </a>
+                                    {% if essay.status == 'failed' %}
+                                    <button class="btn btn-sm btn-warning retry-correction" data-id="{{ essay.id }}">
+                                        重试
+                                    </button>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="8" class="text-center">没有找到作文数据</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% if pagination and pagination.pages > 1 %}
+                <div class="card-footer clearfix">
+                    <ul class="pagination pagination-sm m-0 float-right">
+                        <li class="page-item {% if pagination.page == 1 %}disabled{% endif %}">
+                            <a class="page-link" href="{{ url_for('admin.essays', page=pagination.prev_num, status=status, user_id=user_id) if pagination.has_prev else '#' }}">«</a>
+                        </li>
+                        
+                        {% for page_num in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+                            {% if page_num %}
+                                <li class="page-item {% if page_num == pagination.page %}active{% endif %}">
+                                    <a class="page-link" href="{{ url_for('admin.essays', page=page_num, status=status, user_id=user_id) }}">{{ page_num }}</a>
+                                </li>
+                            {% else %}
+                                <li class="page-item disabled">
+                                    <a class="page-link" href="#">...</a>
+                                </li>
+                            {% endif %}
+                        {% endfor %}
+                        
+                        <li class="page-item {% if pagination.page == pagination.pages %}disabled{% endif %}">
+                            <a class="page-link" href="{{ url_for('admin.essays', page=pagination.next_num, status=status, user_id=user_id) if pagination.has_next else '#' }}">»</a>
+                        </li>
+                    </ul>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 通知提示框 -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index: 5">
+    <div id="toast-container"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // 显示通知函数
+        function showToast(message, type = 'success') {
+            const toastContainer = document.getElementById('toast-container');
+            const toastId = 'toast-' + Date.now();
+            
+            const toastHtml = `
+                <div id="${toastId}" class="toast" role="alert" aria-live="assertive" aria-atomic="true" data-bs-delay="5000">
+                    <div class="toast-header bg-${type} text-white">
+                        <strong class="me-auto">${type === 'success' ? '成功' : '错误'}</strong>
+                        <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
+                    </div>
+                    <div class="toast-body">${message}</div>
+                </div>
+            `;
+            
+            toastContainer.innerHTML += toastHtml;
+            
+            // 尝试使用Bootstrap 5的方式初始化
+            try {
+                const toastElement = document.getElementById(toastId);
+                const toast = new bootstrap.Toast(toastElement);
+                toast.show();
+                
+                // 5秒后自动移除
+                setTimeout(() => {
+                    toastElement.remove();
+                }, 5000);
+            } catch (e) {
+                console.error('无法初始化Toast:', e);
+                // 回退方案 - 简单显示并延时删除
+                const toastElement = document.getElementById(toastId);
+                toastElement.style.display = 'block';
+                setTimeout(() => {
+                    toastElement.remove();
+                }, 5000);
+            }
+        }
+        
+        // 重试批改功能
+        const retryButtons = document.querySelectorAll('.retry-correction');
+        retryButtons.forEach(button => {
+            button.addEventListener('click', function() {
+                const essayId = this.dataset.id;
+                if (!essayId) return;
+                
+                if (confirm('确定要重新批改这篇作文吗？')) {
+                    // 显示加载状态
+                    this.disabled = true;
+                    this.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> 处理中...';
+                    
+                    // 发送请求
+                    fetch(`/api/v1/essays/${essayId}/retry-correction`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        }
+                    })
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error(`状态码: ${response.status}`);
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        if (data.success) {
+                            showToast('已重新提交批改任务', 'success');
+                            // 更新UI以反映更改 - 重新加载页面显示新状态
+                            setTimeout(() => {
+                                window.location.reload();
+                            }, 1500);
+                        } else {
+                            showToast(`重试失败: ${data.message || '未知错误'}`, 'danger');
+                            this.disabled = false;
+                            this.innerHTML = '重试';
+                        }
+                    })
+                    .catch(error => {
+                        console.error('请求失败:', error);
+                        showToast(`请求失败: ${error.message}`, 'danger');
+                        this.disabled = false;
+                        this.innerHTML = '重试';
+                    });
+                }
+            });
+        });
+    });
+</script>
+{% endblock %} 

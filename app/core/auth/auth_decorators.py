@@ -30,6 +30,31 @@ def get_token_from_request():
     # 最后从表单数据获取
     return request.form.get('token')
 
+def token_required(f):
+    """
+    验证API令牌的装饰器
+    仅支持通过API令牌进行认证（不使用会话）
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # 获取令牌
+        token = get_token_from_request()
+        if not token:
+            logger.warning("缺少访问令牌")
+            return jsonify({"status": "error", "message": "缺少访问令牌"}), 401
+        
+        # 验证令牌
+        user = AuthService.verify_token(token)
+        if not user:
+            logger.warning("无效或已过期的令牌")
+            return jsonify({"status": "error", "message": "无效或已过期的令牌"}), 401
+        
+        # 将用户信息存储在g中，以便后续使用
+        g.user = user
+        return f(*args, **kwargs)
+    
+    return decorated_function
+
 def login_required(f):
     """
     验证用户是否已登录的装饰器
@@ -71,7 +96,7 @@ def admin_required(f):
                 return jsonify({"status": "error", "message": "需要登录"}), 401
             return redirect(url_for('auth.login', next=request.url))
         
-        if not current_user._is_admin:
+        if not current_user.is_admin:
             if request.is_json:
                 logger.warning("非管理员API访问")
                 return jsonify({"status": "error", "message": "需要管理员权限"}), 403

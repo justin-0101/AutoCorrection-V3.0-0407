@@ -426,7 +426,15 @@ def profile():
         # 获取当前用户信息
         if current_user.is_authenticated:
             user = User.query.get(current_user.id)
-            return render_template('profile.html', user=user)
+            # 确保获取用户的profile，如果不存在则创建一个
+            if not hasattr(user, 'profile') or not user.profile:
+                profile = UserProfile(user_id=user.id)
+                db.session.add(profile)
+                db.session.commit()
+                # 重新查询用户以获取更新后的关系
+                user = User.query.get(current_user.id)
+            
+            return render_template('profile.html', user=user, profile=user.profile)
         else:
             flash('请先登录', 'warning')
             return redirect(url_for('main.login'))
@@ -468,7 +476,22 @@ def results(essay_id):
             'results.html', 
             essay=essay,
             correction=correction,
-            results=results_data
+            results=results_data,
+            # 确保从results_data中提取所有需要的字段
+            total_score=results_data.get('total_score', 0),
+            grade=results_data.get('level', 'N/A'),
+            content_score=results_data.get('content_score', 0),
+            language_score=results_data.get('language_score', 0),
+            structure_score=results_data.get('structure_score', 0),
+            writing_score=results_data.get('writing_score', 0),
+            overall_assessment=results_data.get('overall_assessment', ''),
+            content_analysis=results_data.get('content_analysis', ''),
+            language_analysis=results_data.get('language_analysis', ''),
+            structure_analysis=results_data.get('structure_analysis', ''),
+            writing_analysis=results_data.get('writing_analysis', ''),
+            content=essay.content,
+            word_count=len(essay.content),
+            spelling_errors=results_data.get('spelling_errors', {'解析': []})
         )
     except Exception as e:
         tb = traceback.format_exc()

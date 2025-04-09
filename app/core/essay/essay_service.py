@@ -8,8 +8,11 @@
 
 import logging
 import time
-import uuid
-from app.database.models import db, Essay, User
+from datetime import datetime
+from sqlalchemy.exc import SQLAlchemyError
+from app.models.db import db
+from app.models.essay import Essay, EssayStatus, EssaySourceType
+from app.models.correction import Correction, CorrectionStatus
 from app.core.essay.essay_validator import EssayValidator
 from app.errors import ValidationError, ResourceNotFoundError, ProcessingError
 from app.utils.file_handler import FileHandler
@@ -21,70 +24,86 @@ class EssayService:
     """作文服务类，处理作文相关的业务逻辑"""
     
     @classmethod
-    def create_essay(cls, user_id, title, content, grade_level=None, essay_type=None, requirements=None, word_count=None):
+    def create_essay(cls, user_id, title, content, source_type=EssaySourceType.text.value,
+                    grade=None, author_name=None, is_public=False):
         """
-        创建新作文
+        创建新作文，在同一事务中创建作文和批改记录
         
         Args:
             user_id: 用户ID
             title: 作文标题
             content: 作文内容
-            grade_level: 年级水平
-            essay_type: 作文类型
-            requirements: 作文要求
-            word_count: 字数统计
+            source_type: 来源类型
+            grade: 年级水平
+            author_name: 作者姓名
+            is_public: 是否公开
         
         Returns:
             dict: 包含新创建的作文信息
         """
         try:
             # 验证作文数据
-            EssayValidator.validate_essay_data(title, content, grade_level, essay_type)
+            EssayValidator.validate_essay_data(title=title, content=content)
             
-            # 如果未提供字数，计算字数
-            if not word_count:
-                word_count = len(content)
+            # 计算字数
+            word_count = len(content)
             
-            # 创建新作文记录
-            essay = Essay(
-                user_id=user_id,
-                title=title,
-                content=content,
-                grade_level=grade_level,
-                essay_type=essay_type,
-                requirements=requirements,
-                word_count=word_count,
-                status='pending',
-                created_at=time.time()
-            )
+            # 开始数据库事务
+            with db.session.begin():
+                # 创建新作文记录
+                essay = Essay(
+                    user_id=user_id,
+                    title=title,
+                    content=content,
+                    word_count=word_count,
+                    source_type=source_type,
+                    grade=grade,
+                    author_name=author_name,
+                    is_public=is_public,
+                    status=EssayStatus.PENDING.value,
+                    created_at=datetime.utcnow()
+                )
+                
+                # 添加到数据库
+                db.session.add(essay)
+                db.session.flush()  # 获取essay.id
+                
+                # 创建批改记录
+                correction = Correction(
+                    essay_id=essay.id,
+                    status=CorrectionStatus.PENDING.value,
+                    created_at=datetime.utcnow()
+                )
+                
+                db.session.add(correction)
+                # 事务会在with块结束时自动提交
             
-            with db.session() as session:
-                session.add(essay)
-                session.commit()
-                essay_id = essay.id
-            
-            logger.info(f"作文创建成功，ID: {essay_id}, 用户: {user_id}")
+            logger.info(f"作文创建成功，ID: {essay.id}, 用户: {user_id}")
             
             # 异步启动作文批改任务
-            correction_task = process_essay_correction.delay(essay_id, user_id)
+            correction_task = process_essay_correction.delay(essay.id)
             
             return {
                 "status": "success",
                 "message": "作文创建成功，已加入批改队列",
-                "essay_id": essay_id,
+                "essay_id": essay.id,
                 "task_id": correction_task.id
             }
         
         except ValidationError as e:
             logger.error(f"作文数据验证失败: {str(e)}")
-            raise e
+            raise
+        
+        except SQLAlchemyError as e:
+            logger.error(f"数据库操作失败: {str(e)}")
+            raise ProcessingError(f"创建作文失败: {str(e)}")
         
         except Exception as e:
             logger.error(f"创建作文异常: {str(e)}", exc_info=True)
             raise ProcessingError(f"创建作文失败: {str(e)}")
     
     @classmethod
-    def create_essay_from_file(cls, user_id, file_data, filename, title=None, grade_level=None, essay_type=None, requirements=None):
+    def create_essay_from_file(cls, user_id, file_data, filename, title=None, grade=None, author_name=None, is_public=False):
         """
         从上传的文件创建作文
         
@@ -93,9 +112,9 @@ class EssayService:
             file_data: 文件数据
             filename: 文件名
             title: 作文标题(可选)
-            grade_level: 年级水平(可选)
-            essay_type: 作文类型(可选)
-            requirements: 作文要求(可选)
+            grade: 年级水平(可选)
+            author_name: 作者姓名(可选)
+            is_public: 是否公开
         
         Returns:
             dict: 包含新创建的作文信息
@@ -110,7 +129,6 @@ class EssayService:
             
             # 从文件中提取内容
             content = file_info.get('content', '')
-            source_type = file_info.get('source_type', 'text')
             
             if not content:
                 raise ValidationError("无法从文件中提取内容")
@@ -120,32 +138,19 @@ class EssayService:
                 title = filename.split('.')[0]
             
             # 创建作文
-            result = cls.create_essay(
+            return cls.create_essay(
                 user_id=user_id,
                 title=title,
                 content=content,
-                grade_level=grade_level,
-                essay_type=essay_type,
-                requirements=requirements,
-                word_count=len(content)
+                source_type=EssaySourceType.upload.value,
+                grade=grade,
+                author_name=author_name,
+                is_public=is_public
             )
-            
-            # 添加源文件信息
-            with db.session() as session:
-                essay = session.query(Essay).get(result.get('essay_id'))
-                if essay:
-                    essay.source_file = filename
-                    essay.source_type = source_type
-                    session.commit()
-            
-            result['source_type'] = source_type
-            result['word_count'] = len(content)
-            
-            return result
         
         except ValidationError as e:
             logger.error(f"文件验证失败: {str(e)}")
-            raise e
+            raise
         
         except Exception as e:
             logger.error(f"从文件创建作文异常: {str(e)}", exc_info=True)

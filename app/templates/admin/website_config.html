@@ -14,55 +14,56 @@
             <div class="card-header">会员权益配置</div>
             <div class="card-body">
                 <form action="{{ url_for('admin.config') }}" method="post">
+                    <input type="hidden" name="membership_settings" value="1">
                     <h5 class="mb-3">免费用户</h5>
                     <div class="row g-3 mb-4">
                         <div class="col-md-6">
-                            <label for="free_essays" class="form-label">基础批改次数</label>
-                            <input type="number" class="form-control" id="free_essays" name="free_essays" value="{{ config.free_essays }}" min="0" required>
+                            <label for="free_monthly" class="form-label">基础批改次数</label>
+                            <input type="number" class="form-control" id="free_monthly" name="free_monthly" value="{{ config.free_essays|default(10) }}" min="0" required>
                         </div>
                         <div class="col-md-6">
-                            <label for="free_daily_limit" class="form-label">每日可用次数</label>
-                            <input type="number" class="form-control" id="free_daily_limit" name="free_daily_limit" value="{{ config.free_daily_limit }}" min="0" required>
+                            <label for="free_daily" class="form-label">每日可用次数</label>
+                            <input type="number" class="form-control" id="free_daily" name="free_daily" value="{{ config.free_daily_limit|default(3) }}" min="0" required>
                         </div>
                     </div>
                     
                     <h5 class="mb-3">普通会员</h5>
                     <div class="row g-3 mb-4">
                         <div class="col-md-6">
-                            <label for="regular_monthly_essays" class="form-label">每月批改次数</label>
-                            <input type="number" class="form-control" id="regular_monthly_essays" name="regular_monthly_essays" value="{{ config.regular_monthly_essays }}" min="0" required>
+                            <label for="basic_monthly" class="form-label">每月批改次数</label>
+                            <input type="number" class="form-control" id="basic_monthly" name="basic_monthly" value="{{ config.regular_monthly_essays|default(100) }}" min="0" required>
                         </div>
                         <div class="col-md-6">
-                            <label for="regular_daily_essays" class="form-label">每日可用次数</label>
-                            <input type="number" class="form-control" id="regular_daily_essays" name="regular_daily_essays" value="{{ config.regular_daily_essays }}" min="0" required>
+                            <label for="basic_daily" class="form-label">每日可用次数</label>
+                            <input type="number" class="form-control" id="basic_daily" name="basic_daily" value="{{ config.regular_daily_essays|default(20) }}" min="0" required>
                         </div>
                         <div class="col-md-6">
-                            <label for="regular_price" class="form-label">会员价格(元/月)</label>
-                            <input type="number" class="form-control" id="regular_price" name="regular_price" value="{{ config.regular_price }}" min="0" step="0.01" required>
+                            <label for="basic_price" class="form-label">会员价格(元/月)</label>
+                            <input type="number" class="form-control" id="basic_price" name="basic_price" value="{{ config.regular_price|default(49) }}" min="0" step="0.01" required>
                         </div>
                     </div>
                     
                     <h5 class="mb-3">高级会员</h5>
                     <div class="row g-3 mb-4">
                         <div class="col-md-6">
-                            <label for="premium_monthly_essays" class="form-label">每月批改次数</label>
-                            <input type="number" class="form-control" id="premium_monthly_essays" name="premium_monthly_essays" value="{{ config.premium_monthly_essays }}" min="0" required>
+                            <label for="premium_monthly" class="form-label">每月批改次数</label>
+                            <input type="number" class="form-control" id="premium_monthly" name="premium_monthly" value="{{ config.premium_monthly_essays|default(300) }}" min="0" required>
                         </div>
                         <div class="col-md-6">
-                            <label for="premium_daily_essays" class="form-label">每日可用次数</label>
-                            <input type="number" class="form-control" id="premium_daily_essays" name="premium_daily_essays" value="{{ config.premium_daily_essays }}" min="0" required>
+                            <label for="premium_daily" class="form-label">每日可用次数</label>
+                            <input type="number" class="form-control" id="premium_daily" name="premium_daily" value="{{ config.premium_daily_essays|default(50) }}" min="0" required>
                         </div>
                         <div class="col-md-6">
                             <label for="premium_price" class="form-label">会员价格(元/月)</label>
-                            <input type="number" class="form-control" id="premium_price" name="premium_price" value="{{ config.premium_price }}" min="0" step="0.01" required>
+                            <input type="number" class="form-control" id="premium_price" name="premium_price" value="{{ config.premium_price|default(89) }}" min="0" step="0.01" required>
                         </div>
                     </div>
                     
                     <h5 class="mb-3">注册奖励</h5>
                     <div class="row g-3 mb-4">
                         <div class="col-md-6">
-                            <label for="registration_bonus" class="form-label">注册奖励次数</label>
-                            <input type="number" class="form-control" id="registration_bonus" name="registration_bonus" value="{{ config.registration_bonus }}" min="0" required>
+                            <label for="signup_bonus" class="form-label">注册奖励次数</label>
+                            <input type="number" class="form-control" id="signup_bonus" name="signup_bonus" value="{{ config.registration_bonus|default(3) }}" min="0" required>
                         </div>
                     </div>
                     
@@ -174,7 +175,7 @@
     // 备份数据库
     document.getElementById('backupDbBtn').addEventListener('click', function() {
         if (confirm('确定要备份数据库吗？')) {
-            fetch('{{ url_for('admin.config') }}', {
+            fetch("{{ url_for('admin.config') }}", {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -198,7 +199,7 @@
     // 清理临时文件
     document.getElementById('clearTempFilesBtn').addEventListener('click', function() {
         if (confirm('确定要清理临时文件吗？')) {
-            fetch('{{ url_for('admin.config') }}', {
+            fetch("{{ url_for('admin.config') }}", {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

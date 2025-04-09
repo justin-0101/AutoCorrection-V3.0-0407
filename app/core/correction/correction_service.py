@@ -13,6 +13,8 @@ import json
 from typing import Dict, Any, List, Optional, Union
 import uuid
 import traceback
+import re
+import time
 
 from sqlalchemy.exc import SQLAlchemyError
 from app.config import config
@@ -26,6 +28,11 @@ from app.models.correction import Correction
 from app.core.correction.ai_corrector import AICorrectionService
 from app.core.ai.open_ai_client import OpenAIClient
 from app.core.correction.report_generator import ReportGenerator
+from app.extensions import db
+from app.utils.exceptions import (
+    ResourceNotFoundError, ValidationError, 
+    LimitExceededError, ServiceUnavailableError
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +62,16 @@ class CorrectionService:
             'text': ['txt', 'docx', 'pdf'],
             'image': ['jpg', 'jpeg', 'png']
         })
+        
+        # 允许的最大作文长度
+        self.max_content_length = 5000
+        
+        # 默认批改评分项
+        self.default_scoring_items = [
+            '内容', '语言', '结构', '书写'
+        ]
+        
+        logger.info("批改服务已初始化")
     
     def check_user_limits(self, user_id: int) -> Dict[str, Any]:
         """
@@ -461,7 +478,7 @@ class CorrectionService:
                 return {"status": "error", "message": f"未找到作文，ID: {essay_id}"}
             
             # 更新作文状态
-            essay.status = EssayStatus.PROCESSING.value
+            essay.status = EssayStatus.CORRECTING.value
             db.session.commit()
             
             # 检查是否已有批改记录
@@ -673,4 +690,106 @@ class CorrectionService:
         return {
             'status': 'success',
             'essay': essay_data
-        } 
+        }
+
+    def retry_essay_correction(self, essay_id: int, user_id: int, is_admin: bool = False) -> Dict[str, Any]:
+        """
+        重试作文批改
+        
+        Args:
+            essay_id: 作文ID
+            user_id: 用户ID
+            is_admin: 是否是管理员，管理员可以重试任何作文
+            
+        Returns:
+            dict: 重试结果
+        """
+        logger.info(f"开始重试作文批改，作文ID: {essay_id}, 用户ID: {user_id}")
+        
+        try:
+            # 获取作文信息
+            essay = Essay.query.get(essay_id)
+            if not essay:
+                logger.error(f"未找到作文，ID: {essay_id}")
+                return {"status": "error", "message": f"未找到作文，ID: {essay_id}"}
+            
+            # 检查权限，只有作文所有者或管理员可以重试
+            if essay.user_id != user_id and not is_admin:
+                logger.warning(f"权限不足，用户ID: {user_id}, 作文ID: {essay_id}, 作文所有者ID: {essay.user_id}")
+                return {"status": "error", "message": "您没有权限重试此作文"}
+            
+            # 检查状态，只有失败的作文才能重试
+            if essay.status != EssayStatus.FAILED.value:
+                if essay.status == EssayStatus.COMPLETED.value:
+                    logger.warning(f"作文已完成，无需重试，作文ID: {essay_id}")
+                    return {"status": "error", "message": "此作文已成功批改，无需重试"}
+                elif essay.status == EssayStatus.CORRECTING.value:
+                    logger.warning(f"作文正在批改中，不能重试，作文ID: {essay_id}")
+                    return {"status": "error", "message": "此作文正在批改中，请稍后查看结果"}
+                else:
+                    logger.warning(f"作文状态不允许重试，作文ID: {essay_id}, 状态: {essay.status}")
+                    return {"status": "error", "message": f"此作文当前状态不允许重试: {essay.status}"}
+            
+            # 更新作文状态为待批改
+            essay.status = EssayStatus.PENDING.value
+            
+            # 更新批改记录状态
+            correction = Correction.query.filter_by(essay_id=essay_id).first()
+            if correction:
+                correction.status = 'pending'
+                correction.updated_at = datetime.now()
+                correction.extra_data = correction.extra_data or {}
+                correction.extra_data['retry_count'] = correction.extra_data.get('retry_count', 0) + 1
+                correction.extra_data['retry_time'] = datetime.now().isoformat()
+                correction.extra_data['retry_by'] = user_id
+            else:
+                # 如果没有批改记录，创建一个新的
+                correction = Correction(
+                    essay_id=essay_id,
+                    type='ai',
+                    status='pending'
+                )
+                db.session.add(correction)
+            
+            # 提交更改
+            db.session.commit()
+            
+            # 创建任务记录
+            from app.tasks.correction_tasks import process_essay_correction
+            try:
+                # 提交到Celery队列
+                task = process_essay_correction.delay(essay_id)
+                logger.info(f"重试任务已提交，作文ID: {essay_id}, 任务ID: {task.id}")
+                
+                # 更新任务ID
+                correction.task_id = task.id
+                db.session.commit()
+                
+                return {
+                    "status": "success",
+                    "message": "作文批改任务已重新提交",
+                    "essay_id": essay_id,
+                    "task_id": task.id
+                }
+            except Exception as e:
+                logger.error(f"提交重试任务失败: {str(e)}")
+                essay.status = EssayStatus.FAILED.value
+                if correction:
+                    correction.status = 'failed'
+                    correction.extra_data = correction.extra_data or {}
+                    correction.extra_data['retry_error'] = str(e)
+                db.session.commit()
+                
+                return {
+                    "status": "error",
+                    "message": f"提交重试任务失败: {str(e)}",
+                    "essay_id": essay_id
+                }
+            
+        except Exception as e:
+            logger.error(f"重试作文批改时发生错误: {str(e)}\n{traceback.format_exc()}")
+            return {
+                "status": "error",
+                "message": f"重试作文批改时发生错误: {str(e)}",
+                "essay_id": essay_id
+            } 

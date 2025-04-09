@@ -44,6 +44,8 @@ from app.api.v1.correction import correction_bp
 from app.api.v1.membership import membership_bp
 from app.api.v1.admin import admin_api_bp
 from app.api.v1.example import example_bp, register_example_blueprint
+from app.api.v1.essays import essays_bp
+from app.api.v1 import api_v1_bp  # 导入主API v1蓝图
 
 # 加载环境变量
 def load_env_vars():
@@ -203,8 +205,7 @@ def create_app(config_name='default'):
         # 不要在这里抛出异常，让应用继续启动
     
     # 注册蓝图
-    register_blueprints(app, main_bp, admin_bp, auth_bp, correction_bp, 
-                       membership_bp, admin_api_bp)
+    register_blueprints(app, main_bp, admin_bp, api_v1_bp)
     
     # 注册示例API蓝图
     register_example_blueprint(app)

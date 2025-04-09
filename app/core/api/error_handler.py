@@ -40,6 +40,7 @@ class ErrorHandler:
             self._default_status_code = 500
             self._log_exceptions = True
             self._include_traceback = False
+            self._registered_blueprints = set()  # 添加一个集合来跟踪已注册的蓝图
             self._register_default_error_mappings()
             ErrorHandler._initialized = True
     
@@ -119,11 +120,17 @@ class ErrorHandler:
         Args:
             blueprint: Flask蓝图实例
         """
+        # 检查蓝图是否已经注册过错误处理器
+        if blueprint.name in self._registered_blueprints:
+            logger.debug(f"蓝图 {blueprint.name} 已经注册过错误处理器，跳过")
+            return
+            
         @blueprint.errorhandler(Exception)
         def handle_exception(error):
             return self.handle_error(error)
         
-        # 可以为蓝图注册特定的错误处理器
+        # 记录已注册的蓝图
+        self._registered_blueprints.add(blueprint.name)
         logger.info(f"为蓝图 {blueprint.name} 注册错误处理器完成")
     
     def register_error_mapping(self, exception_class, status_code, default_message=None):

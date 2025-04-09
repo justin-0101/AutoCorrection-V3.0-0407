@@ -45,63 +45,39 @@ except ImportError as e:
 def app():
     """创建测试应用实例"""
     app = create_app('testing')
-    
-    # 建立应用上下文
-    ctx = app.app_context()
-    ctx.push()
-    
-    yield app
-    
-    ctx.pop()
+    return app
 
 
 @pytest.fixture(scope='session')
 def db(app):
-    """数据库fixture"""
-    from app.extensions import db as _db
-    
-    # 在应用上下文中创建所有表
+    """创建数据库实例"""
     with app.app_context():
         _db.create_all()
-        
-        # 创建默认角色和权限
-        from app.models.user import Role, Permission
-        Permission.create_default_permissions()
-        Role.create_default_roles()
-    
-    yield _db
-    
-    # 清理数据库
-    with app.app_context():
-        _db.session.remove()
+        yield _db
         _db.drop_all()
 
 
 @pytest.fixture(scope='function')
-def session(app, db):
-    """提供数据库会话 - 每个测试重置"""
-    from app.extensions import db as _db
-    from sqlalchemy.orm import scoped_session, sessionmaker
-    
-    # 开始事务
-    connection = _db.engine.connect()
+def session(db):
+    """创建数据库会话"""
+    connection = db.engine.connect()
     transaction = connection.begin()
     
-    # 创建会话
+    # 创建会话工厂
     session_factory = sessionmaker(bind=connection)
     session = scoped_session(session_factory)
     
-    # 使用这个会话替换当前的
-    old_session = _db.session
-    _db.session = session
+    # 替换当前会话
+    old_session = db.session
+    db.session = session
     
     yield session
     
     # 清理
-    _db.session = old_session
+    session.remove()
     transaction.rollback()
     connection.close()
-    session.remove()
+    db.session = old_session
 
 
 @pytest.fixture
@@ -111,30 +87,14 @@ def client(app) -> FlaskClient:
 
 
 @pytest.fixture
-def test_user(session):
+def test_user(app, session):
     """创建测试用户"""
-    from app.models.user import User, Role, UserRole
-    
-    # 获取学生角色
-    student_role = Role.query.filter_by(name='student').first()
-    if not student_role:
-        raise ValueError("学生角色未找到，请确保已创建默认角色")
-    
     user = User(
+        username='test_user',
         email='test@example.com',
-        username='testuser',
-        name='Test User',
-        _is_active=True,
-        is_admin=False,
-        is_deleted=False
+        is_active=True
     )
-    user.set_password('password123')
-    
-    # 添加学生角色
-    user_role = UserRole(user=user, role=student_role)
-    session.add(user_role)
-    
-    # 保存到数据库
+    user.set_password('test123')  # 设置测试密码
     session.add(user)
     session.commit()
     

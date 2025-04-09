@@ -53,7 +53,53 @@ class ServiceRegistry:
             
         except Exception as e:
             logger.error(f"初始化服务失败: {str(e)}")
-            return False
+            
+            # 尝试初始化关键服务，即使其他服务失败
+            try:
+                logger.info("尝试单独初始化关键服务...")
+                # 初始化Redis服务 - 这是最基础的服务
+                cls._initialize_service('redis_service')
+                # 初始化AI客户端工厂 - 核心功能依赖此服务
+                cls._initialize_service('ai_client_factory')
+                return True
+            except Exception as recovery_error:
+                logger.error(f"恢复初始化失败: {str(recovery_error)}")
+                return False
+            
+    @classmethod
+    def _initialize_service(cls, service_name: str) -> Any:
+        """
+        单独初始化特定服务
+        
+        Args:
+            service_name: 要初始化的服务名称
+            
+        Returns:
+            Any: 初始化的服务实例
+        """
+        if service_name not in cls.CORE_SERVICES:
+            logger.error(f"未知的服务: {service_name}")
+            return None
+            
+        module_path, class_name = cls.CORE_SERVICES[service_name]
+        
+        try:
+            # 导入模块
+            module = importlib.import_module(module_path)
+            # 获取类
+            service_class = getattr(module, class_name)
+            # 创建实例
+            service_instance = service_class()
+            
+            # 注册到服务容器
+            from app.core.services.container import container, ServiceScope
+            container.register(service_name, service_instance, ServiceScope.SINGLETON)
+            
+            logger.info(f"成功初始化服务: {service_name}")
+            return service_instance
+        except Exception as e:
+            logger.error(f"初始化服务 {service_name} 失败: {str(e)}")
+            return None
     
     @classmethod
     def _declare_core_dependencies(cls) -> None:
