@@ -25,7 +25,7 @@ def start_celery_worker(queue, node_index=0, concurrency=1):
     
     cmd = [
         'celery',
-        '-A', 'tasks.celery_app:celery_app',
+        '-A', 'app.tasks:celery',
         'worker',
         '--loglevel=info',
         '--concurrency', str(concurrency),
@@ -48,7 +48,7 @@ def start_celery_beat():
     
     cmd = [
         'celery',
-        '-A', 'tasks.celery_app:celery_app',
+        '-A', 'app.tasks:celery',
         'beat',
         '--loglevel=info'
     ]

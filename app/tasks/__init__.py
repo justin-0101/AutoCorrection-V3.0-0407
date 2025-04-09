@@ -6,6 +6,7 @@
 包含所有Celery异步任务的定义和配置
 """
 
+from app.tasks.celery_app import celery_app
 from app.tasks.correction_tasks import (
     process_essay_correction,
     batch_process_essays
@@ -32,7 +33,13 @@ from app.tasks.analytics_tasks import (
 )
 from app.tasks.scheduled_tasks import beat_schedule
 
+# 导出Celery实例
+celery = celery_app
+
 __all__ = [
+    # Celery实例
+    'celery',
+    
     # 作文批改任务
     'process_essay_correction',
     'batch_process_essays',

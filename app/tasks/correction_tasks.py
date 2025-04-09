@@ -11,7 +11,6 @@ import traceback
 import json
 from datetime import datetime
 import uuid
-from celery import Celery
 
 from app.tasks.celery_app import celery_app
 from app.core.correction.correction_service import CorrectionService
@@ -23,6 +22,7 @@ from app.extensions import db
 from app.models.correction_type import CorrectionType
 from app.models.correction_status import CorrectionStatus
 from app.models.essay_status import EssayStatus
+from app.models.task_status import TaskStatus, TaskState
 
 # 获取任务专用日志记录器
 logger = get_task_logger()
@@ -56,33 +56,130 @@ def validate_essay_id(essay_id):
     return True, ""
 
 @celery_app.task(
-    bind=True,
     name='app.tasks.correction_tasks.process_essay_correction',
-    max_retries=3,
-    default_retry_delay=300,
-    acks_late=True
+    bind=True,
+    max_retries=5,
+    default_retry_delay=60,
+    acks_late=True,
+    reject_on_worker_lost=True,
+    task_time_limit=900,  # 15分钟
+    task_soft_time_limit=600,  # 10分钟
+    queue='correction'
 )
 def process_essay_correction(self, essay_id):
-    """处理作文批改任务"""
-    try:
-        # 注意：不再创建应用上下文，因为这已经在task_prerun信号处理中完成
-        logger.info(f"开始处理作文批改任务: essay_id={essay_id}")
+    """
+    异步处理作文批改任务
+    
+    Args:
+        self: Celery任务实例
+        essay_id: 作文ID
+    
+    Returns:
+        Dict: 批改结果
+    """
+    task_id = self.request.id or str(uuid.uuid4())
+    
+    # 记录任务开始信息
+    logger.info(f"[{task_id}] 开始异步处理作文批改，作文ID: {essay_id}")
+    
+    # 参数验证
+    is_valid, error_message = validate_essay_id(essay_id)
+    if not is_valid:
+        logger.error(f"[{task_id}] 作文ID无效: {error_message}")
+        return {
+            'status': 'error',
+            'message': error_message,
+            'task_id': task_id
+        }
+    
+    # 转换为整数
+    essay_id = int(essay_id)
+    
+    # 创建Flask应用上下文
+    from app import create_app
+    from flask import current_app
+    from app.core.ai.init_services import ensure_services
+    
+    app = create_app()
+    
+    with app.app_context():
+        # 确保所有必要的服务已初始化
+        if not ensure_services():
+            logger.error(f"[{task_id}] 服务初始化失败, essay_id={essay_id}")
+            return {
+                'status': 'error',
+                'message': "服务初始化失败",
+                'task_id': task_id
+            }
+            
+        # 记录任务状态
+        try:
+            # 查找或创建任务状态记录
+            task_status = TaskStatus.query.filter_by(task_id=task_id).first()
+            if not task_status:
+                task_status = TaskStatus.create_from_task(
+                    task_id=task_id,
+                    task_name='process_essay_correction',
+                    related_type='essay',
+                    related_id=str(essay_id),
+                    args=json.dumps([essay_id]),
+                    worker_id=self.request.hostname
+                )
+            
+            # 更新为开始状态
+            task_status.mark_as_started()
+            
+        except Exception as e:
+            logger.warning(f"[{task_id}] 记录任务状态失败: {str(e)}")
         
         try:
-            # 获取作文信息
+            # 获取作文，提前验证
             essay = Essay.query.get(essay_id)
             if not essay:
-                logger.error(f"找不到作文: essay_id={essay_id}")
-                return {'success': False, 'error': 'Essay not found'}
+                error_msg = f"作文不存在，ID: {essay_id}"
+                logger.error(f"[{task_id}] {error_msg}")
+                
+                # 更新任务状态
+                if 'task_status' in locals():
+                    task_status.mark_as_failure(error=error_msg)
+                    
+                return {
+                    'status': 'error',
+                    'message': error_msg,
+                    'task_id': task_id
+                }
             
-            # 安全地获取grade字段，如果不存在则为None
-            grade = None
-            try:
-                grade = essay.grade
-                logger.debug(f"作文年级: essay_id={essay_id}, grade={grade}")
-            except (AttributeError, Exception) as e:
-                # 如果字段不存在或访问出错，记录日志但不终止流程
-                logger.warning(f"获取作文年级字段失败，可能是旧数据: essay_id={essay_id}, error={str(e)}")
+            # 强制类型检查
+            if not hasattr(essay, 'source_type'):
+                error_msg = f"Essay对象缺少source_type属性，ID: {essay_id}"
+                logger.warning(f"[{task_id}] {error_msg}，尝试重试")
+                
+                if 'task_status' in locals():
+                    # 增加重试计数
+                    task_status.increment_retry()
+                    
+                # 使用合适的重试策略
+                policy = get_retry_policy('app.tasks.correction_tasks.process_essay_correction', AttributeError())
+                retry_delay = calculate_next_retry_time(
+                    self.request.retries,
+                    policy['base_delay'],
+                    policy['max_delay']
+                )
+                
+                raise self.retry(exc=AttributeError('Essay对象缺少source_type属性'), countdown=retry_delay)
+            
+            # 检查作文状态
+            if essay.status == EssayStatus.COMPLETED.value:
+                logger.info(f"[{task_id}] 作文已完成批改，跳过处理，ID: {essay_id}")
+                
+                if 'task_status' in locals():
+                    task_status.mark_as_success(result={'status': 'skipped', 'reason': '作文已完成批改'})
+                    
+                return {
+                    'status': 'skipped',
+                    'message': '作文已完成批改',
+                    'task_id': task_id
+                }
             
             # 使用事务确保状态更新的原子性
             with db.session.begin_nested():
@@ -99,74 +196,186 @@ def process_essay_correction(self, essay_id):
                 
                 # 更新状态为处理中
                 if not essay.update_status(EssayStatus.CORRECTING):
-                    logger.error(f"无法将作文状态更新为处理中: essay_id={essay_id}")
-                    return {'success': False, 'error': '状态更新失败'}
+                    error_msg = f"无法将作文状态更新为处理中: essay_id={essay_id}"
+                    logger.error(f"[{task_id}] {error_msg}")
+                    
+                    if 'task_status' in locals():
+                        task_status.mark_as_failure(error=error_msg)
+                        
+                    return {
+                        'status': 'error',
+                        'message': error_msg,
+                        'task_id': task_id
+                    }
                 
                 correction.status = CorrectionStatus.PROCESSING.value
                 db.session.flush()
             
             # 提交事务
             db.session.commit()
-            
+                
             # 获取批改服务
             from app.core.services.container import container
             correction_service = container.get("correction_service")
             if not correction_service:
-                logger.error("Correction service not found")
-                return {'success': False, 'error': 'Correction service not found'}
-            
-            # 执行批改
-            result = correction_service.perform_correction(essay_id)
-            
-            # 处理成功，更新状态和结果
-            try:
-                with db.session.begin_nested():
-                    # 验证评分结果
-                    scores = result.get('results', {}).get('scores', {})
-                    if not validate_scores(scores):
-                        raise ValueError("Invalid scores in correction results")
-                    
-                    # 更新批改记录
-                    correction.results = result.get('results')
-                    correction.score = scores.get('total_score')
-                    correction.content = result.get('results', {}).get('corrected_content')
-                    correction.comments = result.get('results', {}).get('comments')
-                    correction.error_analysis = result.get('results', {}).get('error_analysis')
-                    correction.improvement_suggestions = result.get('results', {}).get('improvement_suggestions')
-                    correction.status = CorrectionStatus.COMPLETED.value
-                    correction.completed_at = datetime.utcnow()
-                    
-                    # 更新作文状态为完成
-                    if not essay.update_status(EssayStatus.COMPLETED):
-                        raise ValueError("Failed to update essay status to completed")
-                    
-                    # 同步结果到Essay
-                    correction.sync_results_to_essay()
+                error_msg = "Correction service not found"
+                logger.error(f"[{task_id}] {error_msg}")
                 
-                # 提交事务
-                db.session.commit()
-                
-                logger.info(f"作文批改完成: essay_id={essay_id}")
+                if 'task_status' in locals():
+                    task_status.mark_as_failure(error=error_msg)
+                    
                 return {
-                    'success': True,
-                    'essay_id': essay_id,
-                    'correction_id': correction.id,
-                    'results': result.get('results')
+                    'status': 'error',
+                    'message': error_msg,
+                    'task_id': task_id
                 }
             
-            except Exception as e:
-                logger.error(f"更新批改结果失败: essay_id={essay_id}, error={str(e)}")
-                db.session.rollback()
-                raise
+            # 执行批改
+            logger.info(f"[{task_id}] 开始执行批改，作文ID: {essay_id}")
+            result = correction_service.perform_correction(essay_id)
+            logger.info(f"[{task_id}] 批改执行完成，作文ID: {essay_id}, 状态: {result.get('status')}")
+            
+            # 处理成功，更新状态和结果
+            if result.get('status') == 'success':
+                try:
+                    with db.session.begin_nested():
+                        # 验证评分结果
+                        scores = result.get('results', {}).get('scores', {})
+                        if not validate_scores(scores):
+                            raise ValueError("评分结果无效")
+                        
+                        # 更新批改记录
+                        correction.results = result.get('results')
+                        correction.score = scores.get('total_score')
+                        correction.content = result.get('results', {}).get('corrected_content')
+                        correction.comments = result.get('results', {}).get('comments')
+                        correction.error_analysis = result.get('results', {}).get('error_analysis')
+                        correction.improvement_suggestions = result.get('results', {}).get('improvement_suggestions')
+                        correction.status = CorrectionStatus.COMPLETED.value
+                        correction.completed_at = datetime.utcnow()
+                        
+                        # 更新作文状态为完成
+                        if not essay.update_status(EssayStatus.COMPLETED):
+                            raise ValueError("更新作文状态为完成失败")
+                        
+                        # 同步结果到Essay
+                        correction.sync_results_to_essay()
+                    
+                    # 提交事务
+                    db.session.commit()
+                    
+                    # 记录任务成功
+                    if 'task_status' in locals():
+                        task_status.mark_as_success(result={
+                            'essay_id': essay_id,
+                            'correction_id': correction.id,
+                            'score': correction.score
+                        })
+                    
+                    logger.info(f"[{task_id}] 作文批改完成并保存结果: essay_id={essay_id}")
+                    return {
+                        'status': 'success',
+                        'essay_id': essay_id,
+                        'correction_id': correction.id,
+                        'results': result.get('results'),
+                        'task_id': task_id
+                    }
+                
+                except Exception as e:
+                    error_msg = f"更新批改结果失败: {str(e)}"
+                    logger.error(f"[{task_id}] {error_msg}, essay_id={essay_id}")
+                    db.session.rollback()
+                    
+                    if 'task_status' in locals():
+                        task_status.mark_as_failure(error=error_msg)
+                    
+                    # 设置作文状态为错误
+                    try:
+                        with db.session.begin_nested():
+                            essay.update_status(EssayStatus.ERROR)
+                            correction.status = CorrectionStatus.ERROR.value
+                            correction.error = str(e)
+                        db.session.commit()
+                    except Exception as ex:
+                        logger.error(f"[{task_id}] 更新失败状态时出错: {str(ex)}")
+                        db.session.rollback()
+                    
+                    raise
+            else:
+                # 批改执行失败
+                error_msg = result.get('message', '批改执行失败，未返回详细错误')
+                logger.error(f"[{task_id}] 批改执行失败: {error_msg}, essay_id={essay_id}")
+                
+                # 更新状态为错误
+                try:
+                    with db.session.begin_nested():
+                        essay.update_status(EssayStatus.ERROR)
+                        correction.status = CorrectionStatus.ERROR.value
+                        correction.error = error_msg
+                    db.session.commit()
+                except Exception as ex:
+                    logger.error(f"[{task_id}] 更新失败状态时出错: {str(ex)}")
+                    db.session.rollback()
+                
+                if 'task_status' in locals():
+                    task_status.mark_as_failure(error=error_msg)
+                
+                return {
+                    'status': 'error',
+                    'message': error_msg,
+                    'task_id': task_id
+                }
         
+        except self.retry_error as e:
+            # 重试异常不需要记录故障，因为任务将重试
+            logger.info(f"[{task_id}] 任务将重试: {str(e)}")
+            raise
+            
         except Exception as e:
-            logger.error(f"处理作文批改任务发生未预期错误: essay_id={essay_id}, error={str(e)}")
-            # 重试任务
-            raise self.retry(exc=e)
-    finally:
-        # 确保数据库会话在任务结束时被清理
-        # 注意：应用上下文的清理由task_postrun信号处理
-        db.session.remove()
+            error_msg = f"处理作文批改任务发生未预期错误: {str(e)}"
+            logger.error(f"[{task_id}] {error_msg}, essay_id={essay_id}")
+            logger.error(f"[{task_id}] 详细错误: {traceback.format_exc()}")
+            
+            # 更新状态为错误
+            try:
+                with db.session.begin_nested():
+                    # 只有当作文存在时才更新状态
+                    if 'essay' in locals() and essay:
+                        essay.update_status(EssayStatus.ERROR)
+                    
+                    # 只有当批改记录存在时才更新状态
+                    if 'correction' in locals() and correction:
+                        correction.status = CorrectionStatus.ERROR.value
+                        correction.error = str(e)
+                db.session.commit()
+            except Exception as ex:
+                logger.error(f"[{task_id}] 更新失败状态时出错: {str(ex)}")
+                db.session.rollback()
+            
+            if 'task_status' in locals():
+                task_status.mark_as_failure(error=error_msg)
+            
+            # 检查是否应该重试任务
+            if should_retry_task(e, self.request.retries, 5):
+                policy = get_retry_policy('app.tasks.correction_tasks.process_essay_correction', e)
+                retry_delay = calculate_next_retry_time(
+                    self.request.retries,
+                    policy['base_delay'],
+                    policy['max_delay']
+                )
+                
+                logger.info(f"[{task_id}] 任务将在 {retry_delay} 秒后重试，当前重试次数: {self.request.retries}")
+                raise self.retry(exc=e, countdown=retry_delay)
+            else:
+                logger.error(f"[{task_id}] 任务失败且不再重试，已达到最大重试次数或错误类型不支持重试")
+                return {
+                    'status': 'error',
+                    'message': error_msg,
+                    'task_id': task_id
+                }
+        finally:
+            # 确保数据库会话在任务结束时被清理
+            db.session.remove()
 
 def validate_scores(scores):
     """验证评分结果的有效性"""
@@ -189,41 +398,16 @@ def validate_scores(scores):
     language_score = scores['language_score']
     
     # 总分应该在内容分和语言分的范围内
-    if total_score < min(content_score, language_score) or total_score > max(content_score, language_score):
+    if total_score < min(content_score, language_score) or total_score > max(content_score, language_score) + 10:
         return False
     
     return True
-
-@celery_app.task
-def cleanup_stale_tasks():
-    """清理停滞的任务"""
-    try:
-        # 注意：不再手动创建应用上下文，依赖于task_prerun信号处理
-        # 查找所有处于pending或processing状态超过1小时的作文
-        from datetime import datetime, timedelta
-        one_hour_ago = datetime.utcnow() - timedelta(hours=1)
-        
-        stale_essays = Essay.query.filter(
-            Essay.status.in_(['pending', 'processing']),
-            Essay.updated_at < one_hour_ago
-        ).all()
-        
-        for essay in stale_essays:
-            # 重新提交批改任务
-            process_essay_correction.apply_async(args=[essay.id])
-            logger.info(f"重新提交停滞的作文批改任务: essay_id={essay.id}")
-            
-    except Exception as e:
-        logger.error(f"清理停滞任务时出错: {str(e)}")
-    finally:
-        # 确保数据库会话在任务结束时被清理
-        db.session.remove()
 
 @celery_app.task(
     name='app.tasks.correction_tasks.high_priority_essay_correction',
     bind=True,
     max_retries=5,
-    default_retry_delay=30,
+    default_retry_delay=60,
     acks_late=True,
     reject_on_worker_lost=True,
     task_time_limit=600,  # 10分钟
@@ -274,20 +458,12 @@ def batch_process_essays(self, essay_ids, priority=False):
     
     # 创建Flask应用上下文
     from app import create_app
+    from flask import current_app
     from app.core.ai.init_services import ensure_services
-    from app.extensions import db
     
-    flask_app = create_app()
+    app = create_app()
     
-    # 保存应用上下文到Celery任务实例
-    if not hasattr(self, 'app_context'):
-        self.app_context = flask_app.app_context()
-        self.app_context.push()
-        
-    try:
-        # 确保有新的干净的数据库会话
-        db.session.remove()
-        
+    with app.app_context():
         # 确保所有必要的服务已初始化
         if not ensure_services():
             logger.error(f"[{task_id}] 批量处理作文批改失败：服务初始化失败")
@@ -309,8 +485,6 @@ def batch_process_essays(self, essay_ids, priority=False):
         
         # 记录任务状态
         try:
-            from app.models.task_status import TaskStatus
-            
             # 创建批处理任务状态
             batch_task = TaskStatus.create_from_task(
                 task_id=task_id,
@@ -353,7 +527,7 @@ def batch_process_essays(self, essay_ids, priority=False):
                     })
                     continue
                     
-                if essay.status == 'completed':
+                if essay.status == EssayStatus.COMPLETED.value:
                     logger.info(f"[{task_id}] 作文已完成批改，跳过处理，ID: {essay_id}")
                     success_count += 1
                     results.append({
@@ -393,50 +567,67 @@ def batch_process_essays(self, essay_ids, priority=False):
     
         return {
             'status': 'success' if not errors else 'partial',
-            'message': f"已处理 {len(essay_ids)} 篇作文，成功 {len(results)} 篇，失败 {len(errors)} 篇",
+            'total': len(essay_ids),
+            'submitted': len(results),
+            'errors': len(errors),
             'results': results,
-            'errors': errors,
-            'task_id': task_id
+            'error_details': errors
         }
-    finally:
-        # 确保数据库会话在任务结束时被清理
-        db.session.remove()
-        
-        # 确保上下文在任务结束时被正确清理
-        if hasattr(self, 'app_context'):
-            try:
-                self.app_context.pop()
-            except Exception as e:
-                logger.warning(f"清理应用上下文时出错: {str(e)}")
 
-def update_essay_status(essay_id, status, error=None):
-    """
-    更新作文状态
+@celery_app.task
+def cleanup_stale_tasks():
+    """清理停滞的任务"""
+    # 获取任务专用日志记录器
+    logger = get_task_logger()
     
-    Args:
-        essay_id: 作文ID
-        status: 状态 (pending/processing/completed/failed)
-        error: 错误信息（如果有）
-    """
-    try:
-        with db.session() as session:
-            essay = session.query(Essay).get(essay_id)
-            if essay:
-                # 使用枚举值更新状态
-                if status == 'pending':
-                    essay.status = EssayStatus.PENDING.value
-                elif status == 'processing' or status == 'correcting':
-                    essay.status = EssayStatus.CORRECTING.value
-                elif status == 'completed':
-                    essay.status = EssayStatus.COMPLETED.value
-                elif status == 'failed':
-                    essay.status = EssayStatus.FAILED.value
-                else:
-                    essay.status = EssayStatus.PENDING.value
+    # 创建Flask应用上下文
+    from app import create_app
+    
+    with create_app().app_context():
+        try:
+            # 查找长时间处于运行状态的任务
+            from app.models.task_status import TaskStatus, TaskState
+            from datetime import timedelta
+            
+            # 查找超过1小时仍在运行的任务
+            cutoff_time = datetime.utcnow() - timedelta(hours=1)
+            stale_tasks = TaskStatus.query.filter(
+                TaskStatus.status == TaskState.RUNNING,
+                TaskStatus.started_at < cutoff_time
+            ).all()
+            
+            if not stale_tasks:
+                logger.info("没有发现停滞的任务")
+                return {"status": "success", "message": "No stale tasks found"}
                 
-                if error:
-                    essay.error_message = error
-                session.commit()
-                logger.info(f"更新作文状态为: {essay.status}，ID: {essay_id}")
-    except Exception as e:
-        logger.error(f"更新作文状态失败，ID: {essay_id}: {str(e)}") 
+            logger.info(f"发现 {len(stale_tasks)} 个停滞的任务")
+            
+            for task in stale_tasks:
+                logger.info(f"标记停滞任务为失败: {task.task_id}, 任务名称: {task.task_name}, 运行时长: {task.duration}秒")
+                task.mark_as_failure(error="Task marked as failed due to timeout")
+                
+                # 如果是作文批改任务，更新相关作文状态
+                if task.related_type == 'essay' and task.related_id:
+                    try:
+                        essay = Essay.query.get(int(task.related_id))
+                        if essay and essay.status == EssayStatus.CORRECTING.value:
+                            essay.update_status(EssayStatus.ERROR)
+                            
+                            # 更新批改记录
+                            correction = Correction.query.filter_by(essay_id=essay.id).first()
+                            if correction:
+                                correction.status = CorrectionStatus.ERROR.value
+                                correction.error = "Task timeout"
+                                db.session.commit()
+                                logger.info(f"已更新相关作文状态: essay_id={essay.id}")
+                    except Exception as e:
+                        logger.error(f"更新相关作文状态失败: {str(e)}")
+            
+            return {
+                "status": "success",
+                "message": f"Marked {len(stale_tasks)} stale tasks as failed"
+            }
+        
+        except Exception as e:
+            logger.error(f"清理停滞任务失败: {str(e)}")
+            return {"status": "error", "message": str(e)} 

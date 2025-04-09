@@ -81,12 +81,12 @@ def start_celery():
     
     # Windows下使用不同的命令
     if sys.platform == 'win32':
-        cmd = ['celery', '-A', 'app.tasks.celery_app', 'worker', 
+        cmd = ['celery', '-A', 'app.tasks:celery', 'worker', 
               '--pool=solo', '--loglevel=info',
               '-E',
               '--concurrency=1']
     else:
-        cmd = ['celery', '-A', 'app.tasks.celery_app', 'worker', 
+        cmd = ['celery', '-A', 'app.tasks:celery', 'worker', 
               '--loglevel=info',
               '-E',
               '--concurrency=1']

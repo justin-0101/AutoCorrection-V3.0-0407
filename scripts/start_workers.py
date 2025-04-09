@@ -32,7 +32,7 @@ def start_worker(queue='default', concurrency=2, loglevel='info', index=0):
     node_name = f'worker.{queue}{index}@%h' if index > 0 else f'worker.{queue}@%h'
     
     cmd = [
-        'celery', '-A', 'tasks.celery_app:celery_app', 'worker',
+        'celery', '-A', 'app.tasks:celery', 'worker',
         '--loglevel', loglevel,
         '--concurrency', str(concurrency),
         '-Q', queue,
@@ -47,7 +47,7 @@ def start_beat():
     """启动Celery定时任务调度器"""
     os.chdir(ROOT_DIR)
     cmd = [
-        'celery', '-A', 'tasks.celery_app:celery_app', 'beat',
+        'celery', '-A', 'app.tasks:celery', 'beat',
         '--loglevel', 'info'
     ]
     

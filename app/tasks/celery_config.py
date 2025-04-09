@@ -202,91 +202,23 @@ task_queues = (
 
 # 任务路由配置
 task_routes = {
-    # 作文批改任务
-    'app.tasks.correction_tasks.process_essay_correction': {
-        'queue': 'correction',
-        'routing_key': 'correction',
-    },
-    'app.tasks.correction_tasks.high_priority_essay_correction': {
-        'queue': 'correction.priority',
-        'routing_key': 'correction.priority',
-    },
-    'app.tasks.correction_tasks.batch_process_essays': {
-        'queue': 'correction',
-        'routing_key': 'correction',
-    },
+    # 批改任务
+    'app.tasks.correction_tasks.process_essay_correction': {'queue': 'correction'},
+    'app.tasks.correction_tasks.high_priority_essay_correction': {'queue': 'correction.priority'},
+    'app.tasks.correction_tasks.batch_process_essays': {'queue': 'correction'},
     
-    # 邮件发送任务
-    'app.tasks.user_tasks.send_*': {
-        'queue': 'email',
-        'routing_key': 'email',
-    },
+    # 邮件任务
+    'app.tasks.notification_tasks.*': {'queue': 'email'},
     
-    # 用户相关任务
-    'app.tasks.user_tasks.*': {
-        'queue': 'default',
-        'routing_key': 'default',
-    },
-    
-    # 订阅相关任务
-    'app.tasks.subscription_tasks.*': {
-        'queue': 'high',
-        'routing_key': 'high',
-    },
+    # 分析任务
+    'app.tasks.analytics_tasks.*': {'queue': 'analytics'},
     
     # 备份任务
-    'app.tasks.backup_tasks.*': {
-        'queue': 'backup',
-        'routing_key': 'backup',
-    },
+    'app.tasks.backup_tasks.*': {'queue': 'backup'},
     
-    # 分析统计任务
-    'app.tasks.analytics_tasks.*': {
-        'queue': 'analytics',
-        'routing_key': 'analytics',
-    },
-    
-    # 任务失败通知任务
-    'app.tasks.notification_tasks.send_task_failure_notification': {
-        'queue': 'email',
-        'routing_key': 'email',
-    },
-    
-    # 周期性处理失败任务通知
-    'app.tasks.notification_tasks.process_failed_tasks_notification': {
-        'queue': 'periodic',
-        'routing_key': 'periodic',
-    },
-    
-    # 维护任务
-    'app.tasks.maintenance_tasks.*': {
-        'queue': 'periodic',
-        'routing_key': 'periodic',
-    },
-    
-    # 监控任务
-    'app.tasks.monitoring_tasks.*': {
-        'queue': 'periodic',
-        'routing_key': 'periodic',
-    },
-    
-    # 批量处理任务 - 常规处理任务
-    'app.tasks.batch_processor_tasks.bulk_update_essay_status': {
-        'queue': 'low',
-        'routing_key': 'low',
-    },
-    
-    # 批量处理任务 - 重新处理失败的任务
-    'app.tasks.batch_processor_tasks.reprocess_failed_corrections': {
-        'queue': 'low',
-        'routing_key': 'low',
-    },
-    
-    # 批量处理任务 - 数据清理
-    'app.tasks.batch_processor_tasks.bulk_delete_old_data': {
-        'queue': 'low',
-        'routing_key': 'low',
-    },
+    # 定期任务
+    'app.tasks.scheduled_tasks.*': {'queue': 'periodic'},
+    'app.tasks.correction_tasks.cleanup_stale_tasks': {'queue': 'periodic'},
 }
 
 # 定时任务相关配置

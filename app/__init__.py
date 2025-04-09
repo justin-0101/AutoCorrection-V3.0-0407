@@ -159,6 +159,7 @@ def create_app(config_name='default'):
     try:
         from app.patch import apply_patches
         apply_patches()
+        print("所有猴子补丁应用完成")
     except Exception as e:
         logging.warning(f"应用猴子补丁时出错: {str(e)}")
     
@@ -192,205 +193,48 @@ def create_app(config_name='default'):
     # 修改数据库URI为绝对路径
     app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path.replace("\\", "/")}'
     
-    # 根据环境配置Celery
-    if app.config.get('TESTING') and app.config.get('CELERY_TASK_ALWAYS_EAGER'):
-        from app.tasks.celery_app import celery_app
-        celery_app.conf.update(
-            task_always_eager=True,
-            task_eager_propagates=True
-        )
-        app.logger.warning('Celery已配置为同步执行模式（测试环境）')
+    # 初始化扩展
+    init_extensions(app)
     
-    # 设置日志
-    setup_logging(app)
+    # 初始化服务
+    from app.core.services.init_services import ensure_services
+    if not ensure_services():
+        app.logger.error("服务初始化失败")
+        # 不要在这里抛出异常，让应用继续启动
     
-    # 1. 首先初始化所有扩展（包括数据库）
-    try:
-        from app.extensions import init_extensions
-        init_extensions(app)
-        
-        # 初始化数据库会话管理器
-        try:
-            from app.core.db.session_manager import init_session_manager, get_session_manager
-            from app.core.db import session_manager
-            if init_session_manager(app):
-                # 设置全局session_manager实例
-                import app.core.db as db_core
-                db_core.session_manager = get_session_manager()
-                app.logger.info("数据库会话管理器已初始化")
-            
-            # 初始化字段命名规范系统
-            try:
-                from app.core.db.field_naming import get_standard_fields
-                app.logger.info(f"字段命名规范系统已初始化，标准字段数: {len(get_standard_fields())}")
-            except Exception as e:
-                app.logger.error(f"初始化字段命名规范系统时出错: {str(e)}")
-                raise
-                
-            # 初始化事务管理系统
-            try:
-                from app.core.db.transaction import init_transaction
-                if init_transaction():
-                    app.logger.info("事务管理系统已初始化")
-            except Exception as e:
-                app.logger.error(f"初始化事务管理系统时出错: {str(e)}")
-                raise
-                
-            # 初始化关系管理工具
-            try:
-                from app.core.db.relationship_manager import standard_relationship, one_to_many, many_to_one, many_to_many, one_to_one
-                app.logger.info("关系管理工具已初始化")
-            except Exception as e:
-                app.logger.error(f"初始化关系管理工具时出错: {str(e)}")
-                raise
-                
-            # 初始化模型验证工具
-            try:
-                from app.core.db.model_validator import validate_model, validate_field, set_validators
-                app.logger.info("模型验证工具已初始化")
-            except Exception as e:
-                app.logger.error(f"初始化模型验证工具时出错: {str(e)}")
-                raise
-                
-        except Exception as e:
-            app.logger.error(f"初始化数据库会话管理器时出错: {str(e)}")
-            raise
-            
-        app.logger.info("所有扩展（包括数据库）已初始化")
-    except Exception as e:
-        app.logger.error(f"初始化扩展时出错: {str(e)}")
-        raise
+    # 注册蓝图
+    register_blueprints(app, main_bp, admin_bp, auth_bp, correction_bp, 
+                       membership_bp, admin_api_bp)
     
-    # 2. 确保数据库表已创建
-    try:
-        from app.extensions import db
-        with app.app_context():
-            db.create_all()
-            app.logger.info("数据库表已创建")
-    except Exception as e:
-        app.logger.error(f"创建数据库表时出错: {str(e)}")
-        raise
+    # 注册示例API蓝图
+    register_example_blueprint(app)
+    app.logger.info("示例API蓝图已注册")
+    app.logger.info("蓝图已注册")
     
-    # 3. 初始化服务层（依赖数据库）
-    if not initialize_services(app):
-        raise RuntimeError("服务初始化失败")
-    
-    # 4. 初始化权限管理器
-    try:
-        from app.core.auth.permission_manager import init_permission_manager
-        init_permission_manager(app)
-        app.logger.info("权限管理器已初始化")
-    except Exception as e:
-        app.logger.error(f"初始化权限管理器时出错: {str(e)}")
-        raise
-    
-    # 5. 初始化API核心组件
-    try:
-        from app.core.api import init_api_core
-        init_api_core(app, log_exceptions=True, include_traceback=app.config.get('DEBUG', False))
-        app.logger.info("API核心组件已初始化")
-    except Exception as e:
-        app.logger.error(f"初始化API核心组件时出错: {str(e)}")
-        raise
-    
-    # 6. 注册蓝图
-    try:
-        app.register_blueprint(main_bp)
-        app.register_blueprint(admin_bp, url_prefix='/admin')
-        
-        # 导入API蓝图
-        from app.api.v1 import auth_bp, correction_bp, membership_bp
-        from app.api.v1.admin import admin_api_bp
-        
-        # 注册API蓝图前先设置错误处理器
-        from app.core.api import register_api_blueprint
-        
-        # 为API蓝图预先注册错误处理器
-        auth_bp = register_api_blueprint(auth_bp)
-        correction_bp = register_api_blueprint(correction_bp)
-        membership_bp = register_api_blueprint(membership_bp)
-        admin_api_bp = register_api_blueprint(admin_api_bp)
-        
-        # 导入并预处理example蓝图
-        try:
-            from app.api.v1.example import example_bp, register_example_blueprint
-            register_api_blueprint(example_bp)
-        except ImportError:
-            app.logger.warning("找不到示例API蓝图，将跳过注册")
-        
-        # 然后注册API蓝图
-        app.register_blueprint(auth_bp, url_prefix='/api/v1/auth')
-        app.register_blueprint(correction_bp, url_prefix='/api/v1/correction')
-        app.register_blueprint(membership_bp, url_prefix='/api/v1/membership')
-        app.register_blueprint(admin_api_bp, url_prefix='/api/v1/admin')
-        
-        # 注册示例蓝图（如果存在）
-        try:
-            app.register_blueprint(example_bp)
-            app.logger.info("示例API蓝图已注册")
-        except NameError:
-            pass
-            
-        app.logger.info("蓝图已注册")
-    except Exception as e:
-        app.logger.error(f"注册蓝图时出错: {str(e)}")
-        raise
-    
-    # 7. 注册错误处理和命令
+    # 注册错误处理器
     register_error_handlers(app)
     app.logger.info("错误处理器已注册")
     
+    # 注册命令
     register_commands(app)
     app.logger.info("命令已注册")
     
     # 初始化SocketIO
-    try:
-        socketio.init_app(app, cors_allowed_origins="*", async_mode='threading')
-        app.logger.info("SocketIO已初始化")
-    except Exception as e:
-        app.logger.error(f"初始化SocketIO时出错: {str(e)}")
-        raise
+    socketio.init_app(app, cors_allowed_origins="*")
+    app.logger.info("SocketIO已初始化")
     
     # 初始化源类型管理器
-    try:
-        from app.core.source_type_manager import init_source_types
-        init_source_types()
-        app.logger.info("源类型管理器已初始化")
-    except Exception as e:
-        app.logger.error(f"初始化源类型管理器时出错: {str(e)}")
-        raise
+    from app.core.source_type_manager import init_source_types
+    init_source_types()
+    app.logger.info("源类型管理器已初始化")
     
-    # 初始化监控设置
-    try:
-        from app.core.monitoring import setup_monitoring
-        if setup_monitoring(app):
-            app.logger.info("监控设置已初始化")
-    except Exception as e:
-        app.logger.error(f"初始化监控设置时出错: {str(e)}")
-        raise
+    # 设置监控
+    from app.core.monitoring import setup_monitoring
+    setup_monitoring(app)
+    app.logger.info("监控设置已初始化")
     
-    # 清理数据库会话
-    @app.teardown_appcontext
-    def shutdown_session(exception=None):
-        """请求结束时关闭数据库会话"""
-        try:
-            # 使用会话管理器关闭会话
-            from app.core.db import get_session_manager
-            try:
-                manager = get_session_manager()
-                manager.remove()
-                app.logger.debug("数据库会话已关闭")
-            except RuntimeError:
-                pass  # 会话管理器可能尚未初始化
-        except Exception as e:
-            app.logger.error(f"关闭数据库会话时出错: {str(e)}")
+    app.logger.info("应用已初始化")
     
-    # 初始化命令行工具
-    from app.cli import init_cli
-    init_cli(app)
-    
-    # 返回已初始化的应用实例
-    app.logger.info('应用已初始化')
     return app
 
 def register_error_handlers(app):
