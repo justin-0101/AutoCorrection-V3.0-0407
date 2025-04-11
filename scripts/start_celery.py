@@ -25,7 +25,7 @@ def start_celery_worker(queue, node_index=0, concurrency=1):
     
     cmd = [
         'celery',
-        '-A', 'app.tasks:celery',
+        '-A', 'app.tasks.celery_app:celery_app',
         'worker',
         '--loglevel=info',
         '--concurrency', str(concurrency),
@@ -48,7 +48,7 @@ def start_celery_beat():
     
     cmd = [
         'celery',
-        '-A', 'app.tasks:celery',
+        '-A', 'app.tasks.celery_app:celery_app',
         'beat',
         '--loglevel=info'
     ]
@@ -69,14 +69,14 @@ def main():
     processes = []
     
     # 启动各队列的Worker
-    worker_corrections = start_celery_worker('corrections', 0, 1)
+    worker_corrections = start_celery_worker('correction', 0, 1)
     if worker_corrections:
         processes.append(worker_corrections)
     
     # 给各进程启动时间，避免冲突
     time.sleep(2)
     
-    worker_default = start_celery_worker('default', 0, 1)
+    worker_default = start_celery_worker('celery', 0, 1)
     if worker_default:
         processes.append(worker_default)
     

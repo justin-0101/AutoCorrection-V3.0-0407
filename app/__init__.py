@@ -234,6 +234,10 @@ def create_app(config_name='default'):
     setup_monitoring(app)
     app.logger.info("监控设置已初始化")
     
+    # 导入和注册监控API
+    from app.api.monitoring_api import monitoring_bp
+    app.register_blueprint(monitoring_bp)
+    
     app.logger.info("应用已初始化")
     
     return app

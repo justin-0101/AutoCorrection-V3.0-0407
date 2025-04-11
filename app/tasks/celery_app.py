@@ -126,8 +126,18 @@ def setup_task_context(task_id, task, *args, **kwargs):
     # 为任务创建应用上下文并存储在任务对象上
     try:
         logger.info(f"为任务 {task_id} 创建应用上下文")
-        task._app_context = flask_app.app_context()
-        task._app_context.push()
+        # 确保之前的上下文已经清理
+        if hasattr(task, '_app_context'):
+            try:
+                task._app_context.pop()
+            except Exception:
+                pass
+            delattr(task, '_app_context')
+        
+        # 创建新的上下文
+        ctx = flask_app.app_context()
+        ctx.push()
+        task._app_context = ctx
         
         # 确保数据库会话
         from app.extensions import db
@@ -136,6 +146,13 @@ def setup_task_context(task_id, task, *args, **kwargs):
         logger.info(f"任务 {task_id} 的应用上下文已推送")
     except Exception as e:
         logger.error(f"设置任务 {task_id} 的应用上下文时出错: {str(e)}")
+        # 确保任何失败的上下文都被清理
+        if hasattr(task, '_app_context'):
+            try:
+                task._app_context.pop()
+            except Exception:
+                pass
+            delattr(task, '_app_context')
 
 @task_postrun.connect
 def cleanup_task_context(task_id, task, *args, **kwargs):

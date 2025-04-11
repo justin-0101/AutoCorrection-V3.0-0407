@@ -77,6 +77,27 @@ class ServiceError(APIError):
     def __init__(self, message="服务器内部错误", status_code=None, payload=None):
         super().__init__(message, status_code, payload)
 
+class AIServiceError(ServiceError):
+    """AI服务错误基类"""
+    status_code = 500
+    
+    def __init__(self, message="AI服务处理失败", status_code=None, payload=None):
+        super().__init__(message, status_code, payload)
+
+class AIServiceRequestError(AIServiceError):
+    """AI服务请求错误"""
+    status_code = 500
+    
+    def __init__(self, message="AI服务请求失败", status_code=None, payload=None):
+        super().__init__(message, status_code, payload)
+
+class AIServiceLimitError(AIServiceError):
+    """AI服务限流错误"""
+    status_code = 429
+    
+    def __init__(self, message="AI服务请求过于频繁", status_code=None, payload=None):
+        super().__init__(message, status_code, payload)
+
 class PaymentError(ServiceError):
     """支付错误"""
     status_code = 400 # Or 500 depending on context, using 400 for client-side payment issues like invalid method

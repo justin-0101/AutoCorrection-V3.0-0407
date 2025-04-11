@@ -1,0 +1,31 @@
+stateDiagram-v2
+    [*] --> New
+    New --> Pending: submit
+    Pending --> Processing: process_start
+    Processing --> Completed: process_complete
+    Processing --> Failed: process_failed
+    Failed --> Pending: retry
+    Failed --> Recovery: fix
+    
+    state Pending {
+        [*] --> WaitingInQueue
+        WaitingInQueue --> Submitted: in_queue
+    }
+    
+    state Processing {
+        [*] --> ReadingEssay
+        ReadingEssay --> CallingAI: get_essay
+        CallingAI --> ProcessingResult: ai_response
+    }
+    
+    state Completed {
+        [*] --> ResultsViewable
+        ResultsViewable --> ReportGeneration: generate_report
+    }
+    
+    state Failed {
+        [*] --> CheckFailureReason
+        CheckFailureReason --> NetworkError: connection_error
+        CheckFailureReason --> SystemError: system_error
+        CheckFailureReason --> AIServiceError: ai_service_error
+    } 

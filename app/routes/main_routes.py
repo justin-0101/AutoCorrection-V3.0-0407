@@ -140,23 +140,40 @@ def correction():
                                 flash('作文已提交并开始批改，请稍候...', 'success')
                                 logger.info("File processed successfully: %s", file.filename)
                                 
-                                # 重定向到结果页面
-                                return redirect(url_for('main.results', essay_id=result['essay_id']))
+                                # 返回JSON响应而不是重定向
+                                return jsonify({
+                                    'success': True,
+                                    'message': '作文已提交并开始批改，请稍候...',
+                                    'essay_id': result['essay_id'],
+                                    'task_id': result.get('task_id')
+                                })
                             else:
-                                flash(result.get('message', '提交失败'), 'error')
-                                return redirect(url_for('main.correction'))
+                                # 返回错误JSON响应
+                                return jsonify({
+                                    'success': False,
+                                    'message': result.get('message', '提交失败')
+                                })
                         except Exception as e:
                             logger.error("创建作文记录时出错: %s", str(e), exc_info=True)
-                            flash('提交作文时出错，请重试', 'error')
-                            return redirect(url_for('main.correction'))
+                            # 返回错误JSON响应
+                            return jsonify({
+                                'success': False,
+                                'message': '提交作文时出错，请重试'
+                            })
                             
-            flash('请选择要上传的文件', 'error')
-            return redirect(url_for('main.correction'))
+            # 返回错误JSON响应
+            return jsonify({
+                'success': False,
+                'message': '请选择要上传的文件'
+            })
             
         except Exception as e:
             logger.error("处理作文提交时出错: %s", str(e), exc_info=True)
-            flash('处理文件时出错，请重试', 'error')
-            return redirect(url_for('main.correction'))
+            # 返回错误JSON响应
+            return jsonify({
+                'success': False,
+                'message': '处理文件时出错，请重试'
+            })
     
     # GET请求处理
     remaining_info = None
@@ -748,5 +765,35 @@ def batch_delete_essays():
         flash('删除作文时发生错误', 'danger')
     
     return redirect(url_for('main.user_history'))
+
+@main_bp.route('/api/v1/correction/essays/status/<int:essay_id>')
+@login_required
+def get_essay_status(essay_id):
+    """获取作文批改状态API"""
+    try:
+        essay = Essay.query.get_or_404(essay_id)
+        
+        # 检查用户权限
+        if essay.user_id != current_user.id and not current_user.is_admin:
+            return jsonify({
+                'success': False,
+                'message': '没有权限查看此作文'
+            })
+        
+        # 获取批改状态
+        status = essay.status
+        correction = Correction.query.filter_by(essay_id=essay_id).first()
+        
+        return jsonify({
+            'success': True,
+            'status': status,
+            'correction_id': correction.id if correction else None
+        })
+    except Exception as e:
+        logger.error(f"获取作文状态时出错: {str(e)}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'message': f'获取作文状态时出错: {str(e)}'
+        }), 500
 
 # 可以在这里添加更多主路由... 

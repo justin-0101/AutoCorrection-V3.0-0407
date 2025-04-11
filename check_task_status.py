@@ -10,6 +10,7 @@ import os
 import sys
 import argparse
 from datetime import datetime, timedelta
+import logging
 
 # 确保系统路径正确
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
@@ -18,6 +19,15 @@ from app import create_app
 from app.models.task_status import TaskStatus, TaskState
 from app.extensions import db
 from sqlalchemy import desc, func
+
+# 设置日志格式
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler()]
+)
+
+logger = logging.getLogger(__name__)
 
 def format_time(dt):
     """格式化时间"""
@@ -136,6 +146,79 @@ def print_status_statistics():
         print("-" * 30)
         print(f"总计: {total}")
 
+def check_task_status(task_id):
+    """检查指定任务ID的状态"""
+    try:
+        # 导入必要的模块
+        from app import create_app
+        from app.models.db import db
+        from app.models.essay import Essay
+        from app.models.correction import Correction
+        from celery.result import AsyncResult
+        from app.tasks.celery_app import celery_app
+        
+        app = create_app()
+        
+        with app.app_context():
+            # 检查任务在Celery中的状态
+            task_result = AsyncResult(task_id, app=celery_app)
+            
+            logger.info(f"任务ID: {task_id}")
+            logger.info(f"任务状态: {task_result.state}")
+            
+            if task_result.ready():
+                logger.info(f"任务结果: {task_result.result}")
+                logger.info(f"任务是否成功: {task_result.successful()}")
+                
+                if task_result.failed():
+                    logger.info(f"任务失败原因: {task_result.traceback}")
+            
+            # 查询对应的批改记录
+            correction = db.session.query(Correction).filter_by(task_id=task_id).first()
+            
+            if correction:
+                logger.info(f"找到关联的批改记录ID: {correction.id}")
+                logger.info(f"批改记录状态: {correction.status}")
+                logger.info(f"批改记录创建时间: {correction.created_at}")
+                logger.info(f"批改记录更新时间: {correction.updated_at}")
+                
+                # 查询对应的作文
+                essay = db.session.query(Essay).filter_by(id=correction.essay_id).first()
+                
+                if essay:
+                    logger.info(f"关联的作文ID: {essay.id}")
+                    logger.info(f"作文标题: {essay.title}")
+                    logger.info(f"作文状态: {essay.status}")
+                else:
+                    logger.warning(f"未找到关联的作文")
+            else:
+                logger.warning(f"未找到任务ID为 {task_id} 的批改记录")
+            
+            # 查询所有正在处理中的批改记录
+            correcting_corrections = db.session.query(Correction).filter_by(status="correcting").all()
+            logger.info(f"当前系统中共有 {len(correcting_corrections)} 条正在处理的批改记录")
+            
+            for c in correcting_corrections:
+                logger.info(f"  批改ID: {c.id}, 任务ID: {c.task_id}, 作文ID: {c.essay_id}")
+                
+                # 检查任务状态
+                if c.task_id:
+                    c_task = AsyncResult(c.task_id, app=celery_app)
+                    logger.info(f"  任务状态: {c_task.state}")
+                    
+                    if c_task.ready():
+                        logger.info(f"  任务已完成但批改记录未更新!")
+                        
+                        if c_task.failed():
+                            logger.info(f"  任务失败原因: {c_task.traceback}")
+                
+            return True
+    except Exception as e:
+        logger.error(f"检查任务状态时出错: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return False
+
 def main():
     """主函数"""
     parser = argparse.ArgumentParser(description="任务状态查询工具")
@@ -186,4 +269,10 @@ def main():
                     print_task_details(task)
 
 if __name__ == "__main__":
-    main() 
+    if len(sys.argv) > 1:
+        task_id = sys.argv[1]
+        logger.info(f"检查任务ID: {task_id}")
+        check_task_status(task_id)
+    else:
+        logger.error("请提供任务ID")
+        sys.exit(1) 

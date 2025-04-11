@@ -257,12 +257,14 @@
                                         <span><i class="bi bi-clock me-1"></i>{{ essay.created_at_formatted }}</span>
                                         {% if essay.status == 'completed' %}
                                             <span class="status-badge bg-success">批改完成</span>
-                                        {% elif essay.status == 'processing' %}
+                                        {% elif essay.status == 'correcting' %}
                                             <span class="status-badge bg-info">批改中</span>
                                         {% elif essay.status == 'pending' %}
                                             <span class="status-badge bg-warning">等待批改</span>
                                         {% elif essay.status == 'failed' %}
                                             <span class="status-badge bg-danger">批改失败</span>
+                                        {% else %}
+                                            <span class="status-badge bg-secondary">{{ essay.status }}</span>
                                         {% endif %}
                                     </div>
                                 </div>

@@ -1,0 +1,45 @@
+flowchart TD
+    A[Error point] --> B{Error type evaluation}
+    
+    B -->|Network connection error| C[ConnectionError]
+    B -->|Timeout error| D[TimeoutError]
+    B -->|App context error| E[App Context Error]
+    B -->|Service registration error| F[Service Error]
+    
+    C --> G[Task retry self.retry()]
+    D --> G
+    E --> H[Recreate context push_context()]
+    F --> I[Service auto-registration auto_register()]
+    
+    G --> J{Retry count check}
+    
+    J -->|Not exceeding max retries| K[Reenter task queue]
+    J -->|Exceeding max retries| L[Mark task as failed]
+    
+    L --> M[Start recovery mechanism]
+    H --> M
+    I --> M
+    
+    M --> N[Fix stuck essays]
+    N --> O[Restart Celery processes]
+    O --> P[Resubmit pending essays]
+    
+    subgraph Common Error Types
+    C
+    D
+    E
+    F
+    end
+    
+    subgraph Error Recovery Strategies
+    G
+    H
+    I
+    end
+    
+    subgraph System-level Recovery
+    M
+    N
+    O
+    P
+    end 

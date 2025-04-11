@@ -29,6 +29,7 @@ class EssayStatus(str, enum.Enum):
     """作文状态枚举"""
     DRAFT = 'draft'           # 草稿
     PENDING = 'pending'       # 等待批改
+    PROCESSING = 'processing' # 正在提交处理中（临时状态）
     CORRECTING = 'correcting' # 正在批改
     COMPLETED = 'completed'   # 批改完成
     FAILED = 'failed'          # 批改失败
@@ -40,6 +41,7 @@ class EssayStatus(str, enum.Enum):
         status_text = {
             cls.DRAFT.value: '草稿',
             cls.PENDING.value: '等待批改',
+            cls.PROCESSING.value: '正在提交处理中',
             cls.CORRECTING.value: '正在批改中',
             cls.COMPLETED.value: '批改完成',
             cls.FAILED.value: '批改失败',
@@ -77,7 +79,7 @@ class Essay(BaseModel):
             name='valid_source_type'
         ),
         db.CheckConstraint(
-            "status IN ('draft', 'pending', 'correcting', 'completed', 'failed', 'archived')",
+            "status IN ('draft', 'pending', 'processing', 'correcting', 'completed', 'failed', 'archived')",
             name='valid_status'
         ),
     )
@@ -175,10 +177,11 @@ class Essay(BaseModel):
         # 验证状态转换的合法性
         valid_transitions = {
             EssayStatus.DRAFT.value: [EssayStatus.PENDING.value],
-            EssayStatus.PENDING.value: [EssayStatus.CORRECTING.value, EssayStatus.FAILED.value],
+            EssayStatus.PENDING.value: [EssayStatus.PROCESSING.value, EssayStatus.CORRECTING.value, EssayStatus.FAILED.value],
+            EssayStatus.PROCESSING.value: [EssayStatus.CORRECTING.value, EssayStatus.FAILED.value, EssayStatus.PENDING.value],
             EssayStatus.CORRECTING.value: [EssayStatus.COMPLETED.value, EssayStatus.FAILED.value],
             EssayStatus.COMPLETED.value: [EssayStatus.ARCHIVED.value],
-            EssayStatus.FAILED.value: [EssayStatus.PENDING.value],  # 允许重试
+            EssayStatus.FAILED.value: [EssayStatus.PENDING.value, EssayStatus.PROCESSING.value],  # 允许重试
             EssayStatus.ARCHIVED.value: []  # 归档状态是终态
         }
         
@@ -228,10 +231,11 @@ class Essay(BaseModel):
             
         valid_transitions = {
             EssayStatus.DRAFT.value: [EssayStatus.PENDING.value],
-            EssayStatus.PENDING.value: [EssayStatus.CORRECTING.value, EssayStatus.FAILED.value],
+            EssayStatus.PENDING.value: [EssayStatus.PROCESSING.value, EssayStatus.CORRECTING.value, EssayStatus.FAILED.value],
+            EssayStatus.PROCESSING.value: [EssayStatus.CORRECTING.value, EssayStatus.FAILED.value, EssayStatus.PENDING.value],
             EssayStatus.CORRECTING.value: [EssayStatus.COMPLETED.value, EssayStatus.FAILED.value],
             EssayStatus.COMPLETED.value: [EssayStatus.ARCHIVED.value],
-            EssayStatus.FAILED.value: [EssayStatus.PENDING.value],
+            EssayStatus.FAILED.value: [EssayStatus.PENDING.value, EssayStatus.PROCESSING.value],
             EssayStatus.ARCHIVED.value: []
         }
         

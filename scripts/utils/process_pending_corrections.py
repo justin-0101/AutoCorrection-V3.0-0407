@@ -2,175 +2,192 @@
 # -*- coding: utf-8 -*-
 
 """
-处理待处理的批改任务
-该脚本作为后台服务运行，持续监控并处理所有待批改的作文
+处理待批改作文的实用工具
+用于自动检测和处理处于等待状态的作文
 """
 
 import os
 import sys
+import logging
+import uuid
 from datetime import datetime
 import time
-import uuid
-import logging
-from logging.handlers import RotatingFileHandler
 
-# 确保工作目录正确并添加项目根目录到Python路径
-script_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(os.path.dirname(script_dir))
-os.chdir(project_root)
-sys.path.insert(0, project_root)
+# 确保系统路径正确
+ROOT_DIR = os.path.abspath(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+sys.path.insert(0, ROOT_DIR)
 
-# 导入应用
-from app import create_app
-from app.models.correction import Correction, CorrectionStatus
+# 导入必要的模块
+from flask import Flask
 from app.models.essay import Essay, EssayStatus
+from app.models.correction import Correction, CorrectionStatus
 from app.tasks.correction_tasks import process_essay_correction
-from app.tasks.celery_app import celery_app
-from app.core.services.redis_service import RedisService
-from app.core.ai import AIClientFactory
-from app.core.services.container import container
+from app.config import load_config
+from app.extensions import db  # 从extensions导入db
+from sqlalchemy.exc import SQLAlchemyError
 
-def init_services():
-    """初始化所需的服务"""
-    # 初始化Redis服务
-    redis_service = RedisService()
-    container.register('redis_service', redis_service)
-    
-    # 初始化AI客户端工厂
-    ai_client_factory = AIClientFactory()
-    container.register('ai_client_factory', ai_client_factory)
-    
-    return redis_service, ai_client_factory
+# 设置日志格式
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler()]
+)
 
-# 配置日志
-def setup_logger():
-    logger = logging.getLogger('correction_service')
-    logger.setLevel(logging.INFO)
-    
-    # 创建日志目录
-    log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'logs')
-    os.makedirs(log_dir, exist_ok=True)
-    
-    # 文件处理器
-    file_handler = RotatingFileHandler(
-        os.path.join(log_dir, 'correction_service.log'),
-        maxBytes=10*1024*1024,  # 10MB
-        backupCount=5,
-        encoding='utf-8'  # 添加UTF-8编码设置
-    )
-    file_handler.setLevel(logging.INFO)
-    
-    # 控制台处理器
-    console_handler = logging.StreamHandler(sys.stdout)  # 指定输出到标准输出
-    console_handler.setLevel(logging.INFO)
-    
-    # 格式化器
-    formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    file_handler.setFormatter(formatter)
-    console_handler.setFormatter(formatter)
-    
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-    
-    return logger
+logger = logging.getLogger(__name__)
 
-def process_pending_corrections(logger):
-    """处理所有待处理的批改任务"""
-    with app.app_context():
-        try:
-            # 查找所有待处理的批改任务
-            pending_corrections = Correction.query.filter_by(
-                status=CorrectionStatus.PENDING.value
-            ).all()
-            
-            if not pending_corrections:
-                logger.debug("当前没有待处理的批改任务")
-                return 0
-            
-            processed_count = 0
-            for correction in pending_corrections:
-                try:
-                    essay_id = correction.essay_id
-                    essay = Essay.query.get(essay_id)
-                    
-                    if not essay:
-                        logger.error(f"未找到作文 ID={essay_id}，跳过")
-                        continue
-                    
-                    logger.info(f"处理作文 ID={essay_id}, 标题: {essay.title}")
-                    
-                    # 更新状态为correcting
-                    correction.status = CorrectionStatus.CORRECTING.value
-                    essay.status = EssayStatus.CORRECTING.value
-                    
-                    # 生成任务ID
-                    task_id = str(uuid.uuid4())
-                    correction.task_id = task_id
-                    
-                    # 提交到数据库
-                    from app.models.db import db
-                    db.session.commit()
-                    
-                    # 发送到Celery任务队列
-                    task_result = process_essay_correction.delay(essay_id)
-                    logger.info(f"任务已提交，任务ID: {task_result.id}")
-                    
-                    # 保存实际的Celery任务ID
-                    correction.task_id = task_result.id
-                    db.session.commit()
-                    
-                    processed_count += 1
-                    logger.info(f"成功: 作文 ID={essay_id} 已提交到任务队列")
-                    
-                except Exception as e:
-                    logger.error(f"处理作文ID={essay_id}时出错: {str(e)}")
-                    
-                    # 更新状态为失败
-                    correction.status = CorrectionStatus.FAILED.value
-                    correction.error_message = f"提交任务失败: {str(e)}"
-                    essay.status = EssayStatus.FAILED.value
-                    db.session.commit()
-            
-            return processed_count
-            
-        except Exception as e:
-            logger.error(f"处理批改任务时发生错误: {str(e)}")
-            return 0
+def create_minimal_app():
+    """创建一个最小的Flask应用用于数据库操作"""
+    # 创建最小Flask应用
+    app = Flask(__name__)
+    
+    # 加载配置
+    app.config.from_object(load_config('default'))
+    
+    # 确保数据库目录存在
+    db_dir = os.path.join(ROOT_DIR, 'instance')
+    if not os.path.exists(db_dir):
+        os.makedirs(db_dir)
+    
+    # 确保数据库文件存在
+    db_path = os.path.join(db_dir, 'essay_correction.db')
+    if not os.path.exists(db_path):
+        open(db_path, 'a').close()
+    
+    # 设置数据库URI
+    app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path.replace("\\", "/")}'
+    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    
+    # 设置为测试模式，这样SafeSQLAlchemy会重新初始化
+    app.config['TESTING'] = True
+    
+    # 初始化db
+    db.init_app(app)
+    
+    return app
 
-def main():
-    """主函数，持续运行并处理待批改作文"""
-    logger = setup_logger()
-    logger.info("批改服务启动")
+def process_pending_corrections(limit=10):
+    """
+    处理待批改的作文
     
-    # 初始化应用
-    global app
-    app = create_app()
-    
-    # 初始化服务
-    logger.info("正在初始化服务...")
-    redis_service, ai_client_factory = init_services()
-    logger.info("服务初始化完成")
-    
-    check_interval = 10  # 检查间隔（秒）
+    Args:
+        limit: 一次处理的最大数量
+        
+    Returns:
+        bool: 处理是否成功
+    """
+    # 创建最小应用
+    app = create_minimal_app()
     
     try:
-        while True:
-            try:
-                processed_count = process_pending_corrections(logger)
-                if processed_count > 0:
-                    logger.info(f"本次处理了 {processed_count} 个待批改作文")
-                time.sleep(check_interval)
-            except KeyboardInterrupt:
-                logger.info("收到停止信号，服务正在停止...")
-                break
-            except Exception as e:
-                logger.error(f"服务运行出错: {str(e)}")
-                time.sleep(check_interval)
-    
-    finally:
-        logger.info("批改服务已停止")
+        with app.app_context():
+            # 查询处于待批改状态的作文
+            pending_essays = Essay.query.filter_by(status=EssayStatus.PENDING).limit(limit).all()
+            
+            if not pending_essays:
+                logger.info("没有待处理的作文")
+                return True
+                
+            logger.info(f"找到 {len(pending_essays)} 篇待处理的作文")
+            
+            processed_count = 0
+            for essay in pending_essays:
+                logger.info(f"准备处理作文 [essay_id={essay.id}, 标题='{essay.title}']")
+                
+                try:
+                    # 使用事务保证操作的原子性
+                    with db.session.begin_nested():
+                        # 查找或创建对应的批改记录
+                        correction = Correction.query.filter_by(essay_id=essay.id).first()
+                        
+                        if not correction:
+                            logger.info(f"未找到作文 {essay.id} 的批改记录，创建新记录")
+                            # 创建新的批改记录
+                            correction = Correction(
+                                essay_id=essay.id,
+                                status=CorrectionStatus.PENDING,
+                                created_at=datetime.now()
+                            )
+                            db.session.add(correction)
+                            db.session.flush()  # 确保批改记录有ID
+                        elif correction.status != CorrectionStatus.PENDING:
+                            logger.warning(f"作文 {essay.id} 的批改记录状态为 {correction.status}，"
+                                        f"而作文状态为 {essay.status}，跳过处理")
+                            continue
+                            
+                        # 清理之前关联的任务ID
+                        if correction.task_id:
+                            logger.warning(f"批改记录 {correction.id} 已有任务ID: {correction.task_id}，将清除")
+                            correction.task_id = None
+                        
+                        # 1. 先标记为处理中但使用临时状态
+                        essay.status = EssayStatus.PROCESSING  # 临时状态
+                        correction.status = CorrectionStatus.PROCESSING
+                        db.session.flush()  # 仅在事务内提交
+                        
+                        # 生成唯一的任务ID
+                        task_id = str(uuid.uuid4())
+                        
+                        # 2. 提交任务
+                        logger.info(f"提交作文批改任务 [essay_id={essay.id}, task_id={task_id}]")
+                        task = process_essay_correction.apply_async(
+                            args=[essay.id],
+                            task_id=task_id
+                        )
+                        
+                        # 3. 任务提交成功后更新状态和任务ID
+                        if task and task.id:
+                            logger.info(f"任务提交成功 [essay_id={essay.id}, task_id={task.id}]")
+                            
+                            # 更新批改记录状态和任务ID
+                            correction.task_id = task.id
+                            correction.status = CorrectionStatus.CORRECTING
+                            
+                            # 更新作文状态
+                            essay.status = EssayStatus.CORRECTING
+                            
+                            processed_count += 1
+                            logger.info(f"成功更新作文状态为批改中 [essay_id={essay.id}, task_id={task.id}]")
+                        else:
+                            # 任务提交失败，回滚到PENDING状态
+                            raise Exception(f"任务提交失败 [essay_id={essay.id}]")
+                    
+                    # 提交整个事务
+                    db.session.commit()
+                    
+                except Exception as e:
+                    db.session.rollback()
+                    logger.error(f"处理作文 {essay.id} 时出错: {str(e)}")
+                    
+                    # 确保状态回滚到PENDING
+                    try:
+                        with db.session.begin():
+                            essay_refresh = Essay.query.get(essay.id)
+                            correction_refresh = Correction.query.filter_by(essay_id=essay.id).first()
+                            if essay_refresh:
+                                essay_refresh.status = EssayStatus.PENDING
+                            if correction_refresh:
+                                correction_refresh.status = CorrectionStatus.PENDING
+                                correction_refresh.task_id = None
+                    except Exception as rollback_error:
+                        logger.critical(f"回滚状态失败: {str(rollback_error)}")
+                        
+            logger.info(f"成功处理 {processed_count}/{len(pending_essays)} 篇作文")
+            return True
+    except Exception as e:
+        logger.exception(f"处理待批改作文时出错: {str(e)}")
+        return False
 
 if __name__ == "__main__":
-    main() 
+    while True:
+        logger.info("开始处理待批改作文")
+        try:
+            success = process_pending_corrections()
+            if success:
+                logger.info("处理待批改作文完成，等待新的作文...")
+            else:
+                logger.error("处理待批改作文失败")
+        except Exception as e:
+            logger.exception(f"处理循环异常: {str(e)}")
+        
+        # 等待一段时间后继续检查
+        time.sleep(30)  # 30秒后再次检查 

@@ -1,0 +1,41 @@
+flowchart TD
+    User([User]) -->|Submit essay| WebUI[Web interface]
+    WebUI -->|Submit form| ValidationProc[Validation processing]
+    
+    ValidationProc -->|Validation passed| DBStore[(Database)]
+    ValidationProc -->|Validation failed| WebUI
+    
+    DBStore -->|Read essay| TaskQueue[Celery task queue]
+    TaskQueue -->|Task data| RedisStore[(Redis)]
+    
+    Worker[Celery Worker] -->|Get task| RedisStore
+    Worker -->|Process task| AIService[AI service]
+    AIService -->|Return results| Worker
+    
+    Worker -->|Update results| DBStore
+    
+    User -->|Query results| WebUI
+    WebUI -->|Get results| DBStore
+    WebUI -->|Display results| User
+    
+    Admin([Administrator]) -->|System monitoring| AdminUI[Admin interface]
+    AdminUI -->|Read status| DBStore
+    AdminUI -->|Read queue| RedisStore
+    AdminUI -->|Display statistics| Admin
+    
+    subgraph Data Storage
+    DBStore
+    RedisStore
+    end
+    
+    subgraph Processing Nodes
+    ValidationProc
+    TaskQueue
+    Worker
+    AIService
+    end
+    
+    subgraph Interface
+    WebUI
+    AdminUI
+    end 

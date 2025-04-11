@@ -77,7 +77,7 @@ result_expires = 60 * 60 * 24  # 1 day
 # 配置任务队列
 task_queues = {
     'default': {'exchange': 'default', 'routing_key': 'default'},
-    'corrections': {'exchange': 'corrections', 'routing_key': 'correction.tasks'},
+    'correction': {'exchange': 'correction', 'routing_key': 'correction.tasks'},
     'users': {'exchange': 'users', 'routing_key': 'user.tasks'}
 }
 
@@ -88,7 +88,7 @@ task_default_routing_key = 'default'
 
 # 任务路由
 task_routes = {
-    'tasks.correction_tasks.*': {'queue': 'corrections'},
+    'tasks.correction_tasks.*': {'queue': 'correction'},
     'tasks.user_tasks.*': {'queue': 'users'},
 }
 
@@ -619,7 +619,7 @@ def main():
         processes.append(start_worker('default', args.concurrency, args.loglevel))
     
     if args.all or args.corrections:
-        processes.append(start_worker('corrections', args.concurrency, args.loglevel))
+        processes.append(start_worker('correction', args.concurrency, args.loglevel))
     
     if args.all or args.users:
         processes.append(start_worker('users', args.concurrency, args.loglevel))

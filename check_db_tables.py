@@ -8,6 +8,14 @@ def check_tables(db_path):
     """检查数据库中的表"""
     if not os.path.exists(db_path):
         print(f"数据库文件不存在: {db_path}")
+        # 获取项目根目录的绝对路径
+        BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+        print(f"项目根目录: {BASE_DIR}")
+
+        # 数据库文件的绝对路径
+        DB_PATH = os.path.join(BASE_DIR, 'instance', 'essay_correction.db')
+        print(f"数据库路径: {DB_PATH}")
+        print(f"数据库文件存在: {os.path.exists(DB_PATH)}")
         return
         
     try:

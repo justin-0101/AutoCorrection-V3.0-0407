@@ -1,0 +1,46 @@
+flowchart TD
+    A[User submits essay] --> B[EssayValidator validates data]
+    B --> C[Format standardization processing]
+    C --> D[EssayService.create_essay creates record]
+    D --> E[Set status to PENDING]
+    E --> F[process_essay_correction.delay submits task]
+    F --> G[Return submission success response]
+    
+    G --> H[Celery worker receives task]
+    H --> I[worker_process_init initialization]
+    I --> J[setup_task_context sets context]
+    J --> K[Get essay information]
+    K --> L[Update status to CORRECTING]
+    L --> M[Create or update correction record]
+    M --> N[Get AI client]
+    N --> O[Call AI service for correction]
+    O --> P{Correction successful?}
+    
+    P -->|Success| Q[Parse correction results]
+    P -->|Failure| R[Record error information]
+    Q --> S[Update correction record]
+    S --> T[Update essay status to COMPLETED]
+    R --> U[Update essay status to FAILED]
+    T --> V[cleanup_task_context cleans context]
+    U --> V
+    
+    V --> W[User queries correction results]
+    W --> X[Get essay and correction records]
+    X --> Y[Check permissions]
+    Y --> Z[Assemble correction results]
+    Z --> AA[Display correction results]
+    AA --> AB[Generate PDF report]
+    
+    subgraph Batch Processing Flow
+    BA[Scheduled task] --> BB[process_pending_corrections]
+    BB --> BC[Find essays with PENDING status]
+    BC --> BD[Submit batch to queue]
+    end
+    
+    subgraph Error Recovery Flow
+    CA[fix_workflow.py] --> CB[Check service status]
+    CB --> CC[Fix service registration]
+    CC --> CD[Fix stuck essays]
+    CD --> CE[Restart Celery processes]
+    CE --> CF[Resubmit pending essays]
+    end 

@@ -25,9 +25,39 @@ def track_task_started(task_id, task, *args, **kwargs):
         # 获取相关信息
         task_name = task.name
         
-        # 将参数转换为字符串
-        args_str = json.dumps(args) if args else None
-        kwargs_str = json.dumps(kwargs) if kwargs else None
+        # 将参数转换为字符串，过滤掉不可序列化的对象
+        def safe_serializable(obj):
+            """返回可以安全序列化为JSON的对象"""
+            try:
+                # 特殊类型处理
+                if hasattr(obj, '__dict__'):
+                    return str(obj)
+                
+                if isinstance(obj, (str, int, float, bool)) or obj is None:
+                    return obj
+                elif isinstance(obj, (list, tuple)):
+                    return [safe_serializable(i) for i in obj]
+                elif isinstance(obj, dict):
+                    return {k: safe_serializable(v) for k, v in obj.items() 
+                            if isinstance(k, str)}  # 只处理键是字符串的项
+                return str(obj)  # 将其他类型转换为字符串表示
+            except Exception:
+                return str(obj)  # 任何异常都返回字符串表示
+        
+        # 安全地序列化参数，过滤掉信号参数
+        filtered_kwargs = {k: v for k, v in kwargs.items() 
+                         if not k.startswith('signal') and k != 'sender'}
+        
+        safe_args = [safe_serializable(arg) for arg in args] if args else []
+        safe_kwargs = {k: safe_serializable(v) for k, v in filtered_kwargs.items()} if filtered_kwargs else {}
+        
+        try:
+            args_str = json.dumps(safe_args) if safe_args else None
+            kwargs_str = json.dumps(safe_kwargs) if safe_kwargs else None
+        except TypeError as e:
+            logger.warning(f"参数序列化失败，使用简化表示: {str(e)}")
+            args_str = str(args) if args else None
+            kwargs_str = str(filtered_kwargs) if filtered_kwargs else None
         
         with db.session() as session:
             # 检查是否已存在记录
@@ -63,15 +93,38 @@ def track_task_success(sender, **kwargs):
     """
     任务成功完成时更新任务状态
     """
-    if not sender or not sender.request:
+    if not sender or not hasattr(sender, 'request') or not sender.request:
+        logger.warning("[信号处理] 任务成功处理缺少sender或request")
         return
     
     task_id = sender.request.id
     logger.debug(f"[信号处理] 任务成功: {task_id}")
     
     try:
-        result = sender.request.result
-        result_dict = result if isinstance(result, dict) else {'result': result}
+        # 从kwargs中获取结果
+        result = kwargs.get('result', None)
+        
+        # 确保结果可序列化
+        result_dict = {}
+        if result is not None:
+            if isinstance(result, dict):
+                # 如果是字典，确保所有值都可序列化
+                try:
+                    result_dict = {k: v for k, v in result.items() if k != 'sender'}
+                    # 测试序列化
+                    json.dumps(result_dict)
+                except (TypeError, ValueError):
+                    # 如果序列化失败，则使用字符串表示
+                    result_dict = {'result': str(result)}
+            else:
+                # 非字典类型，尝试序列化
+                try:
+                    # 测试是否可序列化
+                    json.dumps({'result': result})
+                    result_dict = {'result': result}
+                except (TypeError, ValueError):
+                    # 不可序列化，转为字符串
+                    result_dict = {'result': str(result)}
         
         with db.session() as session:
             task_status = session.query(TaskStatus).filter_by(task_id=task_id).first()

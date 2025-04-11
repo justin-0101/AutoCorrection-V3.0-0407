@@ -29,7 +29,7 @@ result_expires = 60 * 60 * 24  # 1 day
 # 配置任务队列
 task_queues = {
     'default': {'exchange': 'default', 'routing_key': 'default'},
-    'corrections': {'exchange': 'corrections', 'routing_key': 'correction.tasks'},
+    'correction': {'exchange': 'correction', 'routing_key': 'correction.tasks'},
     'users': {'exchange': 'users', 'routing_key': 'user.tasks'}
 }
 
@@ -40,18 +40,21 @@ task_default_routing_key = 'default'
 
 # 任务路由
 task_routes = {
-    'tasks.correction_tasks.*': {'queue': 'corrections'},
-    'tasks.user_tasks.*': {'queue': 'users'},
+    'app.tasks.correction_tasks.*': {'queue': 'correction'},
+    'app.tasks.user_tasks.*': {'queue': 'users'},
 }
 
 # 定时任务
 beat_schedule = {
     'reset-monthly-essay-count': {
-        'task': 'tasks.user_tasks.reset_monthly_essay_count',
+        'task': 'app.tasks.user_tasks.reset_monthly_essay_count',
         'schedule': timedelta(days=1),  # 每天检查一次
         'options': {'queue': 'users'}
     }
 }
+
+# 工作进程配置
+worker_pool_restarts = True  # 允许工作进程重启
 
 # 将所有配置导出为一个字典
 CELERY_CONFIG = {
@@ -74,4 +77,5 @@ CELERY_CONFIG = {
     'task_default_routing_key': task_default_routing_key,
     'task_routes': task_routes,
     'beat_schedule': beat_schedule,
+    'worker_pool_restarts': worker_pool_restarts,
 } 

@@ -250,8 +250,8 @@ class DevelopmentConfig(Config):
         'task_default_exchange': 'default',
         'task_default_routing_key': 'default',
         'task_routes': {
-            'tasks.correction_tasks.*': {'queue': 'corrections'},
-            'tasks.user_tasks.*': {'queue': 'users'},
+            'app.tasks.correction_tasks.*': {'queue': 'correction'},
+            'app.tasks.user_tasks.*': {'queue': 'users'},
         }
     }
     

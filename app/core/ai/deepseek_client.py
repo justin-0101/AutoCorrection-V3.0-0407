@@ -365,4 +365,75 @@ D级（0-26分）：内容立意不明确，材料难以表现中心；语言不
             }
         except Exception as e:
             logger.error(f"提取Deepseek响应数据时发生错误: {str(e)}")
-            raise Exception(f"提取响应数据失败: {str(e)}") 
+            raise Exception(f"提取响应数据失败: {str(e)}")
+
+    def correct_essay(self, content: str) -> Dict[str, Any]:
+        """
+        批改作文并返回标准化结果
+        
+        Args:
+            content: 作文内容
+            
+        Returns:
+            Dict: 批改结果，标准格式为：
+            {
+                "status": "success" | "error",
+                "result": {
+                    "总得分": 分数,
+                    "分项得分": {
+                        "内容主旨": 分数,
+                        "语言文采": 分数,
+                        "文章结构": 分数,
+                        "文面书写": 分数
+                    },
+                    "总体评价": 评价文字,
+                    "内容分析": 内容分析,
+                    "语言分析": 语言分析,
+                    "结构分析": 结构分析,
+                    "写作建议": 改进建议,
+                    "错别字": [错误列表]
+                } | {"message": 错误信息}
+            }
+        """
+        try:
+            logger.info(f"开始批改作文，内容长度: {len(content)}")
+            
+            # 使用analyze_essay获取分析结果
+            analysis_result = self.analyze_essay(content)
+            
+            if analysis_result.get("status") == "success":
+                # 获取原始结果
+                raw_result = analysis_result.get("result", {})
+                
+                # 直接使用返回的结果，确保键名与期望匹配
+                corrected_result = {
+                    "总得分": raw_result.get("总得分", 0),
+                    "分项得分": raw_result.get("分项得分", {
+                        "内容主旨": 0,
+                        "语言文采": 0,
+                        "文章结构": 0,
+                        "文面书写": 0
+                    }),
+                    "总体评价": raw_result.get("总体评价", ""),
+                    "内容分析": raw_result.get("内容分析", ""),
+                    "语言分析": raw_result.get("语言分析", ""),
+                    "结构分析": raw_result.get("结构分析", ""),
+                    "写作建议": raw_result.get("写作建议", ""),
+                    "错别字": raw_result.get("错别字", [])
+                }
+                
+                return {
+                    "status": "success",
+                    "result": corrected_result
+                }
+            else:
+                # 保留错误信息
+                return analysis_result
+                
+        except Exception as e:
+            logger.error(f"批改作文失败: {str(e)}")
+            logger.error(f"错误详情: {traceback.format_exc()}")
+            return {
+                "status": "error",
+                "message": f"批改作文失败: {str(e)}"
+            } 

@@ -280,6 +280,11 @@
                             </a>
                         </li>
                         <li class="nav-item">
+                            <a class="nav-link {{ 'active' if active_page == 'monitoring' }}" href="{{ url_for('admin.monitoring') }}">
+                                <i class="bi bi-graph-up"></i> 系统监控
+                            </a>
+                        </li>
+                        <li class="nav-item">
                             <a class="nav-link {{ 'active' if active_page == 'membership' }}" href="{{ url_for('admin.membership') }}">
                                 <i class="bi bi-cart"></i> 会员管理
                             </a>

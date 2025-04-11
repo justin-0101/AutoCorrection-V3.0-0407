@@ -36,5 +36,34 @@ def check_status():
         else:
             print('未找到作文')
 
+def check_status(essay_id=1):
+    app = create_app()
+    
+    with app.app_context():
+        # 检查作文状态
+        essay = Essay.query.get(essay_id)
+        if essay:
+            print(f'作文状态: {essay.status}')
+            print(f'作文标题: {essay.title}')
+            print(f'批改结果: {essay.corrected_content if essay.corrected_content else "尚未批改"}')
+            
+            # 检查批改任务状态
+            correction = Correction.query.filter_by(essay_id=essay.id).first()
+            if correction:
+                print(f'批改任务状态: {correction.status}')
+                print(f'任务ID: {correction.task_id}')
+                if correction.error_message:
+                    print(f'错误信息: {correction.error_message}')
+            else:
+                print('未找到相关批改任务')
+        else:
+            print(f'未找到ID为{essay_id}的作文')
+
 if __name__ == '__main__':
-    check_status() 
+    essay_id = 1
+    if len(sys.argv) > 1:
+        try:
+            essay_id = int(sys.argv[1])
+        except:
+            print(f"无效的作文ID: {sys.argv[1]}, 使用默认ID: 1")
+    check_status(essay_id) 

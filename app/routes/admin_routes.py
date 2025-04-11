@@ -8,8 +8,9 @@
 import logging
 from flask import Blueprint, render_template, redirect, url_for, request, g, abort, flash, current_app, jsonify
 from app.core.auth.auth_decorators import login_required, admin_required
-from app.models.user import User, UserProfile
+from app.models.user import User, UserProfile, MembershipLevel
 from app.models.essay import Essay
+from app.models.membership import MembershipPlan, Membership
 from datetime import datetime, timedelta
 from sqlalchemy import or_
 from flask_login import current_user
@@ -17,9 +18,9 @@ from sqlalchemy.sql import func
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.exc import SQLAlchemyError
 from flask_wtf import FlaskForm
-from wtforms import IntegerField, HiddenField
-from wtforms.validators import DataRequired, NumberRange
-from app import db, logger
+from wtforms import IntegerField, HiddenField, StringField, SelectField, PasswordField
+from wtforms.validators import DataRequired, NumberRange, Email, Length, EqualTo
+from app import db
 
 # 创建日志记录器
 logger = logging.getLogger(__name__)
@@ -29,6 +30,51 @@ admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 
 # 创建SQLAlchemy对象
 db = SQLAlchemy()
+
+# 定义修改批改次数表单
+class UpdateUserCorrectionsForm(FlaskForm):
+    """用户批改次数更新表单"""
+    user_id = HiddenField('用户ID', 
+        validators=[DataRequired(message='用户ID不能为空')])
+    monthly_limit = IntegerField('每月限制', 
+        validators=[
+            DataRequired(message='请输入每月批改限制次数'),
+            NumberRange(min=0, message='批改次数不能小于0')
+        ])
+    monthly_used = IntegerField('已使用次数', 
+        validators=[
+            DataRequired(message='请输入已使用次数'),
+            NumberRange(min=0, message='已使用次数不能小于0')
+        ])
+
+# 定义添加用户表单
+class AddUserForm(FlaskForm):
+    """添加用户表单"""
+    username = StringField('用户名', validators=[
+        DataRequired(message='请输入用户名'),
+        Length(min=3, max=50, message='用户名长度必须在3-50个字符之间')
+    ])
+    email = StringField('邮箱', validators=[
+        DataRequired(message='请输入邮箱'),
+        Email(message='请输入有效的邮箱地址')
+    ])
+    password = PasswordField('密码', validators=[
+        DataRequired(message='请输入密码'),
+        Length(min=6, message='密码长度不能少于6个字符')
+    ])
+    confirm_password = PasswordField('确认密码', validators=[
+        DataRequired(message='请确认密码'),
+        EqualTo('password', message='两次输入的密码不一致')
+    ])
+    user_type = SelectField('用户类型', choices=[
+        ('free', '免费用户'),
+        ('basic', '普通会员'),
+        ('premium', '高级会员')
+    ], validators=[DataRequired(message='请选择用户类型')])
+    role = SelectField('角色', choices=[
+        ('user', '普通用户'),
+        ('admin', '管理员')
+    ], validators=[DataRequired(message='请选择用户角色')])
 
 
 @admin_bp.before_request
@@ -109,7 +155,6 @@ def index():
         
         # 更新高级会员数量
         try:
-            from app.models.user import MembershipLevel
             premium_users = User.query.filter(User.membership_level == MembershipLevel.PREMIUM.value).count()
             stats['premium_users'] = premium_users
         except Exception as e:
@@ -160,120 +205,159 @@ def index():
     )
 
 
+
 @admin_bp.route('/users', methods=['GET', 'POST'])
 @login_required
 @admin_required
 def users():
     """用户管理页面"""
     
+    # 初始化表单
+    form = UpdateUserCorrectionsForm()
+    add_user_form = AddUserForm()
+    
     # 处理POST请求 - 更新用户批改次数
     if request.method == 'POST':
         logger.info("开始处理更新用户批改次数请求")
 
         # 验证表单
-        form = UpdateUserCorrectionsForm()
-        if not form.validate():
-            logger.warning("表单验证失败")
-            for field, errors in form.errors.items():
-                flash(f"{getattr(form[field].label, 'text', field)}: {', '.join(errors)}", 'danger')
-            return redirect(url_for('admin.users'))
+        if form.validate():
+            user_id = form.user_id.data
+            user = db.session.get(User, user_id)
+            if not user:
+                logger.warning(f"用户不存在: {user_id}")
+                if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                    return jsonify({"status": "error", "message": "用户不存在"})
+                flash("用户不存在", "danger")
+                return redirect(url_for('admin.users'))
 
-        user_id = form.user_id.data
-        user = db.session.get(User, user_id)
-        if not user:
-            logger.warning(f"用户不存在: {user_id}")
-            flash("用户不存在", "danger")
-            return redirect(url_for('admin.users'))
-
-        try:
-            monthly_limit = form.monthly_limit.data
-            monthly_used = form.monthly_used.data
-            
-            logger.info(f"接收到的参数: user_id={user_id}, monthly_limit={monthly_limit}, monthly_used={monthly_used}")
-            
-            # 使用事务保护数据一致性
             try:
-                with db.session.begin():
-                    if not user.profile:
-                        logger.info(f"为用户 {user.username} 创建新的用户档案")
-                        profile = UserProfile(user_id=user.id)
-                        db.session.add(profile)
-                        user.profile = profile
-                    
-                    # 更新用户档案
-                    user.profile.monthly_limit = monthly_limit
-                    user.profile.monthly_used = monthly_used
-                    user.profile.reset_date = datetime.now()
-                    
-                    # 立即提交更改
-                    db.session.commit()
-                    logger.info(f"成功更新用户 {user.username} 的批改次数: limit={monthly_limit}, used={monthly_used}")
-                    flash(f'已成功更新用户 {user.username} 的批改次数', 'success')
-                    
-            except SQLAlchemyError as e:
-                db.session.rollback()
-                logger.error(f"数据库错误: {str(e)}")
-                flash('数据库错误，请稍后重试', 'danger')
+                monthly_limit = form.monthly_limit.data
+                monthly_used = form.monthly_used.data
                 
-        except Exception as e:
-            logger.error(f"更新用户批改次数时发生错误: {str(e)}")
-            flash('更新批改次数失败，请稍后重试', 'danger')
+                logger.info(f"接收到的参数: user_id={user_id}, monthly_limit={monthly_limit}, monthly_used={monthly_used}")
+                
+                # 使用事务保护数据一致性
+                try:
+                    with db.session.begin():
+                        if not user.profile:
+                            logger.info(f"为用户 {user.username} 创建新的用户档案")
+                            profile = UserProfile(user_id=user.id)
+                            db.session.add(profile)
+                            user.profile = profile
+                        
+                        # 更新用户档案中的批改次数限制
+                        user.profile.essay_monthly_limit = monthly_limit
+                        user.profile.essay_monthly_used = monthly_used
+                        
+                        # 根据月度批改限制自动设置合适的会员级别
+                        if monthly_limit <= 3:
+                            user.membership_level = MembershipLevel.FREE.value
+                        elif monthly_limit <= 30:
+                            user.membership_level = MembershipLevel.BASIC.value
+                        else:
+                            user.membership_level = MembershipLevel.PREMIUM.value
+                            
+                        db.session.commit()
+                        
+                    logger.info(f"已更新用户 {user.username} 的批改次数限制")
+                    
+                    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                        return jsonify({"status": "success"})
+                    flash(f"已成功更新用户 {user.username} 的批改次数", "success")
+                    
+                except Exception as e:
+                    logger.error(f"更新用户批改次数时出现数据库错误: {str(e)}")
+                    db.session.rollback()
+                    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                        return jsonify({"status": "error", "message": f"数据库错误: {str(e)}"})
+                    flash(f"更新用户批改次数时出现数据库错误: {str(e)}", "danger")
+            except Exception as e:
+                logger.error(f"更新用户批改次数时出现错误: {str(e)}")
+                if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                    return jsonify({"status": "error", "message": f"系统错误: {str(e)}"})
+                flash(f"更新用户批改次数时出现错误: {str(e)}", "danger")
+        else:
+            logger.warning("表单验证失败")
+            errors = {}
+            for field, field_errors in form.errors.items():
+                errors[field] = ", ".join(field_errors)
+                logger.warning(f"{field}: {errors[field]}")
+            
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                return jsonify({"status": "error", "errors": errors})
+            
+            for field, field_errors in form.errors.items():
+                flash(f"{getattr(form[field].label, 'text', field)}: {', '.join(field_errors)}", 'danger')
         
-        logger.info("完成处理更新用户批改次数请求")
-        return redirect(url_for('admin.users'))
+        if request.headers.get('X-Requested-With') != 'XMLHttpRequest':
+            return redirect(url_for('admin.users'))
     
-    # 处理GET请求 - 显示用户列表
-    # 默认值，确保始终存在
-    users = []
-    pagination = None
-    page = 1
-    query = ""
+    # GET 请求处理 - 显示用户列表
+    page = request.args.get('page', 1, type=int)
     per_page = 20
+    search = request.args.get('search', '')
+    user_type = request.args.get('user_type', '')
+    role = request.args.get('role', '')
+    status = request.args.get('status', '')
     
+    # 构建查询
+    query = User.query
+    
+    # 应用搜索条件
+    if search:
+        query = query.filter(or_(
+            User.username.ilike(f'%{search}%'),
+            User.email.ilike(f'%{search}%')
+        ))
+    
+    # 应用用户类型过滤
+    if user_type:
+        query = query.filter(User.membership_level == user_type)
+    
+    # 应用角色过滤
+    if role == 'admin':
+        query = query.filter(User._is_admin == True)
+    elif role == 'user':
+        query = query.filter(User._is_admin == False)
+    
+    # 应用状态过滤
+    if status == '1':
+        query = query.filter(User._is_active == True)
+    elif status == '0':
+        query = query.filter(User._is_active == False)
+    
+    # 分页查询结果
+    pagination = query.order_by(User.id.desc()).paginate(page=page, per_page=per_page)
+    users = pagination.items
+    
+    # 根据数据库的会员计划获取可用权益
+    membership_plans = {}
     try:
-        # 添加分页和搜索功能
-        page = request.args.get('page', 1, type=int)
-        query = request.args.get('query', '', type=str)
-        
-        # 构建查询
-        user_query = User.query
-        
-        # 如果有搜索词，添加过滤条件
-        if query:
-            user_query = user_query.filter(
-                or_(
-                    User.username.ilike(f'%{query}%'),
-                    User.email.ilike(f'%{query}%'),
-                    User.name.ilike(f'%{query}%')
-                )
-            )
-        
-        # 排序并分页
-        pagination = user_query.order_by(User.created_at.desc()).paginate(
-            page=page, per_page=per_page, error_out=False
-        )
-        
-        users = pagination.items
-        
-        # 创建表单实例
-        form = UpdateUserCorrectionsForm()
-    
+        with current_app.app_context():
+            plans = MembershipPlan.query.all()
+            for plan in plans:
+                membership_plans[plan.code] = {
+                    'name': plan.name,
+                    'daily_limit': plan.max_essays_per_day,
+                    'monthly_limit': plan.max_essays_total
+                }
     except Exception as e:
-        import traceback
-        tb = traceback.format_exc()
-        logger.error(f"用户管理页面错误: {str(e)}\n{tb}")
-        # 异常处理后继续返回模板，使用默认值
+        logger.error(f"获取会员计划信息时出错: {str(e)}")
+        membership_plans = {
+            'free': {'name': '免费用户', 'daily_limit': 1, 'monthly_limit': 5},
+            'basic': {'name': '普通会员', 'daily_limit': 5, 'monthly_limit': 30},
+            'premium': {'name': '高级会员', 'daily_limit': 10, 'monthly_limit': 100}
+        }
     
     return render_template(
         'admin/user_management.html',
         users=users,
         pagination=pagination,
-        current_page=page,
-        query=query,
-        form=form
+        form=form,
+        add_user_form=add_user_form,
+        membership_plans=membership_plans
     )
-
-
 @admin_bp.route('/membership')
 @login_required
 def membership():
@@ -290,8 +374,6 @@ def membership():
             return redirect(url_for('main.index'))
         
         # 会员计划信息
-        from app.models.membership import MembershipPlan, Membership
-        
         plans = MembershipPlan.query.all()
         recent_memberships = Membership.query.order_by(Membership.created_at.desc()).limit(10).all()
     
@@ -534,8 +616,6 @@ def config():
                 # 根据表单数据更新配置
                 if 'membership_settings' in request.form:
                     # 处理会员设置
-                    from app.models.membership import MembershipPlan
-                    
                     # 免费用户设置
                     free_monthly = request.form.get('free_monthly', 10, type=int)
                     free_daily = request.form.get('free_daily', 3, type=int)
@@ -633,20 +713,108 @@ def config():
     )
 
 
-class UpdateUserCorrectionsForm(FlaskForm):
-    """用户批改次数更新表单"""
-    user_id = HiddenField('用户ID', 
-        validators=[DataRequired(message='用户ID不能为空')])
-    monthly_limit = IntegerField('每月限制', 
-        validators=[
-            DataRequired(message='请输入每月批改限制次数'),
-            NumberRange(min=0, message='批改次数不能小于0')
-        ])
-    monthly_used = IntegerField('已使用次数', 
-        validators=[
-            DataRequired(message='请输入已使用次数'),
-            NumberRange(min=0, message='已使用次数不能小于0')
-        ])
+@admin_bp.route('/add_user', methods=['POST'])
+@login_required
+@admin_required
+def add_user():
+    """添加新用户"""
+    form = AddUserForm()
+    
+    if form.validate():
+        try:
+            # 检查用户名和邮箱是否已存在
+            if User.query.filter_by(username=form.username.data).first():
+                return jsonify({"status": "error", "errors": {"username": "用户名已存在"}})
+                
+            if User.query.filter_by(email=form.email.data).first():
+                return jsonify({"status": "error", "errors": {"email": "邮箱已存在"}})
+            
+            # 创建新用户
+            user = User(
+                username=form.username.data,
+                email=form.email.data,
+                membership_level=form.user_type.data,
+                _is_admin=form.role.data == 'admin'
+            )
+            user.set_password(form.password.data)
+            
+            # 创建用户档案
+            profile = UserProfile(user_id=user.id)
+            
+            # 根据用户类型设置批改次数限制
+            if form.user_type.data == 'free':
+                profile.essay_monthly_limit = 3
+            elif form.user_type.data == 'basic':
+                profile.essay_monthly_limit = 30
+            elif form.user_type.data == 'premium':
+                profile.essay_monthly_limit = 100
+            
+            # 保存到数据库
+            db.session.add(user)
+            db.session.add(profile)
+            db.session.commit()
+            
+            return jsonify({"status": "success", "message": "添加用户成功"})
+            
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"添加用户时出现错误: {str(e)}")
+            return jsonify({"status": "error", "message": f"添加用户失败: {str(e)}"})
+    else:
+        errors = {}
+        for field, field_errors in form.errors.items():
+            errors[field] = ", ".join(field_errors)
+        
+        return jsonify({"status": "error", "errors": errors})
+
+
+@admin_bp.route('/monitoring')
+@login_required
+@admin_required
+def monitoring():
+    """系统监控页面"""
+    try:
+        from app.core.monitoring.monitor_service import metrics_store, alert_manager
+        
+        # 获取监控指标
+        metrics = metrics_store.get_all_metrics()
+        
+        # 获取最近的告警
+        recent_alerts = alert_manager.get_recent_alerts(limit=10)
+        
+        # 获取系统状态
+        system_stats = {
+            'essays': {
+                'pending': metrics_store.get_gauge('essays.count.pending'),
+                'processing': metrics_store.get_gauge('essays.count.processing'),
+                'completed': metrics_store.get_gauge('essays.count.completed'),
+                'failed': metrics_store.get_gauge('essays.count.failed')
+            },
+            'tasks': {
+                'active': metrics_store.get_gauge('celery_tasks_active'),
+                'success_rate': metrics_store.get_counter('tasks.successes') / 
+                               (metrics_store.get_counter('tasks.total') or 1) * 100,
+                'failure_rate': metrics_store.get_counter('tasks.failures') / 
+                               (metrics_store.get_counter('tasks.total') or 1) * 100
+            },
+            'performance': {
+                'avg_processing_time': metrics_store.get_histogram_stats('essay_correction.processing_time').get('avg', 0),
+                'p95_processing_time': metrics_store.get_histogram_stats('essay_correction.processing_time').get('p95', 0)
+            }
+        }
+        
+        return render_template(
+            'admin/monitoring.html',
+            metrics=metrics,
+            system_stats=system_stats,
+            recent_alerts=recent_alerts,
+            active_page='monitoring'
+        )
+        
+    except Exception as e:
+        logger.error(f"加载监控页面出错: {str(e)}")
+        flash(f'加载监控页面出错: {str(e)}', 'danger')
+        return redirect(url_for('admin.index'))
 
 
 @admin_bp.errorhandler(404)

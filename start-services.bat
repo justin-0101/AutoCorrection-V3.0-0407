@@ -24,17 +24,20 @@ start "Flask App" cmd /k "python run.py"
 timeout /t 5 /nobreak > nul
 
 echo [INFO] Starting Celery main worker process...
-start "Celery Main Worker" cmd /k "celery -A app.tasks:celery worker --pool=solo --concurrency=1 --loglevel=info -Q default,correction,email,periodic,analytics,backup -n worker1@%%computername%%"
+start "Celery Main Worker" cmd /k "celery -A app.tasks.celery_app:celery_app worker --pool=solo --concurrency=1 --loglevel=info -Q default,correction,email,periodic,analytics,backup -n worker1@%%computername%%"
 
 timeout /t 2 /nobreak > nul
 
 echo [INFO] Starting Celery priority worker process...
-start "Celery Priority Worker" cmd /k "celery -A app.tasks:celery worker --pool=solo --concurrency=1 --loglevel=info -Q correction.priority -n priority_worker@%%computername%%"
+start "Celery Priority Worker" cmd /k "celery -A app.tasks.celery_app:celery_app worker --pool=solo --concurrency=1 --loglevel=info -Q correction.priority -n priority_worker@%%computername%%"
 
 timeout /t 2 /nobreak > nul
 
 echo [INFO] Starting automatic essay correction service...
 start "Auto Correction Service" cmd /k "python scripts/utils/process_pending_corrections.py"
+timeout /t 3 /nobreak > nul
+echo [INFO] Checking if correction service is running properly...
+echo [INFO] If you see 'waiting for essays to correct' below, the service is running correctly.
 
 echo [INFO] All services have been started!
 echo.

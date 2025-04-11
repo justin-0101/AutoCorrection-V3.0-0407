@@ -16,7 +16,6 @@ from app.models.correction import Correction, CorrectionStatus
 from app.core.essay.essay_validator import EssayValidator
 from app.errors import ValidationError, ResourceNotFoundError, ProcessingError
 from app.utils.file_handler import FileHandler
-from app.tasks.correction_tasks import process_essay_correction, batch_process_essays
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +79,8 @@ class EssayService:
             
             logger.info(f"作文创建成功，ID: {essay.id}, 用户: {user_id}")
             
+            # 延迟导入，避免循环依赖
+            from app.tasks.correction_tasks import process_essay_correction
             # 异步启动作文批改任务
             correction_task = process_essay_correction.delay(essay.id)
             
@@ -426,41 +427,59 @@ class EssayService:
             dict: 重试结果
         """
         try:
-            with db.session() as session:
-                essay = session.query(Essay).get(essay_id)
+            with db.session.begin():
+                # 查找作文
+                essay = db.session.query(Essay).get(essay_id)
                 
                 if not essay:
                     raise ResourceNotFoundError(f"找不到ID为{essay_id}的作文")
                 
-                # 验证权限
-                if essay.user_id != user_id:
+                # 如果指定了用户ID，验证权限
+                if user_id and essay.user_id != user_id:
                     # 检查用户是否为管理员
-                    user = session.query(User).get(user_id)
+                    from app.models.user import User
+                    user = db.session.query(User).get(user_id)
                     if not user or not user.is_admin:
-                        raise ValidationError("您没有权限重试此作文的批改")
+                        raise ValidationError("您没有权限操作此作文")
                 
-                # 验证状态
-                if essay.status not in ['failed', 'pending']:
-                    raise ValidationError(f"当前状态({essay.status})的作文不需要重新批改")
+                # 检查作文状态是否为COMPLETED或FAILED
+                if essay.status not in [EssayStatus.COMPLETED.value, EssayStatus.FAILED.value]:
+                    raise ValidationError(f"只有已完成或失败的作文才能重试批改, 当前状态: {essay.status}")
                 
-                # 更新状态
-                essay.status = 'pending'
-                essay.failure_reason = None
-                essay.updated_at = time.time()
+                # 查找或创建批改记录
+                correction = db.session.query(Correction).filter_by(essay_id=essay_id).first()
                 
-                session.commit()
+                if not correction:
+                    correction = Correction(
+                        essay_id=essay_id,
+                        status=CorrectionStatus.PENDING.value,
+                        created_at=datetime.utcnow()
+                    )
+                    db.session.add(correction)
+                else:
+                    # 更新状态
+                    correction.status = CorrectionStatus.PENDING.value
+                    correction.task_id = None
+                    correction.error_message = None
+                    correction.updated_at = datetime.utcnow()
                 
-                # 重新启动作文批改任务
-                correction_task = process_essay_correction.delay(essay_id, user_id)
-                
-                logger.info(f"作文批改重试，ID: {essay_id}, 用户: {user_id}")
-                
-                return {
-                    "status": "success",
-                    "message": "作文已重新加入批改队列",
-                    "essay_id": essay_id,
-                    "task_id": correction_task.id
-                }
+                # 更新作文状态
+                essay.status = EssayStatus.PENDING.value
+                essay.updated_at = datetime.utcnow()
+            
+            logger.info(f"作文批改重置为待处理状态，ID: {essay.id}")
+            
+            # 延迟导入，避免循环依赖
+            from app.tasks.correction_tasks import process_essay_correction
+            # 提交批改任务
+            correction_task = process_essay_correction.delay(essay_id)
+            
+            return {
+                "status": "success",
+                "message": "已重新提交作文批改任务",
+                "essay_id": essay_id,
+                "task_id": correction_task.id
+            }
         
         except ResourceNotFoundError as e:
             logger.error(str(e))
@@ -471,17 +490,17 @@ class EssayService:
             raise e
         
         except Exception as e:
-            logger.error(f"重试作文批改异常，ID: {essay_id}: {str(e)}", exc_info=True)
+            logger.error(f"重试作文批改异常: {str(e)}", exc_info=True)
             raise ProcessingError(f"重试作文批改失败: {str(e)}")
     
     @classmethod
     def batch_submit_essays(cls, user_id, essays_data):
         """
-        批量提交作文
+        批量提交作文批改
         
         Args:
             user_id: 用户ID
-            essays_data: 作文数据列表
+            essays_data: 包含多篇作文数据的列表
         
         Returns:
             dict: 批量提交结果
@@ -490,50 +509,56 @@ class EssayService:
             if not essays_data or not isinstance(essays_data, list):
                 raise ValidationError("无效的作文数据列表")
             
+            # 批量创建作文
             essay_ids = []
+            essays_info = []
             
             for essay_data in essays_data:
-                # 验证作文数据
                 title = essay_data.get('title')
                 content = essay_data.get('content')
-                grade_level = essay_data.get('grade_level')
-                essay_type = essay_data.get('essay_type')
-                requirements = essay_data.get('requirements')
+                grade = essay_data.get('grade')
+                author_name = essay_data.get('author_name')
                 
-                EssayValidator.validate_essay_data(title, content, grade_level, essay_type)
+                # 验证必填项
+                if not title or not content:
+                    continue
                 
-                # 创建新作文记录
-                essay = Essay(
+                # 使用现有方法创建作文
+                result = cls.create_essay(
                     user_id=user_id,
                     title=title,
                     content=content,
-                    grade_level=grade_level,
-                    essay_type=essay_type,
-                    requirements=requirements,
-                    word_count=len(content),
-                    status='pending',
-                    created_at=time.time()
+                    grade=grade,
+                    author_name=author_name,
+                    is_public=False
                 )
                 
-                with db.session() as session:
-                    session.add(essay)
-                    session.commit()
-                    essay_ids.append(essay.id)
+                if result and 'essay_id' in result:
+                    essay_ids.append(result['essay_id'])
+                    essays_info.append({
+                        'essay_id': result['essay_id'],
+                        'title': title,
+                        'status': 'submitted'
+                    })
             
-            logger.info(f"批量作文提交成功，数量: {len(essay_ids)}, 用户: {user_id}")
+            # 如果没有创建任何作文，返回错误
+            if not essay_ids:
+                raise ValidationError("未成功创建任何作文")
             
-            # 启动批量批改任务
+            # 延迟导入，避免循环依赖
+            from app.tasks.correction_tasks import batch_process_essays
+            # 提交批量处理任务
             batch_task = batch_process_essays.delay(essay_ids)
             
             return {
                 "status": "success",
-                "message": f"已成功提交{len(essay_ids)}篇作文，批改任务已启动",
-                "essay_ids": essay_ids,
-                "task_id": batch_task.id
+                "message": f"已批量提交{len(essay_ids)}篇作文进行批改",
+                "essays": essays_info,
+                "batch_task_id": batch_task.id
             }
         
         except ValidationError as e:
-            logger.error(f"批量作文数据验证失败: {str(e)}")
+            logger.error(str(e))
             raise e
         
         except Exception as e:

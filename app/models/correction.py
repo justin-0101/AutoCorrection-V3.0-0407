@@ -21,6 +21,7 @@ from app.utils.input_sanitizer import sanitize_input
 class CorrectionStatus(str, enum.Enum):
     """批改状态枚举"""
     PENDING = 'pending'       # 等待批改
+    PROCESSING = 'processing' # 正在提交处理中（临时状态）
     CORRECTING = 'correcting' # 正在批改
     COMPLETED = 'completed'   # 批改完成
     FAILED = 'failed'        # 批改失败
@@ -30,6 +31,7 @@ class CorrectionStatus(str, enum.Enum):
         """获取状态的显示文本"""
         status_text = {
             cls.PENDING.value: '等待批改',
+            cls.PROCESSING.value: '正在提交处理中',
             cls.CORRECTING.value: '正在批改',
             cls.COMPLETED.value: '批改完成',
             cls.FAILED.value: '批改失败'
@@ -61,7 +63,7 @@ class Correction(BaseModel):
             name='valid_correction_type'
         ),
         db.CheckConstraint(
-            "status IN ('pending', 'correcting', 'completed', 'failed')",
+            "status IN ('pending', 'processing', 'correcting', 'completed', 'failed')",
             name='valid_correction_status'
         ),
     )
@@ -117,25 +119,53 @@ class Correction(BaseModel):
         if isinstance(new_status, CorrectionStatus):
             new_status = new_status.value
             
+        # 验证状态转换的合法性
+        valid_transitions = {
+            CorrectionStatus.PENDING.value: [CorrectionStatus.PROCESSING.value, CorrectionStatus.CORRECTING.value, CorrectionStatus.FAILED.value],
+            CorrectionStatus.PROCESSING.value: [CorrectionStatus.CORRECTING.value, CorrectionStatus.FAILED.value, CorrectionStatus.PENDING.value],
+            CorrectionStatus.CORRECTING.value: [CorrectionStatus.COMPLETED.value, CorrectionStatus.FAILED.value],
+            CorrectionStatus.COMPLETED.value: [],  # 完成状态是终态
+            CorrectionStatus.FAILED.value: [CorrectionStatus.PENDING.value, CorrectionStatus.PROCESSING.value]  # 允许重试
+        }
+        
         old_status = self.status
-        self.status = new_status
         
-        if new_status == CorrectionStatus.COMPLETED.value:
-            self.completed_at = datetime.utcnow()
-        elif new_status == CorrectionStatus.FAILED.value and error_message:
-            self.error_message = error_message
+        # 检查状态转换是否有效
+        if old_status not in valid_transitions:
+            logger.error(f"批改记录当前状态无效: {old_status}")
+            return False
             
-        # 同步更新Essay状态
-        if self.essay:
-            self.essay.status = new_status
+        if new_status not in valid_transitions[old_status]:
+            logger.error(f"批改记录状态转换无效: {old_status} -> {new_status}")
+            return False
+            
+        try:
+            # 更新状态
+            self.status = new_status
+            
+            # 更新相关字段
             if new_status == CorrectionStatus.COMPLETED.value:
-                self.essay.corrected_at = self.completed_at
-                # 同步批改结果到Essay
-                if self.results:
-                    self.sync_results_to_essay()
-        
-        db.session.commit()
-        return old_status != new_status
+                self.completed_at = datetime.utcnow()
+            elif new_status == CorrectionStatus.FAILED.value and error_message:
+                self.error_message = error_message
+                
+            # 同步更新Essay状态
+            if self.essay:
+                # 使用Essay的update_status方法进行状态更新，确保状态转换的合法性
+                self.essay.update_status(new_status, error_message)
+                
+                if new_status == CorrectionStatus.COMPLETED.value:
+                    # 同步批改结果到Essay
+                    if self.results:
+                        self.sync_results_to_essay()
+            
+            db.session.commit()
+            logger.info(f"批改记录 {self.id} 状态已更新: {old_status} -> {new_status}")
+            return True
+        except Exception as e:
+            logger.error(f"更新批改状态时出错: {str(e)}")
+            db.session.rollback()
+            return False
     
     def sync_results_to_essay(self):
         """将批改结果同步到Essay"""

@@ -327,3 +327,98 @@
     });
 </script>
 {% endblock %} 
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // 修复修改批改次数表单提交
+    const correctionForms = document.querySelectorAll('.correction-form');
+    correctionForms.forEach(form => {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            
+            fetch('{{ url_for("admin.users") }}', {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    // 显示成功消息
+                    alert('修改成功');
+                    // 关闭模态框
+                    const modal = bootstrap.Modal.getInstance(this.closest('.modal'));
+                    modal.hide();
+                    // 刷新页面
+                    window.location.reload();
+                } else {
+                    // 显示错误消息
+                    if (data.errors) {
+                        for (const field in data.errors) {
+                            const errorElement = document.getElementById(field + '_error');
+                            if (errorElement) {
+                                errorElement.textContent = data.errors[field];
+                                errorElement.parentElement.querySelector('input').classList.add('is-invalid');
+                            }
+                        }
+                    } else {
+                        alert(data.message || '修改失败');
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('提交请求出错，请重试');
+            });
+        });
+    });
+    
+    // 修复添加用户按钮
+    const addUserForm = document.getElementById('addUserForm');
+    if (addUserForm) {
+        addUserForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            
+            fetch('{{ url_for("admin.add_user") }}', {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    // 显示成功消息
+                    alert('添加用户成功');
+                    // 关闭模态框
+                    const modal = bootstrap.Modal.getInstance(document.getElementById('addUserModal'));
+                    modal.hide();
+                    // 刷新页面
+                    window.location.reload();
+                } else {
+                    // 显示错误消息
+                    if (data.errors) {
+                        for (const field in data.errors) {
+                            const errorElement = document.getElementById('add_' + field + '_error');
+                            if (errorElement) {
+                                errorElement.textContent = data.errors[field];
+                                errorElement.parentElement.querySelector('input').classList.add('is-invalid');
+                            }
+                        }
+                    } else {
+                        alert(data.message || '添加用户失败');
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('提交请求出错，请重试');
+            });
+        });
+    }
+});
+</script>

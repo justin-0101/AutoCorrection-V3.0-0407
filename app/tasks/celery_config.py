@@ -248,6 +248,16 @@ beat_schedule = {
         },
     },
     
+    # 状态一致性检查任务
+    'check-status-consistency': {
+        'task': 'app.tasks.maintenance_tasks.check_and_fix_inconsistent_statuses',
+        'schedule': timedelta(minutes=15),  # 每15分钟执行一次
+        'options': {
+            'queue': 'periodic',
+            'expires': 600,  # 10分钟后过期
+        },
+    },
+    
     # 更新任务队列长度指标
     'update-queue-length-metrics': {
         'task': 'app.tasks.monitoring_tasks.update_queue_length_metrics',
