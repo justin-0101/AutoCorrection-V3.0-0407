@@ -374,7 +374,7 @@ class DeepseekClient(BaseAPIClient):
             
             # 记录API请求配置
             api_config = {
-                "url": self.api_url,
+                "url": self.api_base,
                 "model": self.model,
                 "temperature": self.api_config.get("temperature", 0.1),
                 "timeout": self.timeout
@@ -383,7 +383,7 @@ class DeepseekClient(BaseAPIClient):
             logger.info(f"[DeepseekClient] API配置: {api_config}")
             
             # 发起API请求
-            print(f"[DeepseekClient] 发送请求到 {self.api_url}")
+            print(f"[DeepseekClient] 发送请求到 {self.api_base}")
             
             # 创建完整的API请求参数
             request_params = {
