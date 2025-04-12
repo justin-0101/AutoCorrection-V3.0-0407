@@ -21,6 +21,7 @@ from tenacity import (
     wait_exponential,
     retry_if_exception_type
 )
+from datetime import datetime
 
 from app.core.ai.api_client import BaseAPIClient, APIError
 from config.ai_config import AI_CONFIG
@@ -144,6 +145,31 @@ class DeepseekClient(BaseAPIClient):
         # 移除控制字符和其他可能导致JSON解析错误的字符
         return re.sub(r'[\x00-\x1F\x7F]', '', json_str)
 
+    def _clean_json_string(self, json_str: str) -> str:
+        """
+        清理JSON字符串，包括提取代码块中的JSON和去除无关字符
+        
+        Args:
+            json_str: 原始JSON字符串
+            
+        Returns:
+            str: 清洗后的JSON字符串
+        """
+        # 先尝试提取代码块中的JSON
+        json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', json_str)
+        if json_match:
+            logger.debug("从代码块中提取JSON")
+            json_str = json_match.group(1)
+        
+        # 移除控制字符和其他可能导致JSON解析错误的字符
+        json_str = re.sub(r'[\x00-\x1F\x7F]', '', json_str)
+        
+        # 移除JSON前后可能的说明文字
+        json_str = re.sub(r'^[^{]*', '', json_str)
+        json_str = re.sub(r'[^}]*$', '', json_str)
+        
+        return json_str
+
     def format_response(self, response: Dict) -> Dict[str, Any]:
         """
         格式化API响应结果
@@ -167,22 +193,61 @@ class DeepseekClient(BaseAPIClient):
                 "message": f"格式化响应失败: {str(e)}"
             }
     
-    def _extract_result(self, response: Dict) -> Dict[str, Any]:
+    def _extract_result(self, response: Dict) -> Dict:
         """
-        从API响应中提取结果
+        从API响应中提取结果数据并格式化
         
         Args:
             response: API响应
             
         Returns:
-            Dict: 提取的结果
+            Dict: 格式化后的结果
         """
         try:
+            # 首先从API响应中提取内容
+            content = None
+            
+            if response and 'choices' in response and len(response['choices']) > 0:
+                choice = response['choices'][0]
+                if 'message' in choice and 'content' in choice['message']:
+                    content = choice['message']['content']
+            
+            if not content:
+                logger.error("API响应中未找到有效内容")
+                logger.debug(f"API响应: {json.dumps(response, ensure_ascii=False)}")
+                return {"error": "无法从API响应中获取内容"}
+            
+            # 尝试解析JSON
+            try:
+                # 清理可能包含的非JSON内容
+                content = self._clean_json(content)
+                json_result = json.loads(content)
+                logger.debug(f"成功解析JSON: {json.dumps(json_result, ensure_ascii=False)}")
+            except json.JSONDecodeError as json_err:
+                logger.error(f"JSON解析错误: {str(json_err)}")
+                logger.error(f"原始内容: {content}")
+                
+                # 尝试使用正则表达式提取JSON部分
+                import re
+                json_match = re.search(r'```json\s*([\s\S]*?)\s*```', content)
+                if json_match:
+                    try:
+                        json_content = json_match.group(1)
+                        logger.debug(f"从Markdown代码块中提取JSON: {json_content}")
+                        json_result = json.loads(json_content)
+                    except json.JSONDecodeError:
+                        logger.error("从Markdown代码块中提取的JSON解析失败")
+                        # 如果还是失败，返回预设结构但值为空的结果
+                        return self._create_empty_result()
+                else:
+                    logger.error("无法在响应中找到JSON格式内容")
+                    return self._create_empty_result()
+            
             # 提取分数 (保持50分制)
-            total_score = response.get("总得分", 0)
+            total_score = json_result.get("总得分", 0)
             
             # 提取分项得分
-            分项得分 = response.get("分项得分", {})
+            分项得分 = json_result.get("分项得分", {})
             content_score = 分项得分.get("内容主旨", 0)
             language_score = 分项得分.get("语言文采", 0)
             structure_score = 分项得分.get("文章结构", 0)
@@ -199,18 +264,25 @@ class DeepseekClient(BaseAPIClient):
                 level = "D"
             
             # 提取评价和分析
-            overall_assessment = response.get("总体评价", "")
-            content_analysis = response.get("内容分析", "")
-            language_analysis = response.get("语言分析", "")
-            structure_analysis = response.get("结构分析", "")
-            improvement_suggestions = response.get("写作建议", "")
+            overall_assessment = json_result.get("总体评价", "")
+            content_analysis = json_result.get("内容分析", "")
+            language_analysis = json_result.get("语言分析", "")
+            structure_analysis = json_result.get("结构分析", "")
+            improvement_suggestions = json_result.get("写作建议", "")
             
             # 提取错别字
-            spelling_errors = response.get("错别字", [])
+            spelling_errors = json_result.get("错别字", [])
             
             return {
-                "total_score": total_score,
+                "总得分": total_score,
                 "level": level,
+                "分项得分": {
+                    "内容主旨": content_score,
+                    "语言文采": language_score,
+                    "文章结构": structure_score,
+                    "文面书写": writing_score
+                },
+                "total_score": total_score,
                 "content_score": content_score,
                 "language_score": language_score,
                 "structure_score": structure_score,
@@ -220,18 +292,64 @@ class DeepseekClient(BaseAPIClient):
                 "language_analysis": language_analysis,
                 "structure_analysis": structure_analysis,
                 "improvement_suggestions": improvement_suggestions,
+                "总体评价": overall_assessment,
+                "内容分析": content_analysis,
+                "language_analysis": language_analysis,
+                "structure_analysis": structure_analysis,
+                "写作建议": improvement_suggestions,
                 "spelling_errors": {
                     "解析": spelling_errors
-                }
+                },
+                "错别字": spelling_errors
             }
         except Exception as e:
             logger.error(f"提取Deepseek响应数据时发生错误: {str(e)}")
-            raise Exception(f"提取响应数据失败: {str(e)}")
+            logger.error(f"错误详情: {traceback.format_exc()}")
+            return self._create_empty_result(error=str(e))
+    
+    def _create_empty_result(self, error=None):
+        """
+        创建一个空的结果结构
+        """
+        result = {
+            "总得分": 0,
+            "level": "D",
+            "分项得分": {
+                "内容主旨": 0,
+                "语言文采": 0,
+                "文章结构": 0,
+                "文面书写": 0
+            },
+            "total_score": 0,
+            "content_score": 0,
+            "language_score": 0,
+            "structure_score": 0,
+            "writing_score": 0,
+            "overall_assessment": "未能生成评价",
+            "content_analysis": "未能生成分析",
+            "language_analysis": "未能生成分析",
+            "structure_analysis": "未能生成分析",
+            "improvement_suggestions": "未能生成建议",
+            "总体评价": "未能生成评价",
+            "内容分析": "未能生成分析",
+            "language_analysis": "未能生成分析",
+            "structure_analysis": "未能生成分析",
+            "写作建议": "未能生成建议",
+            "spelling_errors": {
+                "解析": []
+            },
+            "错别字": []
+        }
+        
+        if error:
+            result["error"] = error
+            
+        return result
 
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, max=10),
-        retry=retry_if_exception_type((httpx.RequestError, httpx.HTTPStatusError)),
+        retry=retry_if_exception_type((httpx.RequestError, httpx.HTTPStatusError, json.JSONDecodeError)),
         retry_error_callback=lambda retry_state: {
             "status": "error",
             "message": f"API调用失败，已重试{retry_state.attempt_number}次"
@@ -239,48 +357,88 @@ class DeepseekClient(BaseAPIClient):
     )
     async def _call_api(self, messages: List[Dict[str, str]], **kwargs) -> Dict:
         """
-        异步调用API
+        调用API并处理响应
         
         Args:
             messages: 消息列表
-            **kwargs: 其他参数
             
         Returns:
             Dict: API响应
+            
+        Raises:
+            APIError: API调用错误
         """
-        async with httpx.AsyncClient(
-            timeout=self.api_config['timeout'],
-            verify=self.verify_ssl
-        ) as client:
-            try:
-                response = await client.post(
-                    f"{self.api_base}/chat/completions",
-                    json={
-                        "model": self.model,
-                        "messages": messages,
-                        "max_tokens": kwargs.get('max_tokens', self.api_config['max_tokens']),
-                        "temperature": kwargs.get('temperature', self.api_config['temperature']),
-                        "top_p": kwargs.get('top_p', self.api_config['top_p']),
-                        "frequency_penalty": kwargs.get('frequency_penalty', self.api_config['frequency_penalty']),
-                        "presence_penalty": kwargs.get('presence_penalty', self.api_config['presence_penalty'])
-                    },
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json"
-                    }
-                )
-                response.raise_for_status()
-                return response.json()
-                
-            except httpx.RequestError as e:
-                logger.error(f"API请求错误: {str(e)}")
-                raise
-            except httpx.HTTPStatusError as e:
-                logger.error(f"API响应错误: {str(e)}")
-                raise
-            except Exception as e:
-                logger.error(f"未知错误: {str(e)}")
-                raise
+        try:
+            print(f"[DeepseekClient] 开始API调用，消息数: {len(messages)}")
+            logger.info(f"[DeepseekClient] 开始API调用，消息数: {len(messages)}")
+            
+            # 记录API请求配置
+            api_config = {
+                "url": self.api_url,
+                "model": self.model,
+                "temperature": self.api_config.get("temperature", 0.1),
+                "timeout": self.timeout
+            }
+            print(f"[DeepseekClient] API配置: {api_config}")
+            logger.info(f"[DeepseekClient] API配置: {api_config}")
+            
+            # 发起API请求
+            print(f"[DeepseekClient] 发送请求到 {self.api_url}")
+            
+            # 创建完整的API请求参数
+            request_params = {
+                "model": self.model,
+                "messages": messages,
+                "temperature": self.api_config.get("temperature", 0.1),
+                **kwargs
+            }
+            
+            # API请求开始时间
+            api_start_time = datetime.now()
+            
+            # 打印请求前的时间戳
+            print(f"[DeepseekClient] 发送API请求时间: {api_start_time.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}")
+            
+            # 调用API
+            response = await self.client.chat.completions.create(**request_params)
+            
+            # API请求结束时间和耗时
+            api_end_time = datetime.now()
+            api_elapsed = (api_end_time - api_start_time).total_seconds()
+            
+            # 打印请求后的时间戳和耗时
+            print(f"[DeepseekClient] 收到API响应时间: {api_end_time.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}")
+            print(f"[DeepseekClient] API请求总耗时: {api_elapsed:.2f}秒")
+            
+            # 格式化响应
+            formatted_response = self.format_response(response)
+            
+            # 打印响应摘要
+            content_length = len(formatted_response.get("content", ""))
+            print(f"[DeepseekClient] API响应内容长度: {content_length}字符")
+            
+            return formatted_response
+            
+        except httpx.RequestError as e:
+            print(f"[DeepseekClient] API请求错误: {str(e)}")
+            logger.error(f"[DeepseekClient] API请求错误: {str(e)}")
+            raise APIError(f"API请求错误: {str(e)}")
+            
+        except httpx.HTTPStatusError as e:
+            print(f"[DeepseekClient] API状态错误: {e.response.status_code} - {str(e)}")
+            logger.error(f"[DeepseekClient] API状态错误: {e.response.status_code} - {str(e)}")
+            raise APIError(f"API状态错误: {e.response.status_code} - {str(e)}")
+            
+        except json.JSONDecodeError as e:
+            print(f"[DeepseekClient] JSON解析错误: {str(e)}")
+            logger.error(f"[DeepseekClient] JSON解析错误: {str(e)}")
+            raise APIError(f"JSON解析错误: {str(e)}")
+            
+        except Exception as e:
+            print(f"[DeepseekClient] API调用异常: {str(e)}")
+            logger.error(f"[DeepseekClient] API调用异常: {str(e)}")
+            logger.error(f"[DeepseekClient] 异常详情: {traceback.format_exc()}")
+            raise APIError(f"API调用异常: {str(e)}")
 
     def correct_essay(self, content: str) -> Dict[str, Any]:
         """
@@ -311,14 +469,16 @@ class DeepseekClient(BaseAPIClient):
             }
         """
         try:
-            logger.info(f"使用Deepseek批改作文，内容长度: {len(content)}")
+            print(f"[DeepseekClient] 开始批改作文，内容长度: {len(content)}")
+            logger.info(f"[DeepseekClient] 开始批改作文，内容长度: {len(content)}")
             
             # 计算预估token数（中文每个字约2-3个token）
             estimated_tokens = len(content) * 3
             
             # 如果预估token数超过限制，分块处理
             if estimated_tokens > self.api_config['chunk_size']:
-                logger.info(f"内容较长，将分块处理，预估token数: {estimated_tokens}")
+                print(f"[DeepseekClient] 内容较长，将分块处理，预估token数: {estimated_tokens}")
+                logger.info(f"[DeepseekClient] 内容较长，将分块处理，预估token数: {estimated_tokens}")
                 return self._process_long_content(content)
             
             system_prompt = f"""你是一位专业的语文教师，现在需要你按照广东中考语文作文评分标准对一篇作文进行全面评分和详细分析。
@@ -377,20 +537,38 @@ D级（0-26分）：内容立意不明确，材料难以表现中心；语言不
                 {"role": "user", "content": content}
             ]
             
+            print(f"[DeepseekClient] 准备调用API，发送作文内容进行批改")
+            logger.info(f"[DeepseekClient] 准备调用API，发送作文内容进行批改")
+            
+            # 记录开始时间
+            start_time = datetime.now()
+            
             # 使用异步调用并等待结果
             loop = asyncio.get_event_loop()
             response = loop.run_until_complete(self._call_api(messages))
             
+            # 计算耗时
+            elapsed_time = (datetime.now() - start_time).total_seconds()
+            print(f"[DeepseekClient] API调用完成，耗时: {elapsed_time:.2f}秒")
+            logger.info(f"[DeepseekClient] API调用完成，耗时: {elapsed_time:.2f}秒")
+            
             # 提取结果
             result = self._extract_result(response)
+            
+            # 记录结果概要
+            total_score = result.get('total_score', 'N/A')
+            print(f"[DeepseekClient] 批改结果: 总分={total_score}")
+            logger.info(f"[DeepseekClient] 批改结果: 总分={total_score}")
+            
             return {
                 "status": "success",
                 "result": result
             }
             
         except Exception as e:
-            logger.error(f"批改作文失败: {str(e)}")
-            logger.error(f"错误详情: {traceback.format_exc()}")
+            print(f"[DeepseekClient] 批改作文失败: {str(e)}")
+            logger.error(f"[DeepseekClient] 批改作文失败: {str(e)}")
+            logger.error(f"[DeepseekClient] 错误详情: {traceback.format_exc()}")
             return {
                 "status": "error",
                 "message": f"批改作文失败: {str(e)}"
@@ -536,56 +714,6 @@ D级（0-26分）：内容立意不明确，材料难以表现中心；语言不
             return {
                 "status": "error",
                 "message": f"异步批改作文失败: {str(e)}"
-            }
-
-    async def _process_long_content_async(self, content: str) -> Dict[str, Any]:
-        """
-        处理长文本内容，将其分块处理
-        """
-        try:
-            # 按句子分割内容
-            sentences = re.split(r'([。！？])', content)
-            chunks = []
-            current_chunk = ""
-            
-            # 组合句子成块
-            for i in range(0, len(sentences), 2):
-                if i + 1 < len(sentences):
-                    sentence = sentences[i] + sentences[i + 1]
-                else:
-                    sentence = sentences[i]
-                
-                if len(current_chunk) + len(sentence) <= self.api_config['chunk_size']:
-                    current_chunk += sentence
-                else:
-                    if current_chunk:
-                        chunks.append(current_chunk)
-                    current_chunk = sentence
-            
-            if current_chunk:
-                chunks.append(current_chunk)
-            
-            # 处理每个块
-            results = []
-            for i, chunk in enumerate(chunks):
-                logger.info(f"处理第{i + 1}/{len(chunks)}块，长度: {len(chunk)}")
-                result = await self.correct_essay_async(chunk)
-                if result['status'] == 'success':
-                    results.append(result['result'])
-                else:
-                    raise Exception(f"处理第{i + 1}块时失败: {result['message']}")
-            
-            # 合并结果
-            return {
-                "status": "success",
-                "result": self._merge_results(results)
-            }
-            
-        except Exception as e:
-            logger.error(f"处理长文本失败: {str(e)}")
-            return {
-                "status": "error",
-                "message": f"处理长文本失败: {str(e)}"
             }
 
     async def _process_long_content_async(self, content: str) -> Dict[str, Any]:

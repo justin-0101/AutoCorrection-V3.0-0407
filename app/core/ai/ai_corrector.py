@@ -28,7 +28,8 @@ class AICorrectionService:
         
         # 使用工厂获取客户端
         self.client = self.ai_factory.get_client(self.ai_service)
-        logger.info(f"初始化AI批改服务，使用: {self.ai_service}")
+        print(f"[AICorrectionService] 初始化AI批改服务，使用: {self.ai_service}")
+        logger.info(f"[AICorrectionService] 初始化AI批改服务，使用: {self.ai_service}")
         
     def correct_essay(self, content):
         """
@@ -40,28 +41,59 @@ class AICorrectionService:
         Returns:
             dict: 批改结果
         """
-        logger.info(f"开始AI批改，内容长度: {len(content)}")
+        print(f"[AICorrectionService] 开始AI批改，内容长度: {len(content)}，时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info(f"[AICorrectionService] 开始AI批改，内容长度: {len(content)}")
         
         try:
             # 使用选定的AI客户端进行分析
             if not self.client:
-                logger.error(f"AI客户端未初始化，服务: {self.ai_service}")
+                error_msg = f"AI客户端未初始化，服务: {self.ai_service}"
+                print(f"[AICorrectionService] {error_msg}")
+                logger.error(f"[AICorrectionService] {error_msg}")
                 return {
                     "status": "error",
-                    "message": f"AI客户端未初始化，服务: {self.ai_service}"
+                    "message": error_msg
                 }
             
-            result = self.client.analyze_essay(content)
+            # 记录客户端类型和可用方法
+            client_type = type(self.client).__name__
+            client_methods = [m for m in dir(self.client) if not m.startswith('_') and callable(getattr(self.client, m))]
+            
+            print(f"[AICorrectionService] 使用的AI客户端类型: {client_type}")
+            print(f"[AICorrectionService] 客户端可用方法: {client_methods}")
+            logger.info(f"[AICorrectionService] 使用的AI客户端类型: {client_type}")
+            logger.info(f"[AICorrectionService] 客户端可用方法: {client_methods}")
+            
+            # 使用correct_essay方法进行批改
+            print(f"[AICorrectionService] 调用correct_essay方法进行批改")
+            logger.info(f"[AICorrectionService] 调用correct_essay方法进行批改")
+            
+            # 记录开始时间
+            start_time = datetime.now()
+            
+            # 调用客户端的correct_essay方法
+            result = self.client.correct_essay(content)
+            
+            # 计算总耗时
+            elapsed_time = (datetime.now() - start_time).total_seconds()
+            print(f"[AICorrectionService] 批改完成，总耗时: {elapsed_time:.2f}秒")
+            logger.info(f"[AICorrectionService] 批改完成，总耗时: {elapsed_time:.2f}秒")
             
             if result["status"] == "success":
-                logger.info(f"AI批改完成，生成结果")
+                total_score = result.get('result', {}).get('total_score', '未知')
+                print(f"[AICorrectionService] AI批改完成，生成结果: {total_score}分")
+                logger.info(f"[AICorrectionService] AI批改完成，生成结果: {total_score}分")
                 return result
             else:
-                logger.error(f"AI批改失败: {result.get('message', '未知错误')}")
+                error_msg = result.get('message', '未知错误')
+                print(f"[AICorrectionService] AI批改失败: {error_msg}")
+                logger.error(f"[AICorrectionService] AI批改失败: {error_msg}")
                 return result
         
         except Exception as e:
-            logger.error(f"AI批改过程中发生错误: {str(e)}\n{traceback.format_exc()}")
+            print(f"[AICorrectionService] AI批改过程中发生错误: {str(e)}")
+            logger.error(f"[AICorrectionService] AI批改过程中发生错误: {str(e)}")
+            logger.error(f"[AICorrectionService] 错误详情: {traceback.format_exc()}")
             return {
                 "status": "error",
                 "message": f"AI批改失败: {str(e)}"
