@@ -35,6 +35,16 @@ class AIClientFactory:
         if cls._instance is None:
             cls._instance = super(AIClientFactory, cls).__new__(cls)
             cls._instance._clients = {}
+            
+            # 自动注册到服务容器
+            try:
+                from app.core.services.container import container, ServiceScope
+                if not container.has('ai_client_factory'):
+                    container.register('ai_client_factory', cls._instance, ServiceScope.SINGLETON)
+                    logger.info("AI客户端工厂已自动注册到服务容器")
+            except Exception as e:
+                logger.error(f"注册AI客户端工厂到服务容器失败: {str(e)}")
+                
         return cls._instance
     
     def get_client(self, provider_name: Optional[str] = None) -> Any:

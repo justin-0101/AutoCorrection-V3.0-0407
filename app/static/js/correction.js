@@ -48,11 +48,47 @@ document.addEventListener('DOMContentLoaded', function() {
     async function pollCorrectionStatus(essayId) {
         try {
             const response = await fetch(`/api/v1/correction/essays/status/${essayId}`);
+            
+            // 检查HTTP状态码
+            if (response.status === 401) {
+                // 用户未登录或会话已过期
+                const result = await response.json();
+                statusText.textContent = '登录状态已过期';
+                loadingSpinner.style.display = 'none';
+                showAlert('warning', '登录状态已过期，请重新登录');
+                
+                // 如果返回了重定向URL，则跳转
+                if (result.redirect) {
+                    setTimeout(() => {
+                        window.location.href = result.redirect;
+                    }, 2000);
+                }
+                return;
+            } else if (response.status === 404) {
+                // 作文不存在
+                const result = await response.json();
+                statusText.textContent = '作文不存在';
+                loadingSpinner.style.display = 'none';
+                showAlert('danger', result.message || '找不到作文，请重试');
+                return;
+            } else if (!response.ok) {
+                // 其他错误
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
             const result = await response.json();
             
             if (result.success) {
                 switch(result.status) {
+                    case 'pending':
+                        statusText.textContent = '等待批改中...';
+                        setTimeout(() => pollCorrectionStatus(essayId), 2000);
+                        break;
                     case 'processing':
+                        statusText.textContent = '正在处理中...';
+                        setTimeout(() => pollCorrectionStatus(essayId), 2000);
+                        break;
+                    case 'correcting':
                         statusText.textContent = '正在批改中...';
                         setTimeout(() => pollCorrectionStatus(essayId), 2000);
                         break;
@@ -60,7 +96,10 @@ document.addEventListener('DOMContentLoaded', function() {
                         statusText.textContent = '批改完成！';
                         loadingSpinner.style.display = 'none';
                         // 跳转到结果页面
-                        window.location.href = `/results/${essayId}`;
+                        showAlert('success', '批改已完成，正在跳转到结果页面...');
+                        setTimeout(() => {
+                            window.location.href = `/results/${essayId}`;
+                        }, 1000);
                         break;
                     case 'failed':
                         statusText.textContent = '批改失败';
@@ -68,6 +107,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         showAlert('danger', '批改失败，请重试');
                         break;
                     default:
+                        statusText.textContent = `未知状态: ${result.status}`;
                         setTimeout(() => pollCorrectionStatus(essayId), 2000);
                 }
             } else {
@@ -76,6 +116,7 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (error) {
             console.error('Error:', error);
             statusText.textContent = '获取状态失败';
+            // 出错后延长轮询间隔
             setTimeout(() => pollCorrectionStatus(essayId), 5000);
         }
     }

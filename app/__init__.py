@@ -117,6 +117,14 @@ def initialize_services(app):
         from app.core.services.service_container import ServiceContainer
         ServiceContainer.initialize()
         
+        # 1.1 初始化新的依赖注入容器
+        try:
+            from app.core.services.service_registry_di import ServiceContainer as DIContainer
+            DIContainer.init_app(app)
+            app.logger.info("依赖注入容器已初始化")
+        except Exception as di_error:
+            app.logger.warning(f"依赖注入容器初始化失败: {str(di_error)}")
+        
         # 2. 启用模拟模式（测试环境）
         if app.config.get('TESTING'):
             ServiceContainer.enable_mock_mode()
@@ -235,8 +243,12 @@ def create_app(config_name='default'):
     app.logger.info("监控设置已初始化")
     
     # 导入和注册监控API
-    from app.api.monitoring_api import monitoring_bp
-    app.register_blueprint(monitoring_bp)
+    try:
+        from app.api.v1.monitoring import init_app as init_monitoring
+        init_monitoring(app)
+        app.logger.info("监控API已注册")
+    except Exception as e:
+        app.logger.warning(f"注册监控API时出错: {str(e)}")
     
     app.logger.info("应用已初始化")
     

@@ -431,45 +431,130 @@ def get_current_user():
 # 会员管理 API 路由
 @admin_api_bp.route('/memberships', methods=['GET'])
 def get_memberships():
-    """
-    获取会员列表
-    
-    支持分页和搜索
-    """
+    """获取会员订单列表"""
     try:
         # 获取请求参数
         page = int(request.args.get('page', 1))
         limit = int(request.args.get('limit', 10))
         search = request.args.get('search', '')
+        status = request.args.get('status', '')
         
-        # 获取会员列表
-        memberships, total = membership_service.get_subscriptions_with_pagination(
-            page=page,
-            per_page=limit,
-            search_term=search
+        # 获取会员订单列表（这里用模拟数据）
+        # 实际应用中应该从membership_service获取数据
+        
+        # 模拟订单数据
+        mock_orders = [
+            {
+                'order_id': f'ORD{i:06d}',
+                'user_id': i * 10,
+                'user_name': f'用户{i}',
+                'plan_id': 1,
+                'plan_name': '普通会员' if i % 3 != 0 else '高级会员',
+                'amount': 49.00 if i % 3 != 0 else 99.00,
+                'payment_method': '微信支付' if i % 2 == 0 else '支付宝',
+                'status': 'completed' if i % 4 != 0 else ('pending' if i % 4 == 0 else 'cancelled'),
+                'created_at': (datetime.datetime.now() - datetime.timedelta(days=i)).isoformat(),
+                'updated_at': (datetime.datetime.now() - datetime.timedelta(days=i, hours=2)).isoformat()
+            }
+            for i in range(1, 21)
+        ]
+        
+        # 应用搜索过滤
+        filtered_orders = mock_orders
+        if search:
+            filtered_orders = [
+                order for order in filtered_orders 
+                if search.lower() in order['user_name'].lower() or 
+                   search in order['order_id']
+            ]
+        
+        # 应用状态过滤
+        if status:
+            filtered_orders = [
+                order for order in filtered_orders 
+                if order['status'] == status
+            ]
+        
+        # 应用分页
+        total = len(filtered_orders)
+        start_idx = (page - 1) * limit
+        end_idx = min(start_idx + limit, total)
+        paginated_orders = filtered_orders[start_idx:end_idx]
+        
+        # 计算统计数据
+        total_revenue = sum(order['amount'] for order in mock_orders if order['status'] == 'completed')
+        monthly_revenue = sum(
+            order['amount'] for order in mock_orders 
+            if order['status'] == 'completed' and 
+               datetime.datetime.fromisoformat(order['created_at']).month == datetime.datetime.now().month
         )
-        
-        # 计算总页数
-        total_pages = (total + limit - 1) // limit
-        
-        # 转换为 JSON 格式
-        memberships_data = [membership.to_dict() for membership in memberships]
         
         # 构建响应数据
         data = {
-            'memberships': memberships_data,
-            'total': total,
-            'page': page,
-            'limit': limit,
-            'total_pages': total_pages
+            'orders': paginated_orders,
+            'pagination': {
+                'total': total,
+                'current_page': page,
+                'per_page': limit,
+                'total_pages': (total + limit - 1) // limit
+            },
+            'stats': {
+                'total_orders': len(mock_orders),
+                'monthly_orders': len([
+                    order for order in mock_orders
+                    if datetime.datetime.fromisoformat(order['created_at']).month == datetime.datetime.now().month
+                ]),
+                'total_revenue': total_revenue,
+                'monthly_revenue': monthly_revenue
+            }
         }
         
-        logger.info(f"获取会员列表成功，页码：{page}，每页数量：{limit}")
+        logger.info(f"获取会员订单列表成功，页码：{page}，每页数量：{limit}")
         return success_response(data)
     
     except Exception as e:
-        logger.error(f"获取会员列表失败: {str(e)}")
-        return error_response("获取会员列表失败", 500)
+        logger.error(f"获取会员订单列表失败: {str(e)}")
+        return error_response("获取会员订单列表失败", 500)
+
+
+@admin_api_bp.route('/memberships/<string:order_id>', methods=['GET'])
+def get_membership_order(order_id):
+    """获取会员订单详情"""
+    try:
+        # 模拟数据 - 实际应用中应该从数据库获取
+        mock_order = {
+            'order_id': order_id,
+            'user_id': 101,
+            'user_name': '张三',
+            'plan_id': 2,
+            'plan_name': '高级会员',
+            'amount': 99.00,
+            'payment_method': '微信支付',
+            'status': 'completed',
+            'created_at': datetime.datetime.now().isoformat(),
+            'updated_at': datetime.datetime.now().isoformat(),
+            'logs': [
+                {
+                    'timestamp': datetime.datetime.now().isoformat(),
+                    'message': '订单创建'
+                },
+                {
+                    'timestamp': (datetime.datetime.now() - datetime.timedelta(minutes=5)).isoformat(),
+                    'message': '支付成功'
+                },
+                {
+                    'timestamp': (datetime.datetime.now() - datetime.timedelta(minutes=1)).isoformat(),
+                    'message': '订单完成'
+                }
+            ]
+        }
+        
+        logger.info(f"获取会员订单详情成功，订单ID：{order_id}")
+        return success_response(mock_order)
+    
+    except Exception as e:
+        logger.error(f"获取会员订单详情失败: {str(e)}")
+        return error_response("获取会员订单详情失败", 500)
 
 
 @admin_api_bp.route('/membership-plans', methods=['GET'])

@@ -145,7 +145,19 @@ async function loadOrders(page = 1) {
         updateStats(data.stats);
     } catch (error) {
         console.error('Error loading orders:', error);
-        showMessage('加载订单数据失败', 'error');
+        // 使用更安全的通知方式
+        if (typeof Toastify === 'function') {
+            Toastify({
+                text: "加载订单数据失败",
+                duration: 3000,
+                close: true,
+                gravity: "top",
+                position: "center",
+                backgroundColor: "#dc3545",
+            }).showToast();
+        } else {
+            alert("加载订单数据失败");
+        }
     }
 }
 
@@ -230,6 +242,7 @@ async function showOrderDetail(orderId) {
         modal.show();
     } catch (error) {
         console.error('Error loading order details:', error);
+        // 使用已经定义的showMessage函数
         showMessage('加载订单详情失败', 'error');
     }
 }
@@ -270,6 +283,28 @@ function renderPagination(pagination) {
     }
     
     paginationEl.innerHTML = html;
+}
+
+// 添加缺失的showMessage函数
+function showMessage(message, type = 'info') {
+    // 检查Toastify库是否可用
+    if (typeof Toastify === 'function') {
+        const bgColor = type === 'error' ? '#dc3545' : 
+                         type === 'success' ? '#28a745' :
+                         type === 'warning' ? '#ffc107' : '#17a2b8';
+        
+        Toastify({
+            text: message,
+            duration: 3000,
+            close: true,
+            gravity: "top",
+            position: "center",
+            backgroundColor: bgColor,
+        }).showToast();
+    } else {
+        // 如果Toastify不可用，回退到alert
+        alert(message);
+    }
 }
 </script>
 {% endblock %}

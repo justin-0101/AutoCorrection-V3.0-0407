@@ -15,21 +15,16 @@ from datetime import datetime, timedelta
 from sqlalchemy import or_
 from flask_login import current_user
 from sqlalchemy.sql import func
-from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy.exc import SQLAlchemyError
 from flask_wtf import FlaskForm
 from wtforms import IntegerField, HiddenField, StringField, SelectField, PasswordField
 from wtforms.validators import DataRequired, NumberRange, Email, Length, EqualTo
-from app import db
+from app.extensions import db
 
 # 创建日志记录器
 logger = logging.getLogger(__name__)
 
 # 创建蓝图
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
-
-# 创建SQLAlchemy对象
-db = SQLAlchemy()
 
 # 定义修改批改次数表单
 class UpdateUserCorrectionsForm(FlaskForm):
@@ -392,6 +387,7 @@ def membership():
 
 @admin_bp.route('/essays')
 @login_required
+@admin_required
 def essays():
     """作文管理页面"""
     
@@ -404,33 +400,60 @@ def essays():
     per_page = 20
     
     try:
-        # 权限检查
-        if not current_user.is_admin:
-            flash('您没有权限访问作文管理', 'danger')
-            return redirect(url_for('main.index'))
-        
         # 添加分页和过滤功能
         page = request.args.get('page', 1, type=int)
         status = request.args.get('status', '', type=str)
         user_id = request.args.get('user_id', '', type=str)
         
-        # 构建查询
-        essay_query = Essay.query
+        # 构建查询 - 使用更安全的查询构建方法
+        try:
+            # 基本查询
+            essay_query = db.session.query(Essay)
+            
+            # 确保返回对象有created_at字段
+            essay_query = essay_query.filter(Essay.created_at != None)
+            
+            # 如果指定了状态，添加过滤条件
+            if status and len(status) > 0:
+                essay_query = essay_query.filter(Essay.status == status)
+            
+            # 如果指定了用户ID，添加过滤条件（确保是有效的整数）
+            if user_id and user_id.isdigit():
+                user_id_int = int(user_id)
+                essay_query = essay_query.filter(Essay.user_id == user_id_int)
+            
+            # 应用排序
+            essay_query = essay_query.order_by(Essay.created_at.desc())
+            
+            # 执行分页
+            try:
+                pagination = essay_query.paginate(
+                    page=page, per_page=per_page, error_out=False
+                )
+                
+                # 获取分页项目
+                if pagination:
+                    essays = pagination.items
+                    
+                    # 额外安全检查 - 过滤无效的Essay对象
+                    valid_essays = []
+                    for essay in essays:
+                        if essay is None:
+                            continue
+                        if not hasattr(essay, 'created_at') or essay.created_at is None:
+                            continue
+                        valid_essays.append(essay)
+                    
+                    essays = valid_essays
+            except Exception as pagination_error:
+                logger.error(f"分页查询失败: {str(pagination_error)}")
+                essays = []
+                pagination = None
         
-        # 如果指定了状态，添加过滤条件
-        if status:
-            essay_query = essay_query.filter(Essay.status == status)
-        
-        # 如果指定了用户ID，添加过滤条件
-        if user_id and user_id.isdigit():
-            essay_query = essay_query.filter(Essay.user_id == int(user_id))
-        
-        # 排序并分页
-        pagination = essay_query.order_by(Essay.created_at.desc()).paginate(
-            page=page, per_page=per_page, error_out=False
-        )
-        
-        essays = pagination.items
+        except SQLAlchemyError as db_error:
+            logger.error(f"数据库查询错误: {str(db_error)}")
+            essays = []
+            pagination = None
     
     except Exception as e:
         import traceback

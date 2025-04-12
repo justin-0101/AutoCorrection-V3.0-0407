@@ -15,14 +15,49 @@ logger = logging.getLogger(__name__)
 __all__ = ['ServiceContainer', 'container', 'RedisService', 'init_services', 
            'get_redis_service', 'get_ai_client_factory', 'get_correction_service', 'get_ai_service']
 
+def _init_database() -> bool:
+    """初始化并验证数据库连接"""
+    try:
+        from app.models.db import db
+        with db.engine.connect() as conn:
+            result = conn.execute(db.text("SELECT 1"))
+            conn.commit()
+        logger.info("数据库连接验证成功")
+        return True
+    except Exception as e:
+        logger.error(f"数据库连接失败: {str(e)}")
+        return False
+
+def _verify_service_dependencies() -> bool:
+    """验证服务依赖关系"""
+    try:
+        # 验证Redis服务
+        redis_service = container.get("redis_service")
+        if redis_service is None:
+            raise RuntimeError("Redis服务未初始化")
+            
+        # 验证AI服务
+        ai_factory = container.get("ai_client_factory")
+        if ai_factory is None:
+            raise RuntimeError("AI客户端工厂未初始化")
+            
+        # 验证批改服务
+        correction_service = container.get("correction_service")
+        if correction_service is None:
+            raise RuntimeError("批改服务未初始化")
+            
+        return True
+    except Exception as e:
+        logger.error(f"服务依赖验证失败: {str(e)}")
+        return False
+
 def get_redis_service() -> Optional[RedisService]:
     """获取Redis服务实例"""
     try:
         redis_service = container.get("redis_service")
         if redis_service is None:
             logger.warning("Redis服务未找到，尝试动态初始化")
-            from app.core.services.init_services import init_redis_service
-            init_redis_service()
+            _init_redis_service()
             redis_service = container.get("redis_service")
         return redis_service
     except Exception as e:
@@ -56,16 +91,30 @@ def init_services() -> None:
     """
     logger.info("正在初始化核心服务...")
     
-    # 1. 首先初始化Redis服务(基础设施服务)
+    # 1. 验证数据库连接
+    if not _init_database():
+        raise RuntimeError("数据库初始化失败")
+    
+    # 2. 初始化Redis服务
     _init_redis_service()
+    if not container.has("redis_service"):
+        raise RuntimeError("Redis服务初始化失败")
     
-    # 2. 初始化AI服务(依赖Redis服务)
+    # 3. 初始化AI服务
     _init_ai_service()
+    if not container.has("ai_client_factory"):
+        raise RuntimeError("AI服务初始化失败")
     
-    # 3. 初始化业务服务(依赖基础服务)
+    # 4. 初始化业务服务
     _init_business_services()
+    if not container.has("correction_service"):
+        raise RuntimeError("批改服务初始化失败")
     
-    # 4. 初始化服务容器
+    # 5. 验证服务依赖关系
+    if not _verify_service_dependencies():
+        raise RuntimeError("服务依赖验证失败")
+    
+    # 6. 初始化服务容器
     container.initialize()
     
     logger.info("核心服务初始化完成")
@@ -97,10 +146,16 @@ def _init_ai_service() -> None:
 def _init_business_services() -> None:
     """初始化业务服务"""
     try:
+        # 初始化批改服务
         from app.core.correction.correction_service import CorrectionService
         correction_service = CorrectionService()
         container.register("correction_service", correction_service, ServiceScope.SINGLETON)
         logger.info("批改服务已注册到服务容器")
+        
+        # 验证批改服务是否可用
+        if not container.has("correction_service"):
+            raise RuntimeError("批改服务注册失败")
+            
     except ImportError as e:
         logger.error(f"导入批改服务失败: {str(e)}")
         raise RuntimeError("批改服务是必需的") from e

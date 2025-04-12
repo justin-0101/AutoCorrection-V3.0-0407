@@ -147,6 +147,21 @@ class ServiceUnavailableError(APIError):
     def __init__(self, message="服务暂时不可用", status_code=None, payload=None):
         super().__init__(message, status_code, payload)
 
+class ConcurrentUpdateError(Exception):
+    """并发更新错误，当多个进程同时更新同一条记录时发生"""
+    pass
+
+class ProcessingError(ServiceError):
+    """处理错误，当任务处理失败时发生"""
+    status_code = 500
+    
+    def __init__(self, message="任务处理失败", status_code=None, payload=None):
+        super().__init__(message, status_code, payload)
+
+class DatabaseError(Exception):
+    """数据库操作错误"""
+    pass
+
 def api_error_handler(f):
     """API错误处理装饰器"""
     @wraps(f)

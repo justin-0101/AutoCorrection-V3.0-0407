@@ -1,0 +1,56 @@
+# 服务配置文件
+# 用于依赖注入容器的服务配置
+
+# AI服务配置
+ai:
+  api_key: ${AI_API_KEY}
+  endpoint: ${AI_API_ENDPOINT}
+  model: "dash-pro"  # 默认模型
+  timeout: 60  # 请求超时（秒）
+  retry_count: 3
+  retry_delay: 5
+  max_tokens: 4096
+  temperature: 0.7
+
+# Redis配置
+redis:
+  host: ${REDIS_HOST:localhost}
+  port: ${REDIS_PORT:6379}
+  db: 0
+  password: ${REDIS_PASSWORD:}
+  timeout: 5
+  retry_on_timeout: true
+  decode_responses: true
+
+# 数据库配置
+database:
+  pool_size: 10
+  max_overflow: 20
+  pool_timeout: 30
+  pool_recycle: 3600
+
+# 批改服务配置
+correction:
+  default_grade: "junior"
+  max_essay_length: 5000
+  max_correction_time: 300
+  default_process_timeout: 180
+  supported_grades:
+    - primary
+    - junior
+    - senior
+    - college
+
+# 日志配置
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  date_format: "%Y-%m-%d %H:%M:%S"
+  max_bytes: 10485760
+  backup_count: 10
+
+# 缓存服务配置
+cache:
+  default_ttl: 3600
+  prefix: "autocorrect:"
+  client: "redis" 

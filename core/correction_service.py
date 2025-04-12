@@ -472,7 +472,8 @@ class CorrectionService:
                 correction = Correction(
                     essay_id=essay_id,
                     type='ai',
-                    status='processing'  # 设置初始状态为processing
+                    status='processing',  # 设置初始状态为processing
+                    is_deleted=False
                 )
                 db.session.add(correction)
                 db.session.commit()

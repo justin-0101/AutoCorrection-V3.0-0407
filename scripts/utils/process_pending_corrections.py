@@ -91,26 +91,40 @@ def process_pending_corrections(limit=10):
             
             processed_count = 0
             for essay in pending_essays:
-                logger.info(f"准备处理作文 [essay_id={essay.id}, 标题='{essay.title}']")
+                # 添加空值检查
+                if essay is None:
+                    logger.warning("获取到空的作文对象，跳过处理")
+                    continue
+                
+                # 确保essay有必要的属性
+                try:
+                    essay_id = essay.id
+                    essay_title = essay.title if hasattr(essay, 'title') and essay.title else "无标题"
+                except AttributeError as e:
+                    logger.error(f"作文对象缺少必要属性: {str(e)}")
+                    continue
+                
+                logger.info(f"准备处理作文 [essay_id={essay_id}, 标题='{essay_title}']")
                 
                 try:
                     # 使用事务保证操作的原子性
                     with db.session.begin_nested():
                         # 查找或创建对应的批改记录
-                        correction = Correction.query.filter_by(essay_id=essay.id).first()
+                        correction = Correction.query.filter_by(essay_id=essay_id).first()
                         
                         if not correction:
-                            logger.info(f"未找到作文 {essay.id} 的批改记录，创建新记录")
+                            logger.info(f"未找到作文 {essay_id} 的批改记录，创建新记录")
                             # 创建新的批改记录
                             correction = Correction(
-                                essay_id=essay.id,
+                                essay_id=essay_id,
                                 status=CorrectionStatus.PENDING,
-                                created_at=datetime.now()
+                                created_at=datetime.now(),
+                                is_deleted=False
                             )
                             db.session.add(correction)
                             db.session.flush()  # 确保批改记录有ID
                         elif correction.status != CorrectionStatus.PENDING:
-                            logger.warning(f"作文 {essay.id} 的批改记录状态为 {correction.status}，"
+                            logger.warning(f"作文 {essay_id} 的批改记录状态为 {correction.status}，"
                                         f"而作文状态为 {essay.status}，跳过处理")
                             continue
                             
@@ -128,15 +142,15 @@ def process_pending_corrections(limit=10):
                         task_id = str(uuid.uuid4())
                         
                         # 2. 提交任务
-                        logger.info(f"提交作文批改任务 [essay_id={essay.id}, task_id={task_id}]")
+                        logger.info(f"提交作文批改任务 [essay_id={essay_id}, task_id={task_id}]")
                         task = process_essay_correction.apply_async(
-                            args=[essay.id],
+                            args=[essay_id],
                             task_id=task_id
                         )
                         
                         # 3. 任务提交成功后更新状态和任务ID
                         if task and task.id:
-                            logger.info(f"任务提交成功 [essay_id={essay.id}, task_id={task.id}]")
+                            logger.info(f"任务提交成功 [essay_id={essay_id}, task_id={task.id}]")
                             
                             # 更新批改记录状态和任务ID
                             correction.task_id = task.id
@@ -146,23 +160,23 @@ def process_pending_corrections(limit=10):
                             essay.status = EssayStatus.CORRECTING
                             
                             processed_count += 1
-                            logger.info(f"成功更新作文状态为批改中 [essay_id={essay.id}, task_id={task.id}]")
+                            logger.info(f"成功更新作文状态为批改中 [essay_id={essay_id}, task_id={task.id}]")
                         else:
                             # 任务提交失败，回滚到PENDING状态
-                            raise Exception(f"任务提交失败 [essay_id={essay.id}]")
+                            raise Exception(f"任务提交失败 [essay_id={essay_id}]")
                     
                     # 提交整个事务
                     db.session.commit()
                     
                 except Exception as e:
                     db.session.rollback()
-                    logger.error(f"处理作文 {essay.id} 时出错: {str(e)}")
+                    logger.error(f"处理作文 {essay_id} 时出错: {str(e)}")
                     
                     # 确保状态回滚到PENDING
                     try:
                         with db.session.begin():
-                            essay_refresh = Essay.query.get(essay.id)
-                            correction_refresh = Correction.query.filter_by(essay_id=essay.id).first()
+                            essay_refresh = Essay.query.get(essay_id)
+                            correction_refresh = Correction.query.filter_by(essay_id=essay_id).first()
                             if essay_refresh:
                                 essay_refresh.status = EssayStatus.PENDING
                             if correction_refresh:

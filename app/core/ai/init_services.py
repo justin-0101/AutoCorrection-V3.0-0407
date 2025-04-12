@@ -27,10 +27,16 @@ def init_ai_services():
         # 如果没有注册，则创建并注册
         if ai_factory is None:
             logger.info("AI客户端工厂未注册，正在创建并注册...")
-            ai_factory = AIClientFactory()
-            container.register("ai_client_factory", ai_factory)
+            from app.core.ai import AIClientFactory, ai_client_factory
+            # 使用已存在的全局实例而不是创建新实例
+            container.register("ai_client_factory", ai_client_factory)
             logger.info("AI客户端工厂已成功注册")
         
+        # 验证注册是否成功
+        ai_factory = container.get("ai_client_factory")
+        if ai_factory is None:
+            raise RuntimeError("AI客户端工厂注册失败")
+            
         return True
     except Exception as e:
         logger.error(f"初始化AI服务失败: {str(e)}")

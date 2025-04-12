@@ -11,6 +11,7 @@ from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Foreig
 from sqlalchemy.orm import relationship, validates
 from sqlalchemy.ext.hybrid import hybrid_property
 import logging
+from sqlalchemy.exc import SQLAlchemyError
 
 # 创建logger实例
 logger = logging.getLogger(__name__)
@@ -68,6 +69,9 @@ class Correction(BaseModel):
         ),
     )
     
+    # 添加版本控制字段
+    version = Column(Integer, default=0, nullable=False)
+    
     essay_id = Column(Integer, ForeignKey('essays.id', ondelete='CASCADE'), nullable=False)
     corrector_id = Column(Integer, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     type = Column(String(20), nullable=False, default=CorrectionType.AI.value)
@@ -85,6 +89,7 @@ class Correction(BaseModel):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)  # 完成时间
+    is_deleted = Column(Boolean, nullable=False, default=False)  # 添加默认值
     
     # 关系
     essay = relationship('Essay', back_populates='corrections', lazy='joined')
@@ -149,15 +154,35 @@ class Correction(BaseModel):
             elif new_status == CorrectionStatus.FAILED.value and error_message:
                 self.error_message = error_message
                 
-            # 同步更新Essay状态
+            # 同步更新Essay状态 - 改为动态使用essay对象，避免导入Essay类
             if self.essay:
-                # 使用Essay的update_status方法进行状态更新，确保状态转换的合法性
-                self.essay.update_status(new_status, error_message)
-                
+                # 动态获取EssayStatus相关值，以避免循环导入
                 if new_status == CorrectionStatus.COMPLETED.value:
-                    # 同步批改结果到Essay
-                    if self.results:
-                        self.sync_results_to_essay()
+                    # 对应EssayStatus.COMPLETED
+                    essay_new_status = 'completed'
+                elif new_status == CorrectionStatus.FAILED.value:
+                    # 对应EssayStatus.FAILED
+                    essay_new_status = 'failed'
+                elif new_status == CorrectionStatus.CORRECTING.value:
+                    # 对应EssayStatus.CORRECTING
+                    essay_new_status = 'correcting'
+                elif new_status == CorrectionStatus.PROCESSING.value:
+                    # 对应EssayStatus.PROCESSING
+                    essay_new_status = 'processing'
+                elif new_status == CorrectionStatus.PENDING.value:
+                    # 对应EssayStatus.PENDING
+                    essay_new_status = 'pending'
+                else:
+                    essay_new_status = None
+                    
+                if essay_new_status:
+                    # 使用essay对象原有的update_status方法
+                    self.essay.update_status(essay_new_status, error_message)
+                    
+                    if new_status == CorrectionStatus.COMPLETED.value:
+                        # 同步批改结果到Essay - 使用essay对象上的方法
+                        if self.results:
+                            self.sync_results_to_essay()
             
             db.session.commit()
             logger.info(f"批改记录 {self.id} 状态已更新: {old_status} -> {new_status}")
@@ -214,5 +239,60 @@ class Correction(BaseModel):
             'retry_count': self.retry_count,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
-            'completed_at': self.completed_at.isoformat() if self.completed_at else None
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+            'is_deleted': self.is_deleted
         }
+
+    def optimistic_update(self, **kwargs):
+        """
+        乐观锁更新方法
+        
+        Args:
+            **kwargs: 要更新的字段和值
+            
+        Returns:
+            bool: 更新是否成功
+            
+        Raises:
+            ConcurrentUpdateError: 当版本不匹配时抛出
+        """
+        try:
+            current_version = self.version
+            kwargs['version'] = current_version + 1
+            
+            # 使用版本号作为条件进行更新
+            rows = db.session.query(Correction).filter(
+                Correction.id == self.id,
+                Correction.version == current_version
+            ).update(kwargs)
+            
+            if rows == 0:
+                db.session.rollback()
+                raise ConcurrentUpdateError("数据已被其他进程修改")
+            
+            # 更新成功，同步当前对象的版本号
+            self.version = current_version + 1
+            return True
+            
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            raise DatabaseError(f"数据库更新失败: {str(e)}")
+    
+    def safe_update_status(self, new_status: str) -> bool:
+        """
+        安全地更新批改状态
+        
+        Args:
+            new_status: 新状态
+            
+        Returns:
+            bool: 更新是否成功
+        """
+        try:
+            return self.optimistic_update(
+                status=new_status,
+                updated_at=datetime.utcnow()
+            )
+        except ConcurrentUpdateError:
+            logger.warning(f"批改状态更新冲突 [id={self.id}, status={new_status}]")
+            return False

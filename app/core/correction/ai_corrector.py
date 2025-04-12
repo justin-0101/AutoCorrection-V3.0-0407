@@ -12,8 +12,8 @@ import traceback
 import os
 from datetime import datetime
 
-from app.core.ai import AIClientFactory
 from app.core.services.container import container, ServiceScope
+from app.core.correction.correction_logger import correction_logger
 
 logger = logging.getLogger(__name__)
 
@@ -28,40 +28,38 @@ class AICorrectionService:
         ai_factory = container.get("ai_client_factory")
         if ai_factory is None:
             logger.warning("未能从服务容器获取AI客户端工厂，创建新实例")
-            ai_factory = AIClientFactory()
-            # 确保使用单例模式注册到服务容器中
-            container.register("ai_client_factory", ai_factory, ServiceScope.SINGLETON)
-            logger.info("AI客户端工厂已成功注册到服务容器")
+            from app.core.ai import ai_client_factory
+            ai_factory = ai_client_factory
         
         # 使用工厂获取客户端
         self.client = ai_factory.get_client(self.ai_service)
         logger.info(f"初始化AI批改服务，使用: {self.ai_service}")
-        
-    def correct_essay(self, content):
+    
+    @correction_logger.monitor_correction
+    def correct_essay(self, content, essay_id: str = None):
         """
         使用AI对作文进行批改
         
         Args:
             content: 作文内容
+            essay_id: 作文ID，用于日志追踪
             
         Returns:
             dict: 批改结果
         """
-        logger.info(f"开始AI批改，内容长度: {len(content)}")
-        
         try:
             # 使用选定的AI客户端进行分析
-            result = self.client.analyze_essay(content)
+            result = self.client.correct_essay(content)
             
             if result["status"] == "success":
-                logger.info(f"AI批改完成，生成结果")
                 return result
             else:
-                logger.error(f"AI批改失败: {result.get('message', '未知错误')}")
-                return result
+                return {
+                    "status": "error",
+                    "message": result.get('message', '未知错误')
+                }
         
         except Exception as e:
-            logger.error(f"AI批改过程中发生错误: {str(e)}\n{traceback.format_exc()}")
             return {
                 "status": "error",
                 "message": f"AI批改失败: {str(e)}"

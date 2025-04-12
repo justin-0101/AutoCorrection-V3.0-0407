@@ -24,7 +24,7 @@ start "Flask App" cmd /k "python run.py"
 timeout /t 5 /nobreak > nul
 
 echo [INFO] Starting Celery main worker process...
-start "Celery Main Worker" cmd /k "celery -A app.tasks.celery_app:celery_app worker --pool=solo --concurrency=1 --loglevel=info -Q default,correction,email,periodic,analytics,backup -n worker1@%%computername%%"
+start "Celery Main Worker" cmd /k "celery -A app.tasks.celery_app:celery_app worker --pool=solo --concurrency=1 --loglevel=info -Q default,correction,email,periodic,analytics,backup -n main_worker@%%computername%%"
 
 timeout /t 2 /nobreak > nul
 

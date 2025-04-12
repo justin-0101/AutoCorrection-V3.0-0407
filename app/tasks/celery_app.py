@@ -51,82 +51,80 @@ flask_app = None
 
 @worker_process_init.connect
 def init_worker_process(sender, **kwargs):
-    """
-    Celery工作进程初始化时执行
-    初始化数据库连接和服务
-    """
+    """Celery工作进程初始化"""
     global flask_app
     
-    logger.info("初始化Celery工作进程...")
     try:
-        # 导入Flask应用工厂函数
-        from app import create_app
-        
         # 创建Flask应用实例
+        from app import create_app
         flask_app = create_app()
         
         if not flask_app:
-            logger.error("无法创建Flask应用实例")
-            return
-            
+            raise RuntimeError("无法创建Flask应用实例")
+        
         logger.info("已成功创建Flask应用实例")
         
-        # 推送应用上下文 - 测试应用上下文是否可以创建
+        # 初始化服务容器
+        from app.core.services.container import container
+        if not container._initialized:
+            logger.info("初始化服务容器...")
+            container.initialize()
+        
+        # 初始化依赖注入容器
+        try:
+            from app.core.services.service_registry_di import ServiceContainer
+            ServiceContainer.init_worker()
+            logger.info("依赖注入容器已初始化")
+        except Exception as di_error:
+            logger.warning(f"依赖注入容器初始化失败: {str(di_error)}")
+        
+        # 测试应用上下文
         with flask_app.app_context():
-            logger.info("Flask应用上下文测试成功")
-            logger.info("应用上下文管理工作正常")
+            # 测试数据库连接
+            from app.extensions import db
+            db.engine.dispose()  # 清理可能存在的连接
+            db.session.remove()  # 清理会话
             
-            # 初始化必要的服务
-            try:
-                from app.core.ai.init_services import ensure_services
-                if ensure_services():
-                    logger.info("服务初始化成功")
-                else:
-                    logger.error("服务初始化失败")
-            except Exception as e:
-                logger.error(f"初始化服务时出错: {str(e)}")
-                
-            # 设置数据库连接池配置
-            try:
-                from app.extensions import db
-                
-                # 确保每个工作进程有自己的连接池
-                logger.info("配置数据库连接池")
-                db.engine.dispose()
-                
-                # 重新配置连接池
-                db.engine.pool_size = 5
-                db.engine.max_overflow = 10
-                db.engine.pool_timeout = 30
-                db.engine.pool_recycle = 1800  # 30分钟
-                logger.info("数据库连接池已配置")
-            except Exception as e:
-                logger.error(f"配置数据库连接池时出错: {str(e)}")
+            # 配置数据库连接池
+            db.engine.pool_size = 5
+            db.engine.max_overflow = 10
+            db.engine.pool_timeout = 30
+            db.engine.pool_recycle = 1800  # 30分钟
+            
+            # 测试数据库连接
+            from sqlalchemy import text
+            db.session.execute(text('SELECT 1'))
+            db.session.commit()
+            
+            logger.info("数据库连接池配置和测试成功")
+            
+            # 初始化AI服务
+            from app.core.ai.init_services import ensure_services
+            if not ensure_services():
+                raise RuntimeError("AI服务初始化失败")
+            logger.info("AI服务初始化成功")
+            
+            logger.info("Flask应用和所有服务初始化成功")
             
     except Exception as e:
         logger.error(f"工作进程初始化失败: {str(e)}")
+        # 强制退出工作进程
+        os._exit(1)
 
 @task_prerun.connect
 def setup_task_context(task_id, task, *args, **kwargs):
-    """
-    任务执行前设置应用上下文
-    """
+    """任务执行前设置应用上下文"""
     global flask_app
     
-    if not flask_app:
-        logger.error("任务执行前应用实例未初始化")
-        try:
+    try:
+        # 确保应用实例存在
+        if not flask_app:
             from app import create_app
             flask_app = create_app()
-            logger.info("已在任务执行前重新创建应用实例")
-        except Exception as e:
-            logger.error(f"在任务执行前重新创建应用实例失败: {str(e)}")
-            return
-    
-    # 为任务创建应用上下文并存储在任务对象上
-    try:
-        logger.info(f"为任务 {task_id} 创建应用上下文")
-        # 确保之前的上下文已经清理
+            if not flask_app:
+                raise RuntimeError("无法创建Flask应用实例")
+        
+        # 清理可能存在的旧上下文
         if hasattr(task, '_app_context'):
             try:
                 task._app_context.pop()
@@ -139,44 +137,45 @@ def setup_task_context(task_id, task, *args, **kwargs):
         ctx.push()
         task._app_context = ctx
         
-        # 确保数据库会话
+        # 确保数据库会话干净
         from app.extensions import db
         db.session.remove()
         
-        logger.info(f"任务 {task_id} 的应用上下文已推送")
+        logger.info(f"任务 {task_id} 的应用上下文已设置")
+        
     except Exception as e:
         logger.error(f"设置任务 {task_id} 的应用上下文时出错: {str(e)}")
-        # 确保任何失败的上下文都被清理
+        # 确保清理任何部分创建的上下文
         if hasattr(task, '_app_context'):
             try:
                 task._app_context.pop()
             except Exception:
                 pass
             delattr(task, '_app_context')
+        raise  # 重新抛出异常，确保任务不会在无效上下文中执行
 
 @task_postrun.connect
 def cleanup_task_context(task_id, task, *args, **kwargs):
-    """
-    任务执行后清理应用上下文
-    """
+    """任务执行后清理应用上下文"""
+    if not hasattr(task, '_app_context'):
+        return
+    
     try:
-        if hasattr(task, '_app_context'):
-            logger.info(f"清理任务 {task_id} 的应用上下文")
-            
-            # 清理数据库会话
-            try:
-                from app.extensions import db
-                db.session.remove()
-                logger.info(f"已清理任务 {task_id} 的数据库会话")
-            except Exception as e:
-                logger.error(f"清理任务 {task_id} 的数据库会话时出错: {str(e)}")
-            
-            # 弹出应用上下文
-            task._app_context.pop()
-            delattr(task, '_app_context')
-            logger.info(f"已清理任务 {task_id} 的应用上下文")
+        # 清理数据库会话
+        from app.extensions import db
+        db.session.remove()
+        
+        # 弹出上下文
+        task._app_context.pop()
+        delattr(task, '_app_context')
+        logger.info(f"任务 {task_id} 的应用上下文已清理")
+        
     except Exception as e:
         logger.error(f"清理任务 {task_id} 的应用上下文时出错: {str(e)}")
+        # 确保属性被删除
+        if hasattr(task, '_app_context'):
+            delattr(task, '_app_context')
+        raise  # 重新抛出异常，以便Celery可以记录失败
 
 @worker_ready.connect
 def worker_ready_handler(sender, **kwargs):

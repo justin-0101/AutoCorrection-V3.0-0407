@@ -14,7 +14,6 @@ from app.models.essay import Essay, EssayStatus
 from app.models.correction import Correction, CorrectionStatus
 from app.models.db import db
 from app.tasks.monitoring_tasks import metrics_store, generate_system_report
-from app.tasks.correction_tasks import check_and_fix_inconsistent_statuses
 from celery.result import AsyncResult
 from celery import current_app as celery_app
 
@@ -362,24 +361,29 @@ def get_stale_essays():
 def fix_inconsistent_essays():
     """修复状态不一致的作文"""
     try:
-        # 可以选择性地传入特定作文ID，否则修复所有不一致的记录
-        data = request.get_json() or {}
-        essay_ids = data.get('essay_ids', [])
+        # 推迟导入，避免循环依赖
+        from app.tasks.correction_tasks import check_and_fix_inconsistent_statuses
         
-        # 调用异步任务修复不一致状态
-        task = check_and_fix_inconsistent_statuses.apply_async()
+        # 获取请求参数
+        params = request.json or {}
+        fix_mode = params.get('mode', 'auto')  # auto, dry_run
+        
+        # 启动异步任务
+        task = check_and_fix_inconsistent_statuses.apply_async(
+            kwargs={'mode': fix_mode}
+        )
         
         return jsonify({
             'success': True,
-            'task_id': task.id,
-            'message': '已启动状态修复任务'
+            'message': f'已启动状态不一致修复任务，模式: {fix_mode}',
+            'task_id': task.id
         })
     
     except Exception as e:
-        logger.exception(f"启动状态修复任务失败: {str(e)}")
+        logger.exception(f"修复状态不一致的作文失败: {str(e)}")
         return jsonify({
             'success': False,
-            'message': f'启动状态修复任务失败: {str(e)}'
+            'message': f'修复状态不一致的作文失败: {str(e)}'
         }), 500
 
 

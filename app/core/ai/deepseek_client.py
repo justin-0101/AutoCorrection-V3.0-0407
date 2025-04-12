@@ -12,7 +12,15 @@ import logging
 import traceback
 import time
 from typing import Dict, Any, List, Optional, Union
-import requests
+import re
+import asyncio
+import httpx
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type
+)
 
 from app.core.ai.api_client import BaseAPIClient, APIError
 from config.ai_config import AI_CONFIG
@@ -53,13 +61,30 @@ class DeepseekClient(BaseAPIClient):
         logger.info(f"DeepSeek API原始URL: {self.original_base_url}")
         logger.info(f"DeepSeek API修正URL: {self.api_base}")
         
-        # 初始化OpenAI客户端，正确传递参数
+        # 初始化OpenAI客户端，设置合理的超时和重试参数
         self.client = OpenAI(
             api_key=self.api_key,
             base_url=self.api_base.replace('/v1', ''),  # 移除基础URL中的/v1，SDK会自动添加
-            timeout=60.0,
-            max_retries=3
+            timeout=60.0,  # 增加超时时间到60秒
+            max_retries=5,  # 保持5次重试
+            default_headers={"Keep-Alive": "timeout=60, max=1000"}  # 增加keep-alive超时
         )
+        
+        # API调用配置
+        self.api_config = {
+            'timeout': httpx.Timeout(
+                connect=5.0,    # 增加连接超时
+                read=60.0,      # 增加读取超时到60秒
+                write=20.0,     # 增加写入超时
+                pool=10.0       # 增加连接池超时
+            ),
+            'max_tokens': 8000,  # 增加token限制到8000
+            'chunk_size': 4000,  # 增加分块大小
+            'temperature': 0.7,
+            'top_p': 0.95,
+            'frequency_penalty': 0,
+            'presence_penalty': 0
+        }
         
         # 验证模型可用性
         VALID_MODELS = ["deepseek-reasoner", "deepseek-chat", "deepseek-coder"]
@@ -116,173 +141,9 @@ class DeepseekClient(BaseAPIClient):
         Returns:
             str: 清洗后的JSON字符串
         """
-        import re
         # 移除控制字符和其他可能导致JSON解析错误的字符
         return re.sub(r'[\x00-\x1F\x7F]', '', json_str)
 
-    def analyze_essay(self, content: str) -> Dict[str, Any]:
-        """
-        使用Deepseek分析作文
-        
-        Args:
-            content: 作文内容
-            
-        Returns:
-            Dict: 分析结果
-        """
-        try:
-            logger.info(f"使用Deepseek分析作文，内容长度: {len(content)}")
-            text_length = len(content)
-            
-            # 使用原始50分制评分标准
-            system_prompt = f"""你是一位专业的语文教师，现在需要你按照广东中考语文作文评分标准对一篇作文进行全面评分和详细分析。
-
-【作文评分标准】
-总分50分
-字数要求600字以上
-
-【评分等级划分】
-A级（43-50分）：内容立意明确，中心突出，材料具体生动，有真情实感；语言得体、流畅；结构严谨，注意照应，详略得当；卷面整洁，书写优美。
-B级（35-42分）：内容立意明确，中心突出，材料具体；语言规范、通顺；结构完整，条理清楚；卷面整洁，书写工整。
-C级（27-34分）：内容立意明确，材料能表现中心；语言基本通顺，有少数错别字；结构基本完整，有条理；卷面较为整洁，书写清楚。
-D级（0-26分）：内容立意不明确，材料难以表现中心；语言不通顺，错别字较多；结构不完整，条理不清楚；卷面脏乱，字迹潦草。
-
-【评分维度权重】
-各项分数必须为整数，且必须严格按照以下权重范围分配：
-1. 内容主旨：占总分的30%-40%（最高20分，最低视作文质量定）
-2. 语言文采：占总分的20%-30%（最高15分，最低视作文质量定）
-3. 文章结构：占总分的10%-20%（最高10分，最低视作文质量定）
-4. 文面书写：占总分的0%-10%（最高5分，最低视作文质量定）
-
-【具体扣分项】
-1. 无标题扣2分
-2. 字数不足：低于600字，每少50字扣1分
-3. 错别字：每个错别字扣1分
-4. 标点符号使用不规范：根据严重程度1-3分
-
-错别字扣分是从四项得分总和中直接扣除的，而非从某个分项中扣除。
-
-字数：{text_length}字
-
-请提供以下信息，并确保只返回JSON格式的结果：
-```
-{{
-    "总得分": 45,
-    "分项得分": {{
-        "内容主旨": 18,
-        "语言文采": 14,
-        "文章结构": 9,
-        "文面书写": 4
-    }},
-    "总体评价": "这是一篇内容充实的文章，请在这里提供200字左右的总体评价。",
-    "内容分析": "文章主题明确，论述有力，请在这里提供200字左右的内容分析。",
-    "语言分析": "语言表达流畅，用词准确，请在这里提供200字左右的语言分析。",
-    "结构分析": "文章结构合理，层次分明，请在这里提供200字左右的结构分析。",
-    "写作建议": "建议在论述方面更加深入，请在这里提供200字左右的写作建议。",
-    "错别字": ["错误1->正确1", "错误2->正确2"]
-}}
-```
-
-请确保只返回JSON格式的结果，不要包含其他说明文字。每个分析字段控制在200字左右，避免过长。
-"""
-            
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": content}
-            ]
-            
-            try:
-                # 使用OpenAI SDK调用DeepSeek API
-                logger.info(f"准备调用DeepSeek API，模型: {self.model}, URL: {self.api_base}")
-                logger.info(f"API请求路径: {self.api_base}/chat/completions")
-                
-                try:
-                    # 记录请求参数
-                    logger.info(f"请求参数: model={self.model}, temperature=0.1, max_tokens=2048, top_p=0.8")
-                    logger.info(f"消息数量: {len(messages)}")
-                    
-                    # 根据官方文档，调用DeepSeek API (与OpenAI兼容格式)
-                    response = self.client.chat.completions.create(
-                        model=self.model,
-                        messages=messages,
-                        temperature=0.1,
-                        max_tokens=2048,
-                        top_p=0.8
-                    )
-                    logger.info(f"DeepSeek API调用成功，响应ID: {response.id if hasattr(response, 'id') else 'unknown'}")
-                    
-                except Exception as api_err:
-                    logger.error(f"DeepSeek API调用出错: {str(api_err)}")
-                    # 增强错误日志
-                    logger.error(f"""
-                    API请求失败详情：
-                    URL: {self.api_base}/chat/completions
-                    模型: {self.model}
-                    消息长度: {len(content)}
-                    """)
-                    
-                    error_details = ""
-                    
-                    # 提取并记录详细错误信息
-                    if hasattr(api_err, 'response') and api_err.response:
-                        status_code = getattr(api_err.response, 'status_code', 'unknown')
-                        error_text = getattr(api_err.response, 'text', '')[:500]
-                        logger.error(f"响应状态码: {status_code}")
-                        logger.error(f"响应内容: {error_text}")
-                        error_details = f"状态码: {status_code}, 响应: {error_text[:100]}"
-                    
-                    raise APIError(f"DeepSeek API调用失败: {str(api_err)} {error_details}")
-                
-                # 提取响应内容
-                if response and hasattr(response, 'choices') and len(response.choices) > 0:
-                    try:
-                        # 提取内容并解析JSON
-                        content = response.choices[0].message.content
-                        logger.info(f"DeepSeek API响应内容: {content[:100]}...")
-                        result_json = json.loads(content)
-                        return self.format_response(result_json)
-                    except json.JSONDecodeError:
-                        # 尝试从文本中提取JSON，并应用JSON清洗
-                        text_content = response.choices[0].message.content
-                        json_start = text_content.find('{')
-                        json_end = text_content.rfind('}') + 1
-                        
-                        if json_start >= 0 and json_end > json_start:
-                            # 应用JSON清洗函数
-                            json_str = self._clean_json(text_content[json_start:json_end])
-                            try:
-                                result_json = json.loads(json_str)
-                                logger.info("成功通过JSON清洗处理解析响应")
-                                return self.format_response(result_json)
-                            except json.JSONDecodeError as e:
-                                logger.error(f"无法从文本中提取有效JSON: {str(e)}")
-                                logger.error(f"清洗后的JSON内容: {json_str[:200]}...")
-                        
-                        return {
-                            "status": "error",
-                            "message": f"无法解析JSON响应"
-                        }
-                else:
-                    logger.error(f"DeepSeek响应格式异常")
-                    return {
-                        "status": "error",
-                        "message": "API响应格式错误"
-                    }
-                
-            except Exception as e:
-                logger.error(f"DeepSeek API请求错误: {str(e)}")
-                return {
-                    "status": "error",
-                    "message": f"API请求错误: {str(e)}"
-                }
-                
-        except Exception as e:
-            logger.error(f"DeepSeek分析过程中发生错误: {str(e)}\n{traceback.format_exc()}")
-            return {
-                "status": "error", 
-                "message": f"分析失败: {str(e)}"
-            }
-    
     def format_response(self, response: Dict) -> Dict[str, Any]:
         """
         格式化API响应结果
@@ -367,6 +228,60 @@ D级（0-26分）：内容立意不明确，材料难以表现中心；语言不
             logger.error(f"提取Deepseek响应数据时发生错误: {str(e)}")
             raise Exception(f"提取响应数据失败: {str(e)}")
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, max=10),
+        retry=retry_if_exception_type((httpx.RequestError, httpx.HTTPStatusError)),
+        retry_error_callback=lambda retry_state: {
+            "status": "error",
+            "message": f"API调用失败，已重试{retry_state.attempt_number}次"
+        }
+    )
+    async def _call_api(self, messages: List[Dict[str, str]], **kwargs) -> Dict:
+        """
+        异步调用API
+        
+        Args:
+            messages: 消息列表
+            **kwargs: 其他参数
+            
+        Returns:
+            Dict: API响应
+        """
+        async with httpx.AsyncClient(
+            timeout=self.api_config['timeout'],
+            verify=self.verify_ssl
+        ) as client:
+            try:
+                response = await client.post(
+                    f"{self.api_base}/chat/completions",
+                    json={
+                        "model": self.model,
+                        "messages": messages,
+                        "max_tokens": kwargs.get('max_tokens', self.api_config['max_tokens']),
+                        "temperature": kwargs.get('temperature', self.api_config['temperature']),
+                        "top_p": kwargs.get('top_p', self.api_config['top_p']),
+                        "frequency_penalty": kwargs.get('frequency_penalty', self.api_config['frequency_penalty']),
+                        "presence_penalty": kwargs.get('presence_penalty', self.api_config['presence_penalty'])
+                    },
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json"
+                    }
+                )
+                response.raise_for_status()
+                return response.json()
+                
+            except httpx.RequestError as e:
+                logger.error(f"API请求错误: {str(e)}")
+                raise
+            except httpx.HTTPStatusError as e:
+                logger.error(f"API响应错误: {str(e)}")
+                raise
+            except Exception as e:
+                logger.error(f"未知错误: {str(e)}")
+                raise
+
     def correct_essay(self, content: str) -> Dict[str, Any]:
         """
         批改作文并返回标准化结果
@@ -396,44 +311,329 @@ D级（0-26分）：内容立意不明确，材料难以表现中心；语言不
             }
         """
         try:
-            logger.info(f"开始批改作文，内容长度: {len(content)}")
+            logger.info(f"使用Deepseek批改作文，内容长度: {len(content)}")
             
-            # 使用analyze_essay获取分析结果
-            analysis_result = self.analyze_essay(content)
+            # 计算预估token数（中文每个字约2-3个token）
+            estimated_tokens = len(content) * 3
             
-            if analysis_result.get("status") == "success":
-                # 获取原始结果
-                raw_result = analysis_result.get("result", {})
-                
-                # 直接使用返回的结果，确保键名与期望匹配
-                corrected_result = {
-                    "总得分": raw_result.get("总得分", 0),
-                    "分项得分": raw_result.get("分项得分", {
-                        "内容主旨": 0,
-                        "语言文采": 0,
-                        "文章结构": 0,
-                        "文面书写": 0
-                    }),
-                    "总体评价": raw_result.get("总体评价", ""),
-                    "内容分析": raw_result.get("内容分析", ""),
-                    "语言分析": raw_result.get("语言分析", ""),
-                    "结构分析": raw_result.get("结构分析", ""),
-                    "写作建议": raw_result.get("写作建议", ""),
-                    "错别字": raw_result.get("错别字", [])
-                }
-                
-                return {
-                    "status": "success",
-                    "result": corrected_result
-                }
-            else:
-                # 保留错误信息
-                return analysis_result
-                
+            # 如果预估token数超过限制，分块处理
+            if estimated_tokens > self.api_config['chunk_size']:
+                logger.info(f"内容较长，将分块处理，预估token数: {estimated_tokens}")
+                return self._process_long_content(content)
+            
+            system_prompt = f"""你是一位专业的语文教师，现在需要你按照广东中考语文作文评分标准对一篇作文进行全面评分和详细分析。
+
+【作文评分标准】
+总分50分
+字数要求600字以上
+
+【评分等级划分】
+A级（43-50分）：内容立意明确，中心突出，材料具体生动，有真情实感；语言得体、流畅；结构严谨，注意照应，详略得当；卷面整洁，书写优美。
+B级（35-42分）：内容立意明确，中心突出，材料具体；语言规范、通顺；结构完整，条理清楚；卷面整洁，书写工整。
+C级（27-34分）：内容立意明确，材料能表现中心；语言基本通顺，有少数错别字；结构基本完整，有条理；卷面较为整洁，书写清楚。
+D级（0-26分）：内容立意不明确，材料难以表现中心；语言不通顺，错别字较多；结构不完整，条理不清楚；卷面脏乱，字迹潦草。
+
+【评分维度权重】
+各项分数必须为整数，且必须严格按照以下权重范围分配：
+1. 内容主旨：占总分的30%-40%（最高20分，最低视作文质量定）
+2. 语言文采：占总分的20%-30%（最高15分，最低视作文质量定）
+3. 文章结构：占总分的10%-20%（最高10分，最低视作文质量定）
+4. 文面书写：占总分的0%-10%（最高5分，最低视作文质量定）
+
+【具体扣分项】
+1. 无标题扣2分
+2. 字数不足：低于600字，每少50字扣1分
+3. 错别字：每个错别字扣1分
+4. 标点符号使用不规范：根据严重程度1-3分
+
+错别字扣分是从四项得分总和中直接扣除的，而非从某个分项中扣除。
+
+字数：{len(content)}字
+
+请提供以下信息，并确保只返回JSON格式的结果：
+```
+{{
+    "总得分": 45,
+    "分项得分": {{
+        "内容主旨": 18,
+        "语言文采": 14,
+        "文章结构": 9,
+        "文面书写": 4
+    }},
+    "总体评价": "这是一篇内容充实的文章，请在这里提供200字左右的总体评价。",
+    "内容分析": "文章主题明确，论述有力，请在这里提供200字左右的内容分析。",
+    "语言分析": "语言表达流畅，用词准确，请在这里提供200字左右的语言分析。",
+    "结构分析": "文章结构合理，层次分明，请在这里提供200字左右的结构分析。",
+    "写作建议": "建议在论述方面更加深入，请在这里提供200字左右的写作建议。",
+    "错别字": ["错误1->正确1", "错误2->正确2"]
+}}
+```
+
+请确保只返回JSON格式的结果，不要包含其他说明文字。每个分析字段控制在200字左右，避免过长。
+"""
+            
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": content}
+            ]
+            
+            # 使用异步调用并等待结果
+            loop = asyncio.get_event_loop()
+            response = loop.run_until_complete(self._call_api(messages))
+            
+            # 提取结果
+            result = self._extract_result(response)
+            return {
+                "status": "success",
+                "result": result
+            }
+            
         except Exception as e:
             logger.error(f"批改作文失败: {str(e)}")
             logger.error(f"错误详情: {traceback.format_exc()}")
             return {
                 "status": "error",
                 "message": f"批改作文失败: {str(e)}"
+            }
+    
+    def _process_long_content(self, content: str) -> Dict[str, Any]:
+        """
+        处理长文本内容，将其分块处理
+        """
+        try:
+            # 按句子分割内容
+            sentences = re.split(r'([。！？])', content)
+            chunks = []
+            current_chunk = ""
+            
+            # 组合句子成块
+            for i in range(0, len(sentences), 2):
+                if i + 1 < len(sentences):
+                    sentence = sentences[i] + sentences[i + 1]
+                else:
+                    sentence = sentences[i]
+                
+                if len(current_chunk) + len(sentence) <= self.api_config['chunk_size']:
+                    current_chunk += sentence
+                else:
+                    if current_chunk:
+                        chunks.append(current_chunk)
+                    current_chunk = sentence
+            
+            if current_chunk:
+                chunks.append(current_chunk)
+            
+            # 处理每个块
+            results = []
+            for i, chunk in enumerate(chunks):
+                logger.info(f"处理第{i + 1}/{len(chunks)}块，长度: {len(chunk)}")
+                result = self.correct_essay(chunk)
+                if result['status'] == 'success':
+                    results.append(result['result'])
+                else:
+                    raise Exception(f"处理第{i + 1}块时失败: {result['message']}")
+            
+            # 合并结果
+            return {
+                "status": "success",
+                "result": self._merge_results(results)
+            }
+            
+        except Exception as e:
+            logger.error(f"处理长文本失败: {str(e)}")
+            return {
+                "status": "error",
+                "message": f"处理长文本失败: {str(e)}"
+            }
+    
+    def _merge_results(self, results: List[Dict]) -> Dict:
+        """
+        合并多个批改结果
+        """
+        if not results:
+            return {}
+            
+        # 计算平均分数
+        total_score = sum(r.get('total_score', 0) for r in results) / len(results)
+        content_score = sum(r.get('content_score', 0) for r in results) / len(results)
+        language_score = sum(r.get('language_score', 0) for r in results) / len(results)
+        structure_score = sum(r.get('structure_score', 0) for r in results) / len(results)
+        writing_score = sum(r.get('writing_score', 0) for r in results) / len(results)
+        
+        # 合并文本分析
+        overall_assessment = "\n".join(r.get('overall_assessment', '') for r in results)
+        content_analysis = "\n".join(r.get('content_analysis', '') for r in results)
+        language_analysis = "\n".join(r.get('language_analysis', '') for r in results)
+        structure_analysis = "\n".join(r.get('structure_analysis', '') for r in results)
+        improvement_suggestions = "\n".join(r.get('improvement_suggestions', '') for r in results)
+        
+        # 合并错别字
+        spelling_errors = []
+        for r in results:
+            if 'spelling_errors' in r and isinstance(r['spelling_errors'], dict):
+                spelling_errors.extend(r['spelling_errors'].get('解析', []))
+        
+        return {
+            "total_score": round(total_score, 1),
+            "content_score": round(content_score, 1),
+            "language_score": round(language_score, 1),
+            "structure_score": round(structure_score, 1),
+            "writing_score": round(writing_score, 1),
+            "overall_assessment": overall_assessment,
+            "content_analysis": content_analysis,
+            "language_analysis": language_analysis,
+            "structure_analysis": structure_analysis,
+            "improvement_suggestions": improvement_suggestions,
+            "spelling_errors": {
+                "解析": spelling_errors
+            }
+        }
+
+    def analyze_essay(self, content: str) -> Dict[str, Any]:
+        """
+        分析作文（与 correct_essay 方法相同，保持向后兼容）
+        
+        Args:
+            content: 作文内容
+            
+        Returns:
+            Dict: 分析结果
+        """
+        return self.correct_essay(content)
+
+    async def correct_essay_async(self, content: str) -> Dict[str, Any]:
+        """异步批改作文"""
+        try:
+            logger.info(f"异步批改作文，内容长度: {len(content)}")
+            
+            # 计算预估token数
+            estimated_tokens = len(content) * 3
+            
+            # 如果预估token数超过限制，分块处理
+            if estimated_tokens > self.api_config['chunk_size']:
+                logger.info(f"内容较长，将分块处理，预估token数: {estimated_tokens}")
+                return await self._process_long_content_async(content)
+            
+            system_prompt = f"""你是一位专业的语文教师，现在需要你按照广东中考语文作文评分标准对一篇作文进行全面评分和详细分析。
+            // ... existing prompt ...
+            """
+            
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": content}
+            ]
+            
+            response = await self._call_api(messages)
+            result = self._extract_result(response)
+            return {
+                "status": "success",
+                "result": result
+            }
+            
+        except Exception as e:
+            logger.error(f"异步批改作文失败: {str(e)}")
+            logger.error(f"错误详情: {traceback.format_exc()}")
+            return {
+                "status": "error",
+                "message": f"异步批改作文失败: {str(e)}"
+            }
+
+    async def _process_long_content_async(self, content: str) -> Dict[str, Any]:
+        """
+        处理长文本内容，将其分块处理
+        """
+        try:
+            # 按句子分割内容
+            sentences = re.split(r'([。！？])', content)
+            chunks = []
+            current_chunk = ""
+            
+            # 组合句子成块
+            for i in range(0, len(sentences), 2):
+                if i + 1 < len(sentences):
+                    sentence = sentences[i] + sentences[i + 1]
+                else:
+                    sentence = sentences[i]
+                
+                if len(current_chunk) + len(sentence) <= self.api_config['chunk_size']:
+                    current_chunk += sentence
+                else:
+                    if current_chunk:
+                        chunks.append(current_chunk)
+                    current_chunk = sentence
+            
+            if current_chunk:
+                chunks.append(current_chunk)
+            
+            # 处理每个块
+            results = []
+            for i, chunk in enumerate(chunks):
+                logger.info(f"处理第{i + 1}/{len(chunks)}块，长度: {len(chunk)}")
+                result = await self.correct_essay_async(chunk)
+                if result['status'] == 'success':
+                    results.append(result['result'])
+                else:
+                    raise Exception(f"处理第{i + 1}块时失败: {result['message']}")
+            
+            # 合并结果
+            return {
+                "status": "success",
+                "result": self._merge_results(results)
+            }
+            
+        except Exception as e:
+            logger.error(f"处理长文本失败: {str(e)}")
+            return {
+                "status": "error",
+                "message": f"处理长文本失败: {str(e)}"
+            }
+
+    async def _process_long_content_async(self, content: str) -> Dict[str, Any]:
+        """
+        处理长文本内容，将其分块处理
+        """
+        try:
+            # 按句子分割内容
+            sentences = re.split(r'([。！？])', content)
+            chunks = []
+            current_chunk = ""
+            
+            # 组合句子成块
+            for i in range(0, len(sentences), 2):
+                if i + 1 < len(sentences):
+                    sentence = sentences[i] + sentences[i + 1]
+                else:
+                    sentence = sentences[i]
+                
+                if len(current_chunk) + len(sentence) <= self.api_config['chunk_size']:
+                    current_chunk += sentence
+                else:
+                    if current_chunk:
+                        chunks.append(current_chunk)
+                    current_chunk = sentence
+            
+            if current_chunk:
+                chunks.append(current_chunk)
+            
+            # 处理每个块
+            results = []
+            for i, chunk in enumerate(chunks):
+                logger.info(f"处理第{i + 1}/{len(chunks)}块，长度: {len(chunk)}")
+                result = await self.correct_essay_async(chunk)
+                if result['status'] == 'success':
+                    results.append(result['result'])
+                else:
+                    raise Exception(f"处理第{i + 1}块时失败: {result['message']}")
+            
+            # 合并结果
+            return {
+                "status": "success",
+                "result": self._merge_results(results)
+            }
+            
+        except Exception as e:
+            logger.error(f"处理长文本失败: {str(e)}")
+            return {
+                "status": "error",
+                "message": f"处理长文本失败: {str(e)}"
             } 

@@ -19,7 +19,7 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-def init_services():
+def setup_services():
     """初始化所有必要的服务"""
     logger.info("开始初始化应用服务...")
     
@@ -28,51 +28,10 @@ def init_services():
         from app import create_app
         app = create_app()
         
-        # 确保数据库迁移已应用
-        logger.info("检查数据库连接...")
-        
         with app.app_context():
-            from app.models.db import db
-            
-            # 测试数据库连接 (使用新版SQLAlchemy语法)
-            try:
-                with db.engine.connect() as conn:
-                    result = conn.execute(db.text("SELECT 1"))
-                    conn.commit()
-                logger.info("数据库连接正常")
-            except Exception as db_err:
-                logger.error(f"数据库连接测试失败: {str(db_err)}")
-                return False
-            
-            # 初始化AI服务
-            from app.core.ai.init_services import ensure_services
-            
-            if ensure_services():
-                logger.info("AI服务初始化成功")
-            else:
-                logger.error("AI服务初始化失败")
-                return False
-            
-            # 启动服务容器
-            from app.core.services.container import container
-            
-            # 初始化Redis服务
-            from app.core.services.redis_service import RedisService
-            redis_service = RedisService()
-            container.register('redis_service', redis_service)
-            logger.info("Redis服务已注册")
-            
-            # 初始化AI客户端工厂
-            from app.core.ai import AIClientFactory
-            ai_client_factory = AIClientFactory()
-            container.register('ai_client_factory', ai_client_factory)
-            logger.info("AI客户端工厂已注册")
-            
-            # 初始化批改服务
-            from app.core.correction.correction_service import CorrectionService
-            correction_service = CorrectionService()
-            container.register('correction_service', correction_service)
-            logger.info("批改服务已注册")
+            # 直接使用统一的服务初始化函数
+            from app.core.services.__init__ import init_services
+            init_services()
             
             logger.info("所有服务已成功初始化")
             return True
@@ -84,7 +43,7 @@ def init_services():
 
 def start_worker():
     """启动Celery Worker"""
-    if not init_services():
+    if not setup_services():
         logger.error("由于服务初始化失败，未能启动Worker")
         return False
     

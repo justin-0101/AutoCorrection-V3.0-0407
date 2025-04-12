@@ -68,111 +68,209 @@ def about():
 @main_bp.route('/correction', methods=['GET', 'POST'])
 @login_required
 def correction():
-    """作文批改页面"""
-    logger.info("Correction route accessed with method: %s", request.method)
-    
-    # 检查用户是否已登录
-    if not current_user or not current_user.is_authenticated:
-        logger.warning("用户未登录或认证失败")
-        flash('请先登录', 'error')
-        return redirect(url_for('main.login'))
-    
+    """作文批改页面和处理提交"""
     if request.method == 'POST':
-        logger.info("Processing correction form submission")
-        
+        logger.info("接收到作文提交请求")
         try:
-            # 记录表单数据
-            logger.info("接收到表单数据: %s", request.form)
-            logger.info("表单键值: %s", list(request.form.keys()))
+            # 检查用户当前是否有权限提交
+            correction_service = CorrectionService()
+            limits_check = correction_service.check_user_limits(current_user.id)
             
-            # 获取并验证source_type
+            if not limits_check.get('can_submit', False):
+                error_msg = limits_check.get('message', '您已达到批改次数限制')
+                logger.warning(f"用户 {current_user.id} 没有权限提交作文: {error_msg}")
+                
+                return jsonify({
+                    'success': False,
+                    'message': error_msg
+                })
+            
             source_type = request.form.get('source_type', 'text')
-            logger.info("表单中的原始source_type值: '%s'", source_type)
+            logger.info(f"接收到source_type: {source_type}")
             
-            # 清理source_type值
-            source_type = sanitize_input(source_type, max_length=20)
-            logger.info("清理后的source_type: 从 '%s' 到 '%s'", request.form.get('source_type'), source_type)
-            
-            # 验证source_type值
-            valid_types = ['text', 'upload', 'paste', 'api']
-            logger.info("有效的source_type值: %s", valid_types)
-            
+            # 验证source_type
+            valid_types = ['text', 'paste', 'upload', 'api']
             if source_type not in valid_types:
                 source_type = 'text'  # 默认为text类型
             
             logger.info("source_type值有效: '%s'", source_type)
             
+            # 处理文件上传
             if 'file' in request.files:
                 file = request.files['file']
-                if file:
+                if file and file.filename:
                     logger.info("处理文件上传: %s", file.filename)
                     
-                    # 处理文件
-                    file_service = FileService()
-                    file_result = file_service.process_uploaded_file(file)
+                    # 确保上传目录存在
+                    upload_folder = current_app.config.get('UPLOAD_FOLDER', 'uploads')
+                    os.makedirs(upload_folder, exist_ok=True)
                     
-                    if file_result.get('success'):
-                        title = file_result.get('title', '')
-                        logger.info("文件处理成功: %s, 标题: %s", file.filename, title)
+                    # 检查文件类型
+                    allowed_extensions = {'txt', 'docx', 'pdf', 'doc'}
+                    file_ext = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else ''
+                    
+                    if file_ext not in allowed_extensions:
+                        logger.warning(f"不支持的文件类型: {file_ext}")
+                        return jsonify({
+                            'success': False,
+                            'message': f'不支持的文件类型，仅支持: {", ".join(allowed_extensions)}'
+                        })
+                    
+                    # 处理文件
+                    try:
+                        file_service = FileService()
+                        file_result = file_service.process_uploaded_file(file)
                         
-                        # 使用source_type
-                        logger.info("文件上传 - 使用source_type值: '%s'", source_type)
-                        
-                        # 使用作文标题
-                        title = title or request.form.get('subject', '')
-                        logger.info("使用作文标题: %s", title)
-                        
-                        try:
-                            # 创建作文记录
-                            correction_service = CorrectionService()
-                            result = correction_service.submit_essay(
-                                user_id=current_user.id,
-                                title=title,
-                                content=file_result['content'],
-                                grade='junior'  # 默认为初中水平
-                            )
-                            
-                            if result.get('status') == 'success':
-                                logger.info("异步批改任务已提交，essay_id: %s, task_id: %s", 
-                                          result.get('essay_id'), result.get('task_id'))
-                                
-                                # 设置成功消息
-                                flash('作文已提交并开始批改，请稍候...', 'success')
-                                logger.info("File processed successfully: %s", file.filename)
-                                
-                                # 返回JSON响应而不是重定向
-                                return jsonify({
-                                    'success': True,
-                                    'message': '作文已提交并开始批改，请稍候...',
-                                    'essay_id': result['essay_id'],
-                                    'task_id': result.get('task_id')
-                                })
-                            else:
-                                # 返回错误JSON响应
-                                return jsonify({
-                                    'success': False,
-                                    'message': result.get('message', '提交失败')
-                                })
-                        except Exception as e:
-                            logger.error("创建作文记录时出错: %s", str(e), exc_info=True)
-                            # 返回错误JSON响应
+                        if not file_result.get('success'):
+                            logger.error(f"文件处理失败: {file_result.get('message')}")
                             return jsonify({
                                 'success': False,
-                                'message': '提交作文时出错，请重试'
+                                'message': file_result.get('message', '文件处理失败')
                             })
+                        
+                        title = file_result.get('title', '') or request.form.get('subject', '')
+                        if not title:
+                            # 使用文件名作为标题
+                            title = os.path.splitext(file.filename)[0]
                             
-            # 返回错误JSON响应
-            return jsonify({
-                'success': False,
-                'message': '请选择要上传的文件'
-            })
+                        logger.info("文件处理成功: %s, 标题: %s", file.filename, title)
+                        
+                        # 提交作文
+                        result = correction_service.submit_essay(
+                            user_id=current_user.id,
+                            title=title,
+                            content=file_result['content'],
+                            grade=request.form.get('grade', 'junior')  # 获取年级信息
+                        )
+                        
+                        logger.info(f"作文提交结果: {result}")
+                        
+                        if result.get('status') == 'success':
+                            essay_id = result.get('essay_id')
+                            task_id = result.get('task_id')
+                            
+                            # 检查essay_id是否有效
+                            if not essay_id:
+                                logger.error("提交成功但返回的essay_id无效")
+                                return jsonify({
+                                    'success': False,
+                                    'message': '系统错误：作文提交成功但返回的ID无效'
+                                })
+                            
+                            # 检查数据库中是否存在该作文
+                            essay = Essay.query.filter_by(id=essay_id).first()
+                            if not essay:
+                                logger.error(f"严重错误：作文提交成功但在数据库中找不到ID为{essay_id}的作文")
+                                return jsonify({
+                                    'success': False,
+                                    'message': f'系统错误：作文提交成功但在数据库中找不到作文(ID:{essay_id})'
+                                })
+                            
+                            logger.info(f"异步批改任务已提交，essay_id: {essay_id}, task_id: {task_id}")
+                            
+                            flash('作文已提交并开始批改，请稍候...', 'success')
+                            
+                            return jsonify({
+                                'success': True,
+                                'message': '作文已提交并开始批改，请稍候...',
+                                'essay_id': essay_id,
+                                'task_id': task_id
+                            })
+                        else:
+                            logger.error(f"提交作文失败: {result.get('message')}")
+                            return jsonify({
+                                'success': False,
+                                'message': result.get('message', '提交失败')
+                            })
+                    except Exception as e:
+                        logger.error("处理上传文件时出错: %s", str(e), exc_info=True)
+                        return jsonify({
+                            'success': False,
+                            'message': f'处理文件时出错: {str(e)}'
+                        })
+                else:
+                    logger.warning("请求中包含空文件")
+                    return jsonify({
+                        'success': False,
+                        'message': '请选择要上传的文件'
+                    })
+            
+            # 处理文本内容提交（非文件上传）
+            elif source_type == 'text' or source_type == 'paste':
+                logger.info("处理文本内容提交")
+                
+                content = request.form.get('content', '')
+                if not content or len(content.strip()) < 10:
+                    logger.warning("提交的作文内容过短或为空")
+                    return jsonify({
+                        'success': False,
+                        'message': '作文内容过短，请至少输入10个字'
+                    })
+                
+                title = request.form.get('subject', '')
+                if not title:
+                    # 从内容中提取前10个字作为标题
+                    title = content[:10] + '...'
+                
+                # 提交作文
+                result = correction_service.submit_essay(
+                    user_id=current_user.id,
+                    title=title,
+                    content=content,
+                    grade=request.form.get('grade', 'junior')
+                )
+                
+                logger.info(f"作文提交结果: {result}")
+                
+                if result.get('status') == 'success':
+                    essay_id = result.get('essay_id')
+                    task_id = result.get('task_id')
+                    
+                    # 检查essay_id是否有效
+                    if not essay_id:
+                        logger.error("提交成功但返回的essay_id无效")
+                        return jsonify({
+                            'success': False,
+                            'message': '系统错误：作文提交成功但返回的ID无效'
+                        })
+                    
+                    # 检查数据库中是否存在该作文
+                    essay = Essay.query.filter_by(id=essay_id).first()
+                    if not essay:
+                        logger.error(f"严重错误：作文提交成功但在数据库中找不到ID为{essay_id}的作文")
+                        return jsonify({
+                            'success': False,
+                            'message': f'系统错误：作文提交成功但在数据库中找不到作文(ID:{essay_id})'
+                        })
+                    
+                    logger.info(f"异步批改任务已提交，essay_id: {essay_id}, task_id: {task_id}")
+                    
+                    flash('作文已提交并开始批改，请稍候...', 'success')
+                    
+                    return jsonify({
+                        'success': True,
+                        'message': '作文已提交并开始批改，请稍候...',
+                        'essay_id': essay_id,
+                        'task_id': task_id
+                    })
+                else:
+                    logger.error(f"提交作文失败: {result.get('message')}")
+                    return jsonify({
+                        'success': False,
+                        'message': result.get('message', '提交失败')
+                    })
+            else:
+                logger.warning(f"未提供有效的source_type或文件: {source_type}")
+                return jsonify({
+                    'success': False,
+                    'message': '请提供作文内容或上传文件'
+                })
             
         except Exception as e:
             logger.error("处理作文提交时出错: %s", str(e), exc_info=True)
-            # 返回错误JSON响应
             return jsonify({
                 'success': False,
-                'message': '处理文件时出错，请重试'
+                'message': f'处理作文提交时出错: {str(e)}'
             })
     
     # GET请求处理
@@ -340,24 +438,53 @@ def allowed_file(filename):
 def user_history():
     """用户作文历史记录页面"""
     try:
-        # 获取当前用户的作文，按创建时间倒序排列
-        essays = Essay.query.filter_by(user_id=current_user.id).order_by(Essay.created_at.desc()).all()
+        # 确保当前用户已登录且有ID
+        if not current_user or not current_user.is_authenticated:
+            flash('请先登录', 'warning')
+            return redirect(url_for('main.login'))
+        
+        # 获取当前用户的作文，按创建时间倒序排列，添加空值检查
+        essays = Essay.query.filter_by(user_id=current_user.id).filter(Essay.created_at != None).order_by(Essay.created_at.desc()).all()
         
         # 添加预览内容（限制文本长度）
+        valid_essays = []
         for essay in essays:
-            # 截取作文内容前200个字符作为预览
-            if len(essay.content) > 200:
-                essay.preview = essay.content[:200] + '...'
+            if essay is None:
+                continue
+                
+            # 确保作文有内容属性
+            if not hasattr(essay, 'content') or essay.content is None:
+                essay.content = ""
+                essay.preview = "(无内容)"
             else:
-                essay.preview = essay.content
+                # 截取作文内容前200个字符作为预览
+                if len(essay.content) > 200:
+                    essay.preview = essay.content[:200] + '...'
+                else:
+                    essay.preview = essay.content
+            
+            valid_essays.append(essay)
         
         # 传递作文列表到模板
         try:
-            return render_template('user_history.html', essays=essays)
+            return render_template('user_history.html', essays=valid_essays)
         except Exception as template_error:
             current_app.logger.error(f"模板渲染失败: {template_error}")
-            # 尝试使用带路径的模板名
-            return render_template('/user_history.html', essays=essays)
+            # 检查模板是否存在
+            for template_dir in current_app.jinja_loader.searchpath:
+                template_path = os.path.join(template_dir, 'user_history.html')
+                if os.path.exists(template_path):
+                    current_app.logger.info(f"找到模板文件: {template_path}")
+                else:
+                    current_app.logger.warning(f"模板文件不存在: {template_path}")
+                    
+            # 尝试使用带路径的模板名或错误模板
+            try:
+                return render_template('/user_history.html', essays=valid_essays)
+            except Exception:
+                return render_template('error.html', 
+                                       error_code=500, 
+                                       error_message="渲染历史记录页面时出错，请联系管理员。")
     except Exception as e:
         tb = traceback.format_exc()
         current_app.logger.error(f"Failed to render user_history.html. Error: {e}\nTraceback:\n{tb}")
@@ -767,23 +894,38 @@ def batch_delete_essays():
     return redirect(url_for('main.user_history'))
 
 @main_bp.route('/api/v1/correction/essays/status/<int:essay_id>')
-@login_required
 def get_essay_status(essay_id):
     """获取作文批改状态API"""
     try:
-        essay = Essay.query.get_or_404(essay_id)
+        # 检查用户是否已登录
+        if not current_user.is_authenticated:
+            return jsonify({
+                'success': False,
+                'message': '用户未登录或会话已过期',
+                'redirect': '/login'
+            }), 401  # 401 Unauthorized
+        
+        # 使用filter_by而不是get_or_404，以更好地处理不存在的记录
+        essay = Essay.query.filter_by(id=essay_id).first()
+        
+        if not essay:
+            return jsonify({
+                'success': False,
+                'message': f'作文不存在，ID: {essay_id}'
+            }), 404
         
         # 检查用户权限
         if essay.user_id != current_user.id and not current_user.is_admin:
             return jsonify({
                 'success': False,
                 'message': '没有权限查看此作文'
-            })
+            }), 403
         
         # 获取批改状态
         status = essay.status
         correction = Correction.query.filter_by(essay_id=essay_id).first()
         
+        logger.info(f"成功获取作文状态, essay_id: {essay_id}, 状态: {status}")
         return jsonify({
             'success': True,
             'status': status,

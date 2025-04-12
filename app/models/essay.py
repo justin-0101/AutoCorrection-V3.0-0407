@@ -23,7 +23,8 @@ except ImportError:
     def track_source_type(source_type):
         pass
 
-from app.models.correction import Correction, CorrectionStatus
+# 删除直接从Correction导入的语句
+# from app.models.correction import Correction, CorrectionStatus
 
 class EssayStatus(str, enum.Enum):
     """作文状态枚举"""
@@ -84,6 +85,9 @@ class Essay(BaseModel):
         ),
     )
     
+    # 添加版本控制字段
+    version = Column(Integer, default=0, nullable=False)
+    
     # 基本信息
     title = Column(String(200), nullable=False)
     content = Column(Text, nullable=False)
@@ -129,7 +133,7 @@ class Essay(BaseModel):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
-    # 关系
+    # 关系 - 使用字符串形式引用模型，避免循环导入
     user = relationship('User', back_populates='essays', lazy='joined')
     corrections = relationship('Correction', back_populates='essay',
                              lazy='dynamic', cascade='all, delete-orphan')
@@ -244,26 +248,45 @@ class Essay(BaseModel):
     
     def get_latest_correction(self):
         """获取最新的批改记录"""
+        # 使用字符串方式访问属性
+        from app.models.correction import Correction
         return self.corrections.order_by(Correction.created_at.desc()).first()
     
     def sync_correction_results(self, correction):
-        """同步批改结果"""
-        if not correction or not correction.results:
+        """
+        同步批改结果到作文
+        
+        Args:
+            correction: Correction对象
+        
+        Returns:
+            bool: 是否成功同步
+        """
+        if not correction:
             return False
-            
+        
         try:
-            results = correction.results if isinstance(correction.results, dict) else {}
-            self.score = results.get('score')
-            self.corrected_content = results.get('corrected_content')
-            self.comments = results.get('comments')
-            self.error_analysis = results.get('error_analysis')
-            self.improvement_suggestions = results.get('improvement_suggestions')
-            self.correction_count += 1
-            db.session.commit()
-            return True
+            if hasattr(correction, 'results') and correction.results:
+                results = correction.results
+                if isinstance(results, dict):
+                    if 'score' in results:
+                        self.score = results['score']
+                    if 'corrected_content' in results:
+                        self.corrected_content = results['corrected_content']
+                    if 'comments' in results or 'overall_assessment' in results:
+                        self.comments = results.get('comments') or results.get('overall_assessment')
+                    if 'error_analysis' in results or 'spelling_errors' in results:
+                        self.error_analysis = results.get('error_analysis') or results.get('spelling_errors')
+                    if 'improvement_suggestions' in results:
+                        self.improvement_suggestions = results['improvement_suggestions']
+                
+                # 更新批改完成时间
+                self.corrected_at = datetime.utcnow()
+                return True
         except Exception as e:
-            db.session.rollback()
-            return False
+            logger.error(f"同步批改结果时出错: {str(e)}")
+        
+        return False
     
     def __init__(self, **kwargs):
         """初始化Essay对象"""
@@ -330,27 +353,131 @@ class Essay(BaseModel):
     
     @staticmethod
     def _create_correction_record(mapper, connection, target):
-        """在Essay创建后自动创建对应的Correction记录"""
+        """为新创建的Essay自动创建Correction记录"""
+        # 只有当Essay状态为PENDING时才创建Correction记录
+        if target.status != EssayStatus.PENDING.value:
+            return
+
+        # 使用原始SQL语句，避免循环依赖
+        # 获取CorrectionStatus.PENDING值
+        from app.models.correction import CorrectionStatus, CorrectionType
+        pending_status = CorrectionStatus.PENDING.value
+        ai_type = CorrectionType.AI.value
+
         try:
-            # 创建新的批改记录
-            correction = Correction(
-                essay_id=target.id,
-                status=CorrectionStatus.PENDING.value,
-                created_at=datetime.utcnow()
-            )
-            
-            # 使用同一个连接添加记录
+            # 插入Correction记录
             connection.execute(
-                Correction.__table__.insert().values(
-                    essay_id=target.id,
-                    status=CorrectionStatus.PENDING.value,
-                    created_at=datetime.utcnow()
-                )
+                db.text(
+                    """
+                    INSERT INTO corrections 
+                    (essay_id, type, status, version, created_at, updated_at, is_deleted) 
+                    VALUES (:essay_id, :type, :status, 0, :created_at, :updated_at, 0)
+                    """
+                ),
+                {
+                    'essay_id': target.id,
+                    'type': ai_type,
+                    'status': pending_status,
+                    'created_at': datetime.utcnow(),
+                    'updated_at': datetime.utcnow()
+                }
             )
-            
+            logger.info(f"自动为Essay {target.id} 创建了Correction记录")
         except Exception as e:
-            # 记录错误但不影响Essay的创建
-            logger.error(f"创建批改记录失败: {str(e)}")
+            logger.error(f"为Essay {target.id} 创建Correction记录时出错: {str(e)}")
+
+    def start_processing(self):
+        """开始处理"""
+        if self.status != EssayStatus.PENDING:
+            raise ValueError(f"无法从{self.status}状态转换为处理中状态")
+        self.status = EssayStatus.PROCESSING
+        self.updated_at = datetime.now()
+    
+    def start_correcting(self):
+        """开始批改"""
+        if self.status != EssayStatus.PROCESSING:
+            raise ValueError(f"无法从{self.status}状态转换为批改中状态")
+        self.status = EssayStatus.CORRECTING
+        self.updated_at = datetime.now()
+    
+    def complete(self):
+        """完成批改"""
+        if self.status not in [EssayStatus.PROCESSING, EssayStatus.CORRECTING]:
+            raise ValueError(f"无法从{self.status}状态转换为已完成状态")
+        self.status = EssayStatus.COMPLETED
+        self.corrected_at = datetime.now()
+        self.updated_at = datetime.now()
+    
+    def fail(self, error_message):
+        """标记批改失败"""
+        if self.status not in [EssayStatus.PROCESSING, EssayStatus.CORRECTING]:
+            raise ValueError(f"无法从{self.status}状态转换为失败状态")
+        self.status = EssayStatus.FAILED
+        self.error_message = error_message
+        self.updated_at = datetime.now()
+        
+    def archive(self):
+        """归档作文"""
+        if self.status == EssayStatus.ARCHIVED:
+            raise ValueError("作文已经处于归档状态")
+        self.status = EssayStatus.ARCHIVED
+        self.updated_at = datetime.now()
+        
+    def optimistic_update(self, **kwargs):
+        """
+        乐观锁更新方法
+        
+        Args:
+            **kwargs: 要更新的字段和值
+            
+        Returns:
+            bool: 更新是否成功
+            
+        Raises:
+            ConcurrentUpdateError: 当版本不匹配时抛出
+        """
+        try:
+            current_version = self.version
+            kwargs['version'] = current_version + 1
+            
+            # 使用版本号作为条件进行更新
+            rows = db.session.query(Essay).filter(
+                Essay.id == self.id,
+                Essay.version == current_version
+            ).update(kwargs)
+            
+            if rows == 0:
+                db.session.rollback()
+                from app.utils.exceptions import ConcurrentUpdateError
+                raise ConcurrentUpdateError("数据已被其他进程修改")
+            
+            # 更新成功，同步当前对象的版本号
+            self.version = current_version + 1
+            return True
+            
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            from app.utils.exceptions import DatabaseError
+            raise DatabaseError(f"数据库更新失败: {str(e)}")
+    
+    def safe_update_status(self, new_status: str) -> bool:
+        """
+        安全地更新作文状态
+        
+        Args:
+            new_status: 新状态
+            
+        Returns:
+            bool: 更新是否成功
+        """
+        try:
+            return self.optimistic_update(
+                status=new_status,
+                updated_at=datetime.utcnow()
+            )
+        except Exception as e:
+            logger.warning(f"作文状态更新冲突 [id={self.id}, status={new_status}]: {str(e)}")
+            return False
 
 class UserFeedback(BaseModel):
     """用户反馈模型"""
