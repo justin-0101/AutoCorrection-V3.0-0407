@@ -377,7 +377,7 @@ class DeepseekClient(BaseAPIClient):
                 "url": self.api_base,
                 "model": self.model,
                 "temperature": self.api_config.get("temperature", 0.1),
-                "timeout": self.timeout
+                "timeout": self.api_config['timeout']
             }
             print(f"[DeepseekClient] API配置: {api_config}")
             logger.info(f"[DeepseekClient] API配置: {api_config}")
