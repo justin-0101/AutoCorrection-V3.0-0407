@@ -10,11 +10,11 @@ import os
 import logging
 import datetime
 import json
+import time
 from typing import Dict, Any, List, Optional, Union
 import uuid
 import traceback
 import re
-import time
 
 from sqlalchemy.exc import SQLAlchemyError
 from app.config import config
@@ -263,12 +263,28 @@ class CorrectionService(ICorrectionService):
                 check_essay = Essay.query.filter_by(id=essay_id).first()
                 if not check_essay:
                     logger.error(f"严重错误：数据库提交后无法找到Essay ID: {essay_id}")
+                    # 如果找不到记录，返回错误，不启动任务
+                    return {
+                        'status': 'error',
+                        'message': '作文提交成功但在数据库中找不到，请联系管理员',
+                        'essay_id': essay_id
+                    }
                 else:
                     logger.info(f"验证成功：找到Essay ID: {essay_id}, 标题: {check_essay.title}")
+                
+                # 确保数据已经写入数据库并可被其他进程访问
+                db.session.flush()
+                
+                # 添加延迟，确保数据完全写入数据库
+                time.sleep(0.5)
                 
                 # 启动异步批改任务
                 task = process_essay_correction.delay(essay_id)
                 task_id = task.id
+                
+                # 确保获得了任务ID
+                if not task_id:
+                    logger.warning(f"警告：未能获取任务ID，作文ID: {essay_id}")
                 
                 # 更新批改记录的task_id
                 correction.task_id = task_id
@@ -363,6 +379,23 @@ class CorrectionService(ICorrectionService):
             
             db.session.add(essay)
             db.session.commit()
+            
+            # 验证记录是否成功保存
+            essay_id = essay.id
+            check_essay = Essay.query.filter_by(id=essay_id).first()
+            if not check_essay:
+                logger.error(f"严重错误：数据库提交后无法找到Essay ID: {essay_id}")
+                return {
+                    'status': 'error',
+                    'message': '作文提交成功但在数据库中找不到，请联系管理员',
+                    'essay_id': essay_id
+                }
+            
+            # 确保数据已经写入数据库并可被其他进程访问
+            db.session.flush()
+            
+            # 添加延迟，确保数据完全写入数据库
+            time.sleep(0.5)
             
             # 异步处理批改任务
             process_essay_correction.delay(essay.id)

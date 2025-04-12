@@ -11,6 +11,7 @@ import traceback
 import json
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Union
+import time
 
 from celery import shared_task
 from dependency_injector.wiring import inject, Provide
@@ -90,15 +91,49 @@ def process_essay_correction(
     try:
         # 查询数据库
         from app.extensions import db
-        essay = Essay.query.get(essay_id)
+        
+        # 重试机制，查找作文
+        retry_attempts = 3
+        essay = None
+        
+        for attempt in range(retry_attempts):
+            essay = Essay.query.get(essay_id)
+            
+            if essay:
+                break
+                
+            logger.warning(f"[{task_id}] 尝试 {attempt+1}/{retry_attempts} - 找不到作文 ID: {essay_id}，等待后重试...")
+            time.sleep(1 * (attempt + 1))  # 递增等待时间
+        
         if not essay:
-            error_msg = f"作文不存在，ID: {essay_id}"
+            error_msg = f"经过 {retry_attempts} 次尝试后作文仍不存在，ID: {essay_id}"
             logger.error(f"[{task_id}] {error_msg}")
-            return {
-                'status': 'error',
-                'message': error_msg,
-                'task_id': task_id
-            }
+            
+            # 尝试检查数据库连接
+            try:
+                test_query = db.session.execute("SELECT 1")
+                logger.info(f"[{task_id}] 数据库连接测试: {list(test_query)}")
+            except Exception as db_test_error:
+                logger.error(f"[{task_id}] 数据库连接测试失败: {str(db_test_error)}")
+            
+            # 尝试重新获取，使用不同的查询方式
+            try:
+                alt_essay = db.session.query(Essay).filter(Essay.id == essay_id).first()
+                if alt_essay:
+                    logger.info(f"[{task_id}] 使用替代查询方法找到作文: {alt_essay.id}")
+                    essay = alt_essay
+                else:
+                    logger.error(f"[{task_id}] 替代查询方法也找不到作文 ID: {essay_id}")
+            except Exception as alt_query_error:
+                logger.error(f"[{task_id}] 替代查询失败: {str(alt_query_error)}")
+            
+            # 如果仍然找不到，返回错误
+            if not essay:
+                return {
+                    'status': 'error',
+                    'message': error_msg,
+                    'task_id': task_id
+                }
             
         # 如果已完成，跳过处理
         if essay.status == EssayStatus.COMPLETED.value:
@@ -227,4 +262,72 @@ def high_priority_essay_correction(
         "task_id": result.id,
         "essay_id": essay_id,
         "message": "高优先级批改任务已提交"
-    } 
+    }
+
+@shared_task(bind=True)
+@inject
+def batch_process_essays(
+    self, 
+    essay_ids: List[int],
+    priority: bool = False,
+    correction_service: ICorrectionService = Provide[ServiceContainer.correction_service]
+) -> Dict[str, Any]:
+    """
+    批量处理作文批改任务
+    
+    Args:
+        self: Celery任务实例
+        essay_ids: 作文ID列表
+        priority: 是否高优先级
+        correction_service: 批改服务（通过依赖注入提供）
+    
+    Returns:
+        Dict: 批处理结果
+    """
+    task_id = self.request.id
+    logger.info(f"[{task_id}] 开始批量处理作文批改，数量: {len(essay_ids)}, 优先级: {'高' if priority else '普通'}")
+    
+    if not essay_ids:
+        return {"status": "error", "message": "作文ID列表为空"}
+    
+    # 检查每个ID的有效性
+    valid_ids = []
+    invalid_ids = []
+    
+    for essay_id in essay_ids:
+        is_valid, _ = validate_essay_id(essay_id)
+        if is_valid:
+            valid_ids.append(int(essay_id))
+        else:
+            invalid_ids.append(essay_id)
+    
+    # 记录无效ID
+    if invalid_ids:
+        logger.warning(f"[{task_id}] 批量处理中存在无效的作文ID: {invalid_ids}")
+    
+    # 提交有效ID的处理任务
+    results = {
+        "status": "submitted",
+        "task_id": task_id,
+        "total": len(essay_ids),
+        "valid": len(valid_ids),
+        "invalid": len(invalid_ids),
+        "submitted_tasks": []
+    }
+    
+    queue = 'high_priority' if priority else 'correction'
+    
+    for essay_id in valid_ids:
+        # 提交单个处理任务
+        task = process_essay_correction.apply_async(
+            args=[essay_id],
+            queue=queue
+        )
+        
+        results["submitted_tasks"].append({
+            "essay_id": essay_id,
+            "task_id": task.id
+        })
+    
+    logger.info(f"[{task_id}] 批量处理任务已提交，有效ID: {len(valid_ids)}, 无效ID: {len(invalid_ids)}")
+    return results 
