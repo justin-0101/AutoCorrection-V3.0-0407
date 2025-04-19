@@ -24,6 +24,12 @@ from dotenv import load_dotenv
 import click
 from pathlib import Path
 from flask_socketio import SocketIO
+import pytz
+import datetime
+import sys
+import time
+import threading
+import subprocess
 
 # 加载配置和配置类
 from app.config import load_config, Config
@@ -46,6 +52,18 @@ from app.api.v1.admin import admin_api_bp
 from app.api.v1.example import example_bp, register_example_blueprint
 from app.api.v1.essays import essays_bp
 from app.api.v1 import api_v1_bp  # 导入主API v1蓝图
+
+# 立即应用eventlet补丁
+from app.patch import apply_eventlet_patch
+apply_eventlet_patch()
+
+# 设置时区为中国标准时间
+os.environ['TZ'] = 'Asia/Shanghai'
+try:
+    time.tzset()
+    logging.info("已设置系统时区为Asia/Shanghai")
+except AttributeError:
+    logging.warning("Windows系统不支持time.tzset()，时区设置可能不生效")
 
 # 加载环境变量
 def load_env_vars():
@@ -109,6 +127,71 @@ load_dotenv(os.path.join(PROJECT_ROOT, '.env'))
 
 # 创建SocketIO实例
 socketio = SocketIO()
+
+# 批改同步监控线程
+correction_sync_thread = None
+
+def start_correction_sync_monitor(app):
+    """启动批改结果同步监控服务"""
+    global correction_sync_thread
+    
+    if correction_sync_thread and correction_sync_thread.is_alive():
+        app.logger.info("批改结果同步监控服务已在运行中")
+        return
+    
+    # 检查环境变量是否启用了监控
+    if not os.environ.get('ENABLE_CORRECTION_SYNC_MONITOR', 'false').lower() == 'true':
+        app.logger.info("批改结果同步监控服务未启用，跳过启动")
+        return
+    
+    try:
+        app.logger.info("启动批改结果同步监控服务...")
+        
+        # 使用子进程运行监控服务
+        def run_monitor():
+            try:
+                monitor_script = os.path.join(PROJECT_ROOT, 'fix_correction_sync.py')
+                # 检查脚本是否存在
+                if not os.path.exists(monitor_script):
+                    app.logger.error(f"监控脚本不存在: {monitor_script}")
+                    return
+                
+                # 设置检查间隔（秒）
+                interval = int(os.environ.get('CORRECTION_SYNC_INTERVAL', '300'))
+                
+                # 启动监控进程
+                process = subprocess.Popen(
+                    [sys.executable, monitor_script, '--monitor', '--interval', str(interval)],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    cwd=PROJECT_ROOT
+                )
+                
+                app.logger.info(f"批改结果同步监控服务已启动，进程ID: {process.pid}")
+                
+                # 读取并记录输出
+                while True:
+                    output = process.stdout.readline()
+                    if not output and process.poll() is not None:
+                        break
+                    if output:
+                        app.logger.info(f"监控服务: {output.strip().decode('utf-8')}")
+                
+                if process.returncode != 0:
+                    app.logger.error(f"监控服务异常退出，返回码: {process.returncode}")
+                    error_output = process.stderr.read().decode('utf-8')
+                    app.logger.error(f"错误输出: {error_output}")
+            
+            except Exception as e:
+                app.logger.error(f"运行监控服务时出错: {str(e)}")
+        
+        # 创建并启动线程
+        correction_sync_thread = threading.Thread(target=run_monitor, daemon=True)
+        correction_sync_thread.start()
+        app.logger.info("批改结果同步监控服务线程已启动")
+        
+    except Exception as e:
+        app.logger.error(f"启动批改结果同步监控服务时出错: {str(e)}")
 
 def initialize_services(app):
     """初始化服务层（依赖数据库）"""
@@ -249,6 +332,9 @@ def create_app(config_name='default'):
         app.logger.info("监控API已注册")
     except Exception as e:
         app.logger.warning(f"注册监控API时出错: {str(e)}")
+    
+    # 启动批改结果同步监控服务
+    start_correction_sync_monitor(app)
     
     app.logger.info("应用已初始化")
     

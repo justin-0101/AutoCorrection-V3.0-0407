@@ -17,6 +17,7 @@ from datetime import datetime
 from pathlib import Path
 import json
 import time
+from app.core.services.file_service import FileService
 
 # 确保工作目录正确
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -44,6 +45,8 @@ DEFAULT_BACKUP_DIR = os.environ.get('BACKUP_DIR', os.path.join(PARENT_DIR, 'Auto
 DEFAULT_KEEP_DAYS = 30  # 默认保留30天的备份
 REMOTE_BACKUP = os.environ.get('REMOTE_BACKUP_ENABLED', 'False').lower() == 'true'
 REMOTE_BACKUP_PATH = os.environ.get('REMOTE_BACKUP_PATH', '')
+
+file_service = FileService()
 
 
 def ensure_backup_dir(backup_dir):
@@ -345,12 +348,12 @@ def cleanup_old_backups(backup_dir, keep_days):
             file_path = os.path.join(backup_dir, filename)
             
             # 跳过目录
-            if os.path.isdir(file_path):
+            if file_service.is_directory(file_path):
                 continue
             
             # 检查文件修改时间
-            if os.path.getmtime(file_path) < cutoff_time:
-                os.remove(file_path)
+            if file_service.get_modification_time(file_path) < cutoff_time:
+                file_service.remove(file_path)
                 logger.info(f"已删除过期备份文件: {file_path}")
         
         logger.info("清理过期备份文件完成")
@@ -371,7 +374,7 @@ def record_backup_history(backup_dir, backup_files):
     
     try:
         # 加载现有历史记录
-        if os.path.exists(history_file):
+        if file_service.exists(history_file):
             with open(history_file, 'r', encoding='utf-8') as f:
                 history = json.load(f)
         else:

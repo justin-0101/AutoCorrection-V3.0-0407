@@ -2,332 +2,199 @@
 # -*- coding: utf-8 -*-
 
 """
-作文批改异步任务模块 - 依赖注入版本
-提供作文批改相关的异步任务处理，使用依赖注入解决循环导入问题
+文章批改任务模块
+包含异步处理文章批改的任务函数
 """
 
+import os
+import time
 import logging
 import traceback
-import json
-from datetime import datetime
-from typing import Dict, Any, List, Optional, Union
-import time
-
+from flask import current_app
 from celery import shared_task
-from dependency_injector.wiring import inject, Provide
-from app.core.services.service_registry_di import ServiceContainer
-from app.core.correction.interface import ICorrectionService, CorrectionResult
-from app.models.essay import Essay, EssayStatus
-from app.models.correction import Correction, CorrectionStatus
-from app.utils.exceptions import ResourceNotFoundError, ProcessingError
+from sqlalchemy.exc import SQLAlchemyError
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import text
 
-# 获取任务专用日志记录器
-logger = logging.getLogger('app.tasks.correction')
+from app.models.essay import Essay
+from app.core.correction.correction_service import CorrectionService
+from app.extensions import db
 
-def validate_essay_id(essay_id):
-    """
-    验证作文ID
-    
-    Args:
-        essay_id: 作文ID
-        
-    Returns:
-        tuple: (bool, str) - (是否有效, 错误消息)
-    """
-    # 检查是否为None或空
-    if essay_id is None:
-        return False, "作文ID不能为空"
-        
-    # 检查类型
-    if not isinstance(essay_id, int) and not (isinstance(essay_id, str) and essay_id.isdigit()):
-        return False, f"作文ID必须是整数，当前类型: {type(essay_id)}"
-        
-    # 转换为整数并检查范围
-    try:
-        essay_id = int(essay_id)
-        if essay_id <= 0:
-            return False, f"作文ID必须是正整数，当前值: {essay_id}"
-    except (ValueError, TypeError):
-        return False, f"无法将作文ID转换为整数: {essay_id}"
-        
-    return True, ""
+logger = logging.getLogger(__name__)
 
-@shared_task(bind=True, max_retries=5)
-@inject
-def process_essay_correction(
-    self, 
-    essay_id: int,
-    correction_service: ICorrectionService = Provide[ServiceContainer.correction_service]
-):
+@shared_task(bind=True, name='app.tasks.correction_tasks.process_essay_correction')
+def process_essay_correction(self, essay_id):
     """
-    异步处理作文批改任务
+    处理文章批改任务
     
     Args:
         self: Celery任务实例
-        essay_id: 作文ID
-        correction_service: 批改服务（通过依赖注入提供）
-    
+        essay_id: 文章ID
+        
     Returns:
-        Dict: 批改结果
+        dict: 包含批改结果的字典
     """
-    task_id = self.request.id
+    # 导入一些必要的库，在函数内部导入避免循环导入
+    import pytz
+    from flask import has_app_context, current_app
+    from app import create_app
+    import traceback
+
+    logger.info(f"开始处理文章批改任务，文章ID: {essay_id}")
     
-    # 记录任务开始信息
-    logger.info(f"[{task_id}] 开始异步处理作文批改，作文ID: {essay_id}")
-    
-    # 参数验证
-    is_valid, error_message = validate_essay_id(essay_id)
-    if not is_valid:
-        logger.error(f"[{task_id}] 作文ID无效: {error_message}")
-        return {
-            'status': 'error',
-            'message': error_message,
-            'task_id': task_id
-        }
-    
-    # 转换为整数
-    essay_id = int(essay_id)
+    # 检查是否已在应用上下文中
+    app = None
+    ctx = None
     
     try:
-        # 查询数据库
-        from app.extensions import db
+        if not has_app_context():
+            logger.info("未检测到应用上下文，正在创建新的应用上下文...")
+            app = create_app()
+            ctx = app.app_context()
+            ctx.push()
+            logger.info("已创建并推送新的应用上下文")
+        else:
+            logger.info("检测到现有应用上下文，继续使用当前上下文")
+            app = current_app
         
-        # 重试机制，查找作文
-        retry_attempts = 3
-        essay = None
+        # 设置时区为Asia/Shanghai
+        os.environ['TZ'] = 'Asia/Shanghai'
+        try:
+            import time
+            time.tzset()  # 应用时区设置
+            logger.info("已设置时区为Asia/Shanghai")
+        except AttributeError:
+            # Windows不支持tzset
+            logger.warning("Windows环境不支持tzset，时区设置可能不生效")
         
-        for attempt in range(retry_attempts):
-            essay = Essay.query.get(essay_id)
-            
-            if essay:
-                break
-                
-            logger.warning(f"[{task_id}] 尝试 {attempt+1}/{retry_attempts} - 找不到作文 ID: {essay_id}，等待后重试...")
-            time.sleep(1 * (attempt + 1))  # 递增等待时间
+        # 创建本地数据库连接，避免使用全局数据库对象
+        from flask_sqlalchemy import SQLAlchemy
+        local_db = SQLAlchemy()
+        local_db.init_app(app)
+        
+        # 先测试数据库连接
+        logger.info("测试数据库连接...")
+        try:
+            local_db.session.execute(text('SELECT 1'))
+            logger.info("数据库连接测试成功")
+        except Exception as e:
+            logger.error(f"数据库连接测试失败: {str(e)}")
+            raise
+        
+        # 查询文章
+        logger.info(f"查询文章 ID: {essay_id}")
+        essay = local_db.session.get(Essay, essay_id)
         
         if not essay:
-            error_msg = f"经过 {retry_attempts} 次尝试后作文仍不存在，ID: {essay_id}"
-            logger.error(f"[{task_id}] {error_msg}")
-            
-            # 尝试检查数据库连接
-            try:
-                test_query = db.session.execute("SELECT 1")
-                logger.info(f"[{task_id}] 数据库连接测试: {list(test_query)}")
-            except Exception as db_test_error:
-                logger.error(f"[{task_id}] 数据库连接测试失败: {str(db_test_error)}")
-            
-            # 尝试重新获取，使用不同的查询方式
-            try:
-                alt_essay = db.session.query(Essay).filter(Essay.id == essay_id).first()
-                if alt_essay:
-                    logger.info(f"[{task_id}] 使用替代查询方法找到作文: {alt_essay.id}")
-                    essay = alt_essay
-                else:
-                    logger.error(f"[{task_id}] 替代查询方法也找不到作文 ID: {essay_id}")
-            except Exception as alt_query_error:
-                logger.error(f"[{task_id}] 替代查询失败: {str(alt_query_error)}")
-            
-            # 如果仍然找不到，返回错误
-            if not essay:
-                return {
-                    'status': 'error',
-                    'message': error_msg,
-                    'task_id': task_id
-                }
-            
-        # 如果已完成，跳过处理
-        if essay.status == EssayStatus.COMPLETED.value:
-            logger.info(f"[{task_id}] 作文已完成批改，跳过处理，ID: {essay_id}")
-            return {
-                'status': 'skipped',
-                'message': '作文已完成批改',
-                'task_id': task_id
-            }
-            
-        # 更新状态为处理中
-        old_status = essay.status
-        essay.status = EssayStatus.PROCESSING.value
+            logger.error(f"找不到文章 ID: {essay_id}")
+            return {"success": False, "error": f"找不到文章 ID: {essay_id}"}
         
-        # 查找或创建批改记录
-        correction = Correction.query.filter_by(essay_id=essay_id).first()
-        if not correction:
-            correction = Correction(
-                essay_id=essay_id,
-                status=CorrectionStatus.PROCESSING.value,
-                task_id=task_id
-            )
-            db.session.add(correction)
-        else:
-            correction.status = CorrectionStatus.PROCESSING.value
-            correction.task_id = task_id
+        # 更新文章状态为处理中
+        logger.info(f"更新文章状态为处理中: {essay_id}")
+        essay.status = "CORRECTING"
+        local_db.session.commit()
         
-        # 提交状态变更
-        try:
-            db.session.commit()
-            logger.info(f"[{task_id}] 更新状态: {old_status} -> {essay.status}")
-        except Exception as db_error:
-            db.session.rollback()
-            logger.error(f"[{task_id}] 更新状态失败: {str(db_error)}")
-            raise
-            
+        # 初始化批改服务，并传入本地数据库会话
+        logger.info("初始化批改服务...")
+        service = CorrectionService()
+        
+        # 修改perform_correction调用方式，确保传入正确的数据库会话
         # 执行批改
-        try:
-            # 使用注入的批改服务
-            logger.info(f"[{task_id}] 开始执行批改，作文ID: {essay_id}")
-            result = correction_service.perform_correction(essay_id)
-            logger.info(f"[{task_id}] 批改执行完成，作文ID: {essay_id}, 状态: {result.get('status')}")
-            
-            return result
-            
-        except Exception as correction_error:
-            # 处理批改过程中的错误
-            error_message = str(correction_error)
-            logger.error(f"[{task_id}] 批改过程出错: {error_message}")
-            
-            # 更新状态为失败
-            essay.status = EssayStatus.FAILED.value
-            correction.status = CorrectionStatus.FAILED.value
-            correction.error_message = error_message
-            
-            try:
-                db.session.commit()
-            except Exception:
-                db.session.rollback()
-                
-            # 重试逻辑
-            retry_count = self.request.retries
-            if retry_count < 3:  # 最多重试3次
-                logger.info(f"[{task_id}] 将在 {30 * (2 ** retry_count)} 秒后重试 ({retry_count+1}/3)")
-                self.retry(exc=correction_error, countdown=30 * (2 ** retry_count))
-                
-            return {
-                'status': 'error',
-                'message': f"批改失败: {error_message}",
-                'task_id': task_id
-            }
-            
-    except Exception as e:
-        # 处理未捕获的异常
-        error_tb = traceback.format_exc()
-        logger.error(f"[{task_id}] 处理作文批改任务异常，作文ID: {essay_id}, 错误: {str(e)}")
-        logger.error(f"[{task_id}] 错误堆栈: {error_tb}")
+        logger.info(f"开始执行文章批改: {essay_id}")
+        result = service.perform_correction(essay)
         
-        # 重试判断
-        if self.request.retries < self.max_retries:
-            logger.info(f"[{task_id}] 将在60秒后第{self.request.retries+1}次重试")
-            self.retry(exc=e, countdown=60)
-            
-        return {
-            'status': 'error',
-            'message': f"批改过程发生未处理的异常: {str(e)}",
-            'task_id': task_id
-        }
-
-@shared_task(bind=True)
-@inject
-def high_priority_essay_correction(
-    self, 
-    essay_id: int,
-    correction_service: ICorrectionService = Provide[ServiceContainer.correction_service]
-):
-    """
-    高优先级的作文批改任务
-    
-    Args:
-        self: Celery任务实例
-        essay_id: 作文ID
-        correction_service: 批改服务（通过依赖注入提供）
-    
-    Returns:
-        Dict: 处理结果
-    """
-    logger.info(f"开始高优先级作文批改 [essay_id={essay_id}]")
-    
-    is_valid, error_message = validate_essay_id(essay_id)
-    if not is_valid:
-        return {"status": "error", "message": error_message}
-    
-    # 转换为整数
-    essay_id = int(essay_id)
-    
-    # 直接执行批改
-    result = process_essay_correction.apply_async(
-        args=[essay_id],
-        queue='high_priority'
-    )
-    
-    # 返回任务ID
-    return {
-        "status": "submitted",
-        "task_id": result.id,
-        "essay_id": essay_id,
-        "message": "高优先级批改任务已提交"
-    }
-
-@shared_task(bind=True)
-@inject
-def batch_process_essays(
-    self, 
-    essay_ids: List[int],
-    priority: bool = False,
-    correction_service: ICorrectionService = Provide[ServiceContainer.correction_service]
-) -> Dict[str, Any]:
-    """
-    批量处理作文批改任务
-    
-    Args:
-        self: Celery任务实例
-        essay_ids: 作文ID列表
-        priority: 是否高优先级
-        correction_service: 批改服务（通过依赖注入提供）
-    
-    Returns:
-        Dict: 批处理结果
-    """
-    task_id = self.request.id
-    logger.info(f"[{task_id}] 开始批量处理作文批改，数量: {len(essay_ids)}, 优先级: {'高' if priority else '普通'}")
-    
-    if not essay_ids:
-        return {"status": "error", "message": "作文ID列表为空"}
-    
-    # 检查每个ID的有效性
-    valid_ids = []
-    invalid_ids = []
-    
-    for essay_id in essay_ids:
-        is_valid, _ = validate_essay_id(essay_id)
-        if is_valid:
-            valid_ids.append(int(essay_id))
+        # 检查批改结果
+        if isinstance(result, dict) and 'status' in result:
+            if result['status'] == 'success':
+                logger.info(f"文章批改成功: {essay_id}, 得分: {result.get('score', 'N/A')}")
+                # 批改成功，不需要额外更新状态，因为perform_correction已经更新了
+                return {
+                    "success": True, 
+                    "result": result
+                }
+            else:
+                # 批改失败，记录错误信息
+                error_msg = result.get('message', '未知错误')
+                logger.error(f"文章批改失败: {essay_id}, 错误: {error_msg}")
+                # perform_correction应该已经更新了状态，但为了安全起见再次检查
+                try:
+                    essay = local_db.session.get(Essay, essay_id)
+                    if essay and essay.status != "ERROR" and essay.status != "FAILED":
+                        essay.status = "ERROR"
+                        essay.error_message = error_msg
+                        local_db.session.commit()
+                        logger.info(f"已更新文章状态为ERROR: {essay_id}")
+                except Exception as update_err:
+                    logger.error(f"更新文章错误状态失败: {str(update_err)}")
+                
+                return {
+                    "success": False, 
+                    "error": error_msg
+                }
+        elif result is True:  
+            # 兼容旧版API返回True表示成功
+            logger.info(f"文章批改成功(旧版API): {essay_id}")
+            return {"success": True}
+        elif result is False:
+            # 兼容旧版API返回False表示失败
+            logger.error(f"文章批改失败(旧版API): {essay_id}")
+            return {"success": False, "error": "批改失败"}
         else:
-            invalid_ids.append(essay_id)
-    
-    # 记录无效ID
-    if invalid_ids:
-        logger.warning(f"[{task_id}] 批量处理中存在无效的作文ID: {invalid_ids}")
-    
-    # 提交有效ID的处理任务
-    results = {
-        "status": "submitted",
-        "task_id": task_id,
-        "total": len(essay_ids),
-        "valid": len(valid_ids),
-        "invalid": len(invalid_ids),
-        "submitted_tasks": []
-    }
-    
-    queue = 'high_priority' if priority else 'correction'
-    
-    for essay_id in valid_ids:
-        # 提交单个处理任务
-        task = process_essay_correction.apply_async(
-            args=[essay_id],
-            queue=queue
-        )
+            # 未知返回类型
+            logger.error(f"文章批改返回未知类型: {essay_id}, 类型: {type(result)}, 值: {result}")
+            return {"success": False, "error": f"批改服务返回未知类型: {type(result)}"}
         
-        results["submitted_tasks"].append({
-            "essay_id": essay_id,
-            "task_id": task.id
-        })
-    
-    logger.info(f"[{task_id}] 批量处理任务已提交，有效ID: {len(valid_ids)}, 无效ID: {len(invalid_ids)}")
-    return results 
+    except SQLAlchemyError as e:
+        error_msg = f"数据库错误: {str(e)}"
+        logger.error(f"批改文章时数据库错误: {error_msg}")
+        logger.error(traceback.format_exc())
+        
+        # 尝试标记文章为错误状态
+        try:
+            if 'local_db' in locals():
+                essay = local_db.session.get(Essay, essay_id)
+                if essay:
+                    essay.status = "ERROR"
+                    essay.error = error_msg
+                    local_db.session.commit()
+        except Exception as ex:
+            logger.error(f"无法更新文章错误状态: {str(ex)}")
+            
+        return {"success": False, "error": error_msg}
+        
+    except Exception as e:
+        error_msg = f"处理文章批改时出错: {str(e)}"
+        logger.error(error_msg)
+        logger.error(traceback.format_exc())
+        
+        # 尝试标记文章为错误状态
+        try:
+            if 'local_db' in locals():
+                essay = local_db.session.get(Essay, essay_id)
+                if essay:
+                    essay.status = "ERROR"
+                    essay.error = str(e)
+                    local_db.session.commit()
+        except Exception as ex:
+            logger.error(f"无法更新文章错误状态: {str(ex)}")
+            
+        return {"success": False, "error": error_msg}
+        
+    finally:
+        logger.info(f"文章批改任务处理完毕: {essay_id}")
+        
+        # 确保数据库会话被清理
+        try:
+            if 'local_db' in locals():
+                local_db.session.remove()
+                logger.info("本地数据库会话已清理")
+        except Exception as ex:
+            logger.warning(f"清理数据库会话时出错: {str(ex)}")
+            
+        # 如果我们创建了应用上下文，确保弹出它
+        if ctx:
+            try:
+                ctx.pop()
+                logger.info("应用上下文已弹出")
+            except Exception as ex:
+                logger.warning(f"弹出应用上下文时出错: {str(ex)}")

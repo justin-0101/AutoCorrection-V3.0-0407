@@ -82,6 +82,7 @@
                         <div class="col-md-8">
                             <form method="post" action="{{ url_for('main.profile') }}">
                                 <input type="hidden" name="form_type" value="profile">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 
                                 <div class="mb-3">
                                     <label for="email" class="form-label">电子邮箱</label>
@@ -130,6 +131,7 @@
                 <div class="tab-pane fade" id="password-content" role="tabpanel">
                     <form method="post" action="{{ url_for('main.profile') }}" id="passwordForm">
                         <input type="hidden" name="form_type" value="password">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         
                         <div class="mb-3">
                             <label for="current_password" class="form-label">当前密码</label>

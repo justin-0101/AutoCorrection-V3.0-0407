@@ -11,6 +11,8 @@ ai:
   retry_delay: 5
   max_tokens: 4096
   temperature: 0.7
+  service: "deepseek"  # 添加service配置项
+  debug_mode: true  # 添加debug_mode配置项
 
 # Redis配置
 redis:

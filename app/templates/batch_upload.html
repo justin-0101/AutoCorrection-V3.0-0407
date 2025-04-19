@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token }}">
     <title>批量上传作文 - 小园丁作文批改</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
@@ -639,11 +640,25 @@
                 resultsArea.style.display = 'block';
                 processingResults.innerHTML = '';
                 
-                const formData = new FormData();
+                const formData = new FormData(uploadForm);
+                // Clear default file input data as we'll append manually
+                formData.delete('files[]'); 
                 selectedFiles.forEach(file => {
-                    formData.append('files[]', file);
+                    formData.append('files[]', file, file.name); // Ensure files are added correctly
                 });
                 
+                // Add CSRF token to formData
+                const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+                if (csrfToken) {
+                     formData.append('csrf_token', csrfToken); // Add token to form data
+                } else {
+                     console.warn('CSRF token meta tag not found!');
+                     // Optionally, prevent submission or show an error
+                     alert('安全令牌丢失，无法提交。请刷新页面重试。');
+                     hideLoading();
+                     return;
+                }
+
                 try {
                     const response = await fetch(uploadForm.action, {
                     method: 'POST',

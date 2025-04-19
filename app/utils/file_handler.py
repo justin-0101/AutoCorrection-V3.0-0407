@@ -42,7 +42,9 @@ except ImportError:
         HAS_PYMUPDF = False
 
 from app.config import config
-from app.core.ai import AIClientFactory
+
+# 延迟导入AIClientFactory避免循环导入
+# from app.core.ai import AIClientFactory
 
 logger = logging.getLogger(__name__)
 
@@ -58,10 +60,24 @@ class FileHandler:
         # 确保上传目录存在
         os.makedirs(self.upload_folder, exist_ok=True)
         
-        # 初始化AI客户端
-        ai_factory = AIClientFactory()
-        self.ai_client = ai_factory.get_client()
+        # 延迟初始化AI客户端
+        self.ai_client = None
     
+    def _init_ai_client(self):
+        """延迟初始化AI客户端以避免循环导入"""
+        if self.ai_client is None:
+            try:
+                # 延迟导入避免循环引用
+                from app.core.services import get_ai_service
+                self.ai_client = get_ai_service()
+                if not self.ai_client:
+                    logger.warning("无法获取AI服务，将使用兜底处理")
+                else:
+                    logger.debug("AI客户端初始化成功")
+            except Exception as e:
+                logger.error(f"初始化AI客户端失败: {str(e)}")
+                self.ai_client = None
+                
     def allowed_file(self, filename):
         """
         检查文件扩展名是否允许
@@ -222,21 +238,30 @@ class FileHandler:
             str: 提取的文本内容
         """
         try:
-            # 使用AI服务提取图片中的文本
+            # 使用AI服务提取图片中的文本 - 延迟初始化AI客户端
+            self._init_ai_client()
+            if not self.ai_client:
+                logger.warning("AI客户端未初始化，无法提取图片内容")
+                return "无法处理图片内容，AI服务不可用"
+                
             image_file = file_path if file_path and os.path.exists(file_path) else content
             
             # 调用AI客户端进行图片识别
-            result = self.ai_client.recognize_image(image_file)
-            
-            if result and result.get('status') == 'success':
-                return result.get('text', '')
-            else:
-                logger.warning(f"AI客户端提取图片内容失败: {result.get('message', '未知错误')}")
-                return ""
-        
+            try:
+                result = self.ai_client.recognize_image(image_file)
+                
+                if result and result.get('status') == 'success':
+                    return result.get('text', '')
+                else:
+                    logger.warning(f"AI客户端提取图片内容失败: {result.get('message', '未知错误')}")
+                    return "图片识别失败，请尝试使用其他格式"
+            except AttributeError:
+                logger.error("AI客户端缺少recognize_image方法")
+                return "当前AI服务不支持图片识别功能"
+                
         except Exception as e:
-            logger.error(f"提取图片内容时发生错误: {str(e)}", exc_info=True)
-            return ""
+            logger.error(f"提取图片内容时发生错误: {str(e)}")
+            return "处理图片时发生错误，请稍后重试"
     
     def save_file(self, content, filename, subdirectory=None):
         """

@@ -305,9 +305,9 @@ beat_schedule = {
 flower_port = config.CELERY_CONFIG.get('flower_port', 5555)
 flower_basic_auth = config.CELERY_CONFIG.get('flower_basic_auth', None)
 
-# Worker进程池配置
-worker_pool = 'prefork'  # 可选 prefork, eventlet, gevent
-worker_concurrency = config.CELERY_CONFIG.get('worker_concurrency', 8)  # worker进程数
+# Worker池配置
+worker_pool = 'eventlet'  # 使用eventlet作为并发模型
+worker_concurrency = 10  # 使用eventlet时的并发数
 
 # 任务发送重试配置
 task_publish_retry = True

@@ -16,6 +16,7 @@ from PIL import Image
 import pytesseract
 import subprocess
 import platform
+import time
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -191,49 +192,76 @@ def process_document(file):
     temp_file = None
     try:
         # 安全检查
-        if not file or file.filename == '':
-            raise Exception("未选择文件")
+        if not file or not hasattr(file, 'filename') or file.filename == '':
+            raise ValueError("未选择文件或文件对象无效")
+        
+        # 首先保存原始文件名，并提取扩展名
+        original_filename = file.filename
+        if '.' not in original_filename:
+            logger.error(f"文件没有扩展名: {original_filename}")
+            raise ValueError(f"文件没有扩展名: {original_filename}")
             
-        filename = secure_filename(file.filename)
-        # 确保使用一致的文件检查方法
-        if not allowed_file(filename):
-            logger.error(f"不支持的文件格式: {filename}")
-            allowed_exts = ', '.join(ALLOWED_EXTENSIONS.keys())
-            raise Exception(f"不支持的文件格式。支持的格式：{allowed_exts}")
+        # 提取原始扩展名 (在应用secure_filename前)
+        original_ext = original_filename.rsplit('.', 1)[1].lower()
         
-        # 创建临时文件并使用with语句确保正确关闭
-        with tempfile.NamedTemporaryFile(delete=False) as temp:
-            temp_file = temp.name
-            file.save(temp_file)
+        # 检查扩展名是否允许
+        if original_ext not in ALLOWED_EXTENSIONS:
+            logger.error(f"不支持的文件格式: .{original_ext}")
+            raise ValueError(f"不支持的文件格式: .{original_ext}")
+            
+        # 安全处理文件名 (可能会删除中文字符)
+        safe_filename = secure_filename(original_filename)
         
-        # 获取文件标题
-        title = os.path.splitext(filename)[0]
-        file_ext = os.path.splitext(filename)[1].lower().lstrip('.')
+        # 确保安全文件名仍有扩展名
+        if '.' not in safe_filename:
+            safe_filename = f"file_{int(time.time())}.{original_ext}"
+            
+        # 创建临时文件
+        temp_dir = tempfile.gettempdir()
+        temp_file = os.path.join(temp_dir, safe_filename)
         
-        logger.info(f"处理文件: {filename}，扩展名: {file_ext}")
+        # 保存上传的文件
+        file.save(temp_file)
         
-        # 根据文件类型选择处理方法
-        if file_ext == 'docx':
-            content = extract_text_from_docx(temp_file)
-        elif file_ext == 'doc':
-            content = extract_text_from_doc(temp_file)
-        elif file_ext == 'txt':
+        # 记录文件处理信息
+        logger.info(f"原始文件名: {original_filename}, 安全文件名: {safe_filename}, 扩展名: .{original_ext}")
+        logger.info(f"临时文件路径: {temp_file}")
+        
+        # 根据文件类型提取文本
+        content = None
+        if original_ext == 'txt':
             content = extract_text_from_txt(temp_file)
-        elif file_ext == 'pdf':
+            logger.info(f"成功从.txt文件提取文本，长度: {len(content)}")
+        elif original_ext == 'docx':
+            content = extract_text_from_docx(temp_file)
+            logger.info(f"成功从.docx文件提取文本，长度: {len(content)}")
+        elif original_ext == 'doc':
+            content = extract_text_from_doc(temp_file)
+            logger.info(f"成功从.doc文件提取文本，长度: {len(content)}")
+        elif original_ext == 'pdf':
             content = extract_text_from_pdf(temp_file)
-        elif file_ext in ['jpg', 'jpeg', 'png', 'gif']:
+            logger.info(f"成功从.pdf文件提取文本，长度: {len(content)}")
+        elif original_ext in ['jpg', 'jpeg', 'png', 'gif']:
             content = extract_text_from_image(temp_file)
-        else:
-            raise Exception(f"不支持的文件格式: {file_ext}")
+            logger.info(f"成功从图片文件提取文本，长度: {len(content)}")
+            
+        if not content:
+            raise ValueError("文件内容为空")
+            
+        # 从原始文件名中提取标题 (保留中文字符)
+        title = os.path.splitext(original_filename)[0]
         
-        return content, title
+        return content.strip(), title
+        
     except Exception as e:
-        logger.error(f"处理文件时发生错误: {e}")
-        return None, None
+        logger.error(f"处理文件时发生错误: {str(e)}")
+        raise
+        
     finally:
         # 清理临时文件
         if temp_file and os.path.exists(temp_file):
             try:
-                os.unlink(temp_file)
+                os.remove(temp_file)
+                logger.debug(f"临时文件已清理: {temp_file}")
             except Exception as e:
-                logger.error(f"清理临时文件时出错: {e}") 
+                logger.error(f"清理临时文件失败: {str(e)}") 

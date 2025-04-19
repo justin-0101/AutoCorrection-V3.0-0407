@@ -8,6 +8,8 @@
 
 from app.core.correction.correction_service import CorrectionService
 from app.core.correction.ai_corrector import AICorrectionService
+from app.core.correction.file_service import FileService
+from app.core.correction.analysis_service import AnalysisService
 
 # 尝试导入接口定义
 try:
@@ -18,5 +20,7 @@ except ImportError:
 
 __all__ = [
     'CorrectionService',
-    'AICorrectionService'
+    'AICorrectionService',
+    'FileService',
+    'AnalysisService'
 ]

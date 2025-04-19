@@ -11,10 +11,20 @@ import json
 from celery.signals import task_prerun, task_postrun, task_success, task_failure, task_retry
 from app.models.task_status import TaskStatus, TaskState
 from app.models.db import db
+from app import create_app
 
 logger = logging.getLogger(__name__)
 
+def ensure_app_context(func):
+    """确保在Flask应用上下文中执行函数"""
+    def wrapper(*args, **kwargs):
+        app = create_app()
+        with app.app_context():
+            return func(*args, **kwargs)
+    return wrapper
+
 @task_prerun.connect
+@ensure_app_context
 def track_task_started(task_id, task, *args, **kwargs):
     """
     任务开始前创建或更新任务状态记录
@@ -89,6 +99,7 @@ def track_task_started(task_id, task, *args, **kwargs):
 
 
 @task_success.connect
+@ensure_app_context
 def track_task_success(sender, **kwargs):
     """
     任务成功完成时更新任务状态
@@ -142,6 +153,7 @@ def track_task_success(sender, **kwargs):
 
 
 @task_failure.connect
+@ensure_app_context
 def track_task_failure(sender, task_id, exception, **kwargs):
     """
     任务失败时更新任务状态
@@ -167,6 +179,7 @@ def track_task_failure(sender, task_id, exception, **kwargs):
 
 
 @task_retry.connect
+@ensure_app_context
 def track_task_retry(sender, request, reason, **kwargs):
     """
     任务重试时更新任务状态

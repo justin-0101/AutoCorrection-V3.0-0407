@@ -8,24 +8,26 @@
 import os
 import sys
 import binascii
+from app.core.services.file_service import FileService
 
 def fix_specific_file(file_path):
     """
     直接使用二进制方式修复指定文件中的所有null字节和其他特殊字符
     """
     # 确保文件存在
-    if not os.path.exists(file_path):
+    file_service = FileService()
+    if not file_service.exists(file_path):
         print(f"错误: 文件不存在 - {file_path}")
         return False
     
     try:
         # 读取文件的二进制内容
-        with open(file_path, 'rb') as file:
+        with file_service.open(file_path, 'rb') as file:
             content = file.read()
         
         # 备份原始文件
         backup_path = file_path + '.bak'
-        with open(backup_path, 'wb') as backup_file:
+        with file_service.open(backup_path, 'wb') as backup_file:
             backup_file.write(content)
         print(f"已创建备份文件: {backup_path}")
         
@@ -45,13 +47,13 @@ def fix_specific_file(file_path):
         
         # 创建全新的文件而不是覆盖原文件
         new_file_path = file_path + '.new'
-        with open(new_file_path, 'wb') as new_file:
+        with file_service.open(new_file_path, 'wb') as new_file:
             new_file.write(cleaned_content)
         print(f"已创建新文件: {new_file_path}")
         
         # 删除原文件并将新文件重命名
-        os.remove(file_path)
-        os.rename(new_file_path, file_path)
+        file_service.remove(file_path)
+        file_service.rename(new_file_path, file_path)
         print(f"已替换原文件: {file_path}")
         
         return True

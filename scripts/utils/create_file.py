@@ -13,6 +13,7 @@ import logging
 import tempfile
 import traceback
 from werkzeug.utils import secure_filename
+from app.core.services.file_service import FileService
 
 # 获取 logger
 logger = logging.getLogger(__name__)
@@ -107,7 +108,8 @@ def extract_text_from_txt(file_path):
         
         for encoding in encodings:
             try:
-                with open(file_path, "r", encoding=encoding) as f:
+                file_service = FileService()
+                with file_service.open(file_path, 'r', encoding=encoding) as f:
                     text = f.read()
                 logger.info(f"成功使用{encoding}编码读取文本文件，长度: {len(text)}")
                 return text
@@ -117,7 +119,7 @@ def extract_text_from_txt(file_path):
                 logger.error(f"使用{encoding}编码读取失败: {str(e)}")
         
         # 如果所有编码都失败，尝试二进制方式读取
-        with open(file_path, 'rb') as f:
+        with file_service.open(file_path, 'rb') as f:
             binary_data = f.read()
         
         text = binary_data.decode('utf-8', errors='replace')
@@ -145,7 +147,7 @@ def extract_text_from_pdf(file_path):
         try:
             import PyPDF2
             
-            with open(file_path, "rb") as file:
+            with file_service.open(file_path, 'rb') as file:
                 reader = PyPDF2.PdfReader(file)
                 text = ""
                 

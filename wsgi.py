@@ -13,7 +13,18 @@ import logging
 app = create_app()
 
 # 设置日志
-logger = logging.getLogger(__name__)
+# 获取 Flask 应用的 logger
+logger = app.logger 
+# 设置日志级别为 INFO，以便看到 logger.info 的输出
+logger.setLevel(logging.INFO)
+# 可以选择添加一个 StreamHandler 将日志输出到控制台（虽然 Flask 默认可能已经做了）
+handler = logging.StreamHandler()
+handler.setLevel(logging.INFO)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+
+logger.info("应用日志已配置，级别设置为 INFO")
 
 # 初始化容器
 try:

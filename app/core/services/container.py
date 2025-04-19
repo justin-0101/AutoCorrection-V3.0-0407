@@ -2,126 +2,135 @@
 # -*- coding: utf-8 -*-
 
 """
-服务容器模块
-提供依赖注入和服务管理功能
+服务容器模块，用于管理应用中的服务实例
 """
-from enum import Enum
+
 import logging
-from typing import Any, Dict, Optional
-from threading import Lock
+from typing import Dict, Any, Optional, Type
+from enum import Enum, auto
 
 logger = logging.getLogger(__name__)
 
 class ServiceScope(Enum):
-    """服务生命周期范围"""
-    SINGLETON = "singleton"  # 全局单例
-    REQUEST = "request"    # 请求级别
-    TRANSIENT = "transient"  # 临时实例
-
-class ServiceDefinition:
-    """服务定义"""
-    def __init__(self, instance: Any = None, scope: ServiceScope = ServiceScope.SINGLETON):
-        self.instance = instance
-        self.scope = scope
+    """服务作用域"""
+    SINGLETON = auto()    # 单例服务，整个应用生命周期只有一个实例
+    SCOPED = auto()       # 作用域服务，每个请求一个实例
+    TRANSIENT = auto()    # 瞬态服务，每次获取都创建新实例
 
 class ServiceContainer:
-    """服务容器,提供依赖注入和服务管理"""
+    """
+    服务容器，用于注册、获取和管理应用中的服务实例
+    使用单例模式确保容器在应用中是唯一的
+    """
+    _instance = None
+    _services: Dict[str, Any] = {}
+    _scopes: Dict[str, ServiceScope] = {}
+    _initialized = False
     
-    def __init__(self):
-        self._services: Dict[str, ServiceDefinition] = {}
-        self._lock = Lock()
-        self._initialized = False
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(ServiceContainer, cls).__new__(cls)
+        return cls._instance
     
-    def register(self, name: str, instance: Any, scope: ServiceScope = ServiceScope.SINGLETON) -> None:
+    @classmethod
+    def register(cls, name: str, service: Any, scope: ServiceScope = ServiceScope.SINGLETON) -> None:
         """
-        注册服务
+        注册服务到容器
         
         Args:
             name: 服务名称
-            instance: 服务实例
-            scope: 服务生命周期范围
+            service: 服务实例或类型
+            scope: 服务作用域
         """
-        with self._lock:
-            if name in self._services:
-                logger.warning(f"服务 '{name}' 已存在,将被覆盖")
-            
-            self._services[name] = ServiceDefinition(instance, scope)
-            logger.info(f"服务 '{name}' 已注册 (scope: {scope.value})")
+        if name in cls._services:
+            logger.warning(f"服务 '{name}' 已存在，将被覆盖")
+        cls._services[name] = service
+        cls._scopes[name] = scope
+        logger.info(f"服务 '{name}' 已注册 (scope: {scope.name.lower()})")
     
-    def get(self, name: str) -> Optional[Any]:
+    @classmethod
+    def get(cls, name: str) -> Optional[Any]:
         """
-        获取服务实例
+        从容器获取服务
         
         Args:
             name: 服务名称
             
         Returns:
-            服务实例,如果不存在则返回None
+            服务实例，如果不存在则返回None
         """
-        # 移除初始化检查，确保即使容器未初始化也能获取已注册的服务
-        # if not self._initialized:
-        #     logger.warning("服务容器尚未初始化")
-        #     return None
-            
-        service_def = self._services.get(name)
-        if not service_def:
-            logger.warning(f"尝试获取未注册的服务 '{name}'")
+        if not cls.has(name):
+            logger.warning(f"尝试获取未注册的服务 '{name}' ")
             return None
-            
-        if service_def.scope == ServiceScope.TRANSIENT:
-            # 临时实例每次都创建新的
-            return service_def.instance.__class__()
-            
-        return service_def.instance
+        
+        return cls._services.get(name)
     
-    def has(self, name: str) -> bool:
+    @classmethod
+    def has(cls, name: str) -> bool:
         """
-        检查服务是否已注册
+        检查服务是否存在
         
         Args:
             name: 服务名称
             
         Returns:
-            bool: 是否已注册
+            如果服务存在则返回True，否则返回False
         """
-        return name in self._services
+        return name in cls._services
     
-    def initialize(self) -> None:
-        """初始化服务容器"""
-        if self._initialized:
-            return
-            
-        with self._lock:
-            if self._initialized:  # 双重检查锁定
-                return
-                
-            # 验证所有必需的服务
-            self._validate_required_services()
-            
-            self._initialized = True
-            logger.info("服务容器初始化完成")
-    
-    def _validate_required_services(self) -> None:
-        """验证所有必需的服务是否已注册"""
-        required_services = [
-            'redis_service',
-            'ai_client_factory',
-            'correction_service'
-        ]
+    @classmethod
+    def remove(cls, name: str) -> None:
+        """
+        从容器中移除服务
         
-        missing_services = []
-        for service_name in required_services:
-            if not self.has(service_name):
-                missing_services.append(service_name)
-        
-        if missing_services:
-            logger.warning(f"以下必需服务未注册: {', '.join(missing_services)}")
+        Args:
+            name: 服务名称
+        """
+        if name in cls._services:
+            del cls._services[name]
+            if name in cls._scopes:
+                del cls._scopes[name]
+            logger.debug(f"服务 '{name}' 已移除")
+        else:
+            logger.warning(f"尝试移除不存在的服务 '{name}'")
     
-    def reset(self) -> None:
-        """重置服务容器(主要用于测试)"""
-        with self._lock:
-            self._services.clear()
-            self._initialized = False
+    @classmethod
+    def clear(cls) -> None:
+        """
+        清空容器中的所有服务
+        """
+        cls._services.clear()
+        cls._scopes.clear()
+        logger.debug("所有服务已清空")
+    
+    @classmethod
+    def get_all(cls) -> Dict[str, Any]:
+        """
+        获取所有注册的服务
+        
+        Returns:
+            包含所有服务的字典
+        """
+        return cls._services.copy()
+    
+    @classmethod
+    def initialize(cls) -> None:
+        """
+        初始化容器
+        在所有服务注册完成后调用
+        """
+        cls._initialized = True
+        logger.info("服务容器初始化完成")
+    
+    @classmethod
+    def is_initialized(cls) -> bool:
+        """
+        检查容器是否已初始化
+        
+        Returns:
+            如果容器已初始化则返回True，否则返回False
+        """
+        return cls._initialized
 
-# 全局服务容器实例
+# 创建全局容器实例
 container = ServiceContainer() 

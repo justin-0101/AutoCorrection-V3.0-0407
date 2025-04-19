@@ -137,6 +137,31 @@ class Membership(BaseModel):
             self.last_essay_date = today
             db.session.commit()
     
+    def get_remaining_info(self):
+        """获取会员剩余次数信息"""
+        # 确保每日使用量是最新的
+        self.reset_daily_usage()
+        
+        user_type = 'free'  # 默认为免费用户
+        if self.plan and hasattr(self.plan, 'code'):
+            if self.plan.code.lower() == 'premium':
+                user_type = 'premium'
+            elif self.plan.code.lower() == 'regular' or self.plan.code.lower() == 'basic':
+                user_type = 'regular'
+        
+        # 计算剩余次数
+        max_essays_per_day = self.plan.max_essays_per_day if self.plan else 3
+        max_essays_total = self.plan.max_essays_total if self.plan else 10
+        
+        daily_remaining = max(0, max_essays_per_day - self.essays_used_today)
+        total_remaining = max(0, max_essays_total - self.essays_used_total)
+        
+        return {
+            'user_type': user_type,
+            'daily_remaining': daily_remaining,
+            'total_remaining': total_remaining
+        }
+    
     def can_submit_essay(self):
         """检查用户是否可以提交作文"""
         if not self.is_active or self.is_expired():

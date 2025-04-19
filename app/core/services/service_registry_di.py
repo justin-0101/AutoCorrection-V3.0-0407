@@ -11,10 +11,12 @@ import importlib
 from typing import Dict, Any, List, Optional, Type
 import yaml
 import os
+import sys
 
 from dependency_injector import containers, providers
 from app.core.ai import AIClientFactory
 from app.core.correction.correction_service import CorrectionService
+from app.core.correction.ai_corrector import AICorrectionService
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +25,31 @@ class ServiceContainer(containers.DeclarativeContainer):
     
     # 配置
     config = providers.Configuration()
-    config.from_yaml('config/services.yaml')
+    
+    # 手动读取YAML配置文件，指定UTF-8编码
+    try:
+        # 获取当前工作目录并构建绝对路径
+        current_dir = os.getcwd()
+        config_path = os.path.join(current_dir, 'config', 'services.yaml')
+        logger.info(f"尝试从路径加载配置: {config_path}")
+        
+        with open(config_path, 'r', encoding='utf-8') as yaml_file:
+            yaml_config = yaml.safe_load(yaml_file)
+            config.from_dict(yaml_config)
+            logger.info("成功以UTF-8编码加载YAML配置文件")
+    except Exception as e:
+        logger.error(f"加载YAML配置文件失败: {str(e)}")
+        # 使用空字典作为默认配置
+        config.from_dict({})
+        # 创建基本配置以确保系统可以启动
+        config.ai.api_key.with_default('default_key')
+        config.ai.endpoint.with_default('https://api.default.com')
+        config.ai.model.with_default('dash-pro')
+        config.ai.timeout.with_default(60)
+        config.redis.host.with_default('localhost')
+        config.redis.port.with_default(6379)
+        config.redis.db.with_default(0)
+        config.redis.password.with_default('')
     
     # 加载环境变量
     config.ai.api_key.from_env('AI_API_KEY')
@@ -48,6 +74,18 @@ class ServiceContainer(containers.DeclarativeContainer):
         port=config.redis.port,
         db=config.redis.db,
         password=config.redis.password
+    )
+    
+    # 文件服务
+    file_service = providers.Singleton(
+        'app.core.services.file_service.FileService'
+    )
+    
+    # AI批改服务
+    ai_correction_service = providers.Singleton(
+        AICorrectionService,
+        ai_service="deepseek",  # 直接使用字符串默认值
+        debug_mode=True  # 直接启用调试模式
     )
     
     # 批改服务
@@ -113,7 +151,8 @@ class ServiceContainer(containers.DeclarativeContainer):
         """获取服务依赖关系"""
         result = {}
         # 硬编码依赖关系（理想情况下应自动检测）
-        result['correction_service'] = ['ai_client_factory']
+        result['ai_correction_service'] = ['ai_client_factory']
+        result['correction_service'] = ['ai_correction_service']
         result['health_checker'] = ['redis_service', 'correction_service']
         return result
     
@@ -125,16 +164,36 @@ class ServiceContainer(containers.DeclarativeContainer):
             if 'SERVICES_CONFIG' in app.config:
                 cls.config.from_dict(app.config['SERVICES_CONFIG'])
                 
-            # 注入依赖
-            cls.wire(modules=[
+            # 创建容器实例
+            container = cls()
+            
+            # 手动导入并注入依赖
+            modules_to_inject = [
                 "app.tasks.correction_tasks",
                 "app.core.correction.correction_service",
                 "app.api.v1.essays.routes",
                 "app.routes.main_routes"
-            ])
+            ]
+            
+            for module_name in modules_to_inject:
+                try:
+                    # 尝试导入模块
+                    if module_name in sys.modules:
+                        module = sys.modules[module_name]
+                    else:
+                        module = importlib.import_module(module_name)
+                    
+                    # 为模块设置容器属性
+                    module.container = container
+                    logger.info(f"为模块 {module_name} 注入了依赖")
+                except (ImportError, AttributeError) as e:
+                    logger.warning(f"无法为模块 {module_name} 注入依赖: {str(e)}")
             
             # 记录初始化信息
             logger.info("服务容器已连接到应用")
+            
+            # 将容器设置为全局可访问
+            app.container = container
         else:
             logger.warning("无法初始化应用，未提供有效的Flask应用实例")
             
@@ -151,10 +210,30 @@ class ServiceContainer(containers.DeclarativeContainer):
         except ImportError:
             logger.warning("无法加载dotenv，环境变量可能未正确设置")
             
-        # 注入依赖
-        cls.wire(modules=[
+        # 创建容器实例
+        container = cls()
+            
+        # 手动导入并注入依赖
+        modules_to_inject = [
             "app.tasks.correction_tasks",
             "app.core.correction.correction_service"
-        ])
+        ]
         
-        logger.info("服务容器已连接到Celery工作进程") 
+        for module_name in modules_to_inject:
+            try:
+                # 尝试导入模块
+                if module_name in sys.modules:
+                    module = sys.modules[module_name]
+                else:
+                    module = importlib.import_module(module_name)
+                
+                # 为模块设置容器属性
+                module.container = container
+                logger.info(f"为工作进程中的模块 {module_name} 注入了依赖")
+            except (ImportError, AttributeError) as e:
+                logger.warning(f"无法为工作进程中的模块 {module_name} 注入依赖: {str(e)}")
+        
+        logger.info("服务容器已连接到Celery工作进程")
+
+# 创建别名以保持向后兼容性
+ServiceRegistry = ServiceContainer 

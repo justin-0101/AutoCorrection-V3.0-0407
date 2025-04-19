@@ -67,6 +67,15 @@ class Correction(BaseModel):
             "status IN ('pending', 'processing', 'correcting', 'completed', 'failed')",
             name='valid_correction_status'
         ),
+        # 添加唯一索引，确保每篇文章只能有一条未删除的correction记录
+        db.Index(
+            'uix_corrections_essay_active', 
+            'essay_id', 
+            'is_deleted', 
+            unique=True,
+            postgresql_where=db.text('is_deleted = false'),  # PostgreSQL支持条件索引
+            sqlite_where=db.text('is_deleted = 0')           # SQLite支持条件索引
+        ),
     )
     
     # 添加版本控制字段

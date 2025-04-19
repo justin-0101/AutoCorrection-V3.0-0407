@@ -44,7 +44,7 @@
 
 ### 3.1 Celery配置
 
-```python
+python
 # config/celery_config.py
 """
 Celery配置模块

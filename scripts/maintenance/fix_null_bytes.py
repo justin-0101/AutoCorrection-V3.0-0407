@@ -8,12 +8,14 @@ Script to fix null bytes in Python files
 import os
 import sys
 import re
+from app.core.services.file_service import FileService
 
 def fix_file(file_path):
     """Fix null bytes in the specified file using direct binary manipulation."""
     try:
+        file_service = FileService()
         # 读取文件的二进制内容
-        with open(file_path, 'rb') as file:
+        with file_service.open(file_path, 'rb') as file:
             content = file.read()
         
         # 检查是否有null字节（0x00）或其他问题字符
@@ -27,7 +29,7 @@ def fix_file(file_path):
             cleaned_content = content.replace(b'\x00', b'').replace(b'\xff', b'')
             
             # 在Windows环境中使用'wb'模式写入文件
-            with open(file_path, 'wb') as file:
+            with file_service.open(file_path, 'wb') as file:
                 file.write(cleaned_content)
             
             print(f"Fixed: {file_path}")
@@ -57,7 +59,8 @@ def scan_directory(directory):
 def find_import_paths(file_path):
     """分析Python文件并寻找导入的模块路径"""
     try:
-        with open(file_path, 'rb') as file:
+        file_service = FileService()
+        with file_service.open(file_path, 'rb') as file:
             content = file.read()
             
         # 转换为文本以分析导入语句
@@ -103,7 +106,7 @@ if __name__ == "__main__":
     
     print("\n单独检查重要文件:")
     for file_path in problem_files:
-        if os.path.exists(file_path):
+        if file_service.exists(file_path):
             fix_file(file_path)
             
             # 分析这个文件导入的其他模块
@@ -111,7 +114,7 @@ if __name__ == "__main__":
             imported_modules = find_import_paths(file_path)
             for module in imported_modules:
                 potential_file = convert_import_to_file_path(module)
-                if os.path.exists(potential_file):
+                if file_service.exists(potential_file):
                     print(f"检查导入的模块文件: {potential_file}")
                     fix_file(potential_file)
         else:

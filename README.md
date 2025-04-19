@@ -396,3 +396,102 @@ pip install dependency-injector pyyaml prometheus_client
 ## 特别说明
 
 项目最后更新：2025年4月12日
+
+## 模型变更记录
+
+### 版本更新
+
+在最新版本中，我们对 `Essay` 模型进行了以下变更：
+
+- 移除了 `file_path` 和 `file_name` 字段，以简化模型结构。
+- 通过 `FileService` 提供统一的文件操作接口，替代直接的文件路径引用。
+
+### 替代方案
+
+- **文件操作**：所有文件操作现在通过 `FileService` 进行，确保一致性和可维护性。
+- **数据存储**：文件相关信息不再存储在 `Essay` 模型中，而是通过服务层进行管理。
+
+这些变更提高了系统的灵活性和可扩展性，减少了模型与文件系统之间的耦合。
+
+更新：2025年4月13日
+
+## 项目文件结构
+
+项目文件已按功能和用途整理为以下结构：
+
+```
+AutoCorrection-V3.0-0407/
+├── app/                    # 主应用程序目录
+│   ├── __init__.py         # 应用程序初始化
+│   ├── models/             # 数据模型
+│   ├── routes/             # 路由处理
+│   ├── tasks/              # 异步任务
+│   ├── core/               # 核心业务逻辑
+│   │   └── correction/     # 批改核心功能
+│   └── ...
+├── debug/                  # 调试和修复工具
+│   ├── tools/              # 常用修复和调试工具
+│   ├── db_tools/           # 数据库相关工具
+│   ├── web/                # Web界面调试工具
+│   ├── admin/              # 管理功能调试工具
+│   ├── batch/              # 批处理脚本
+│   ├── scripts/            # 辅助脚本
+│   ├── monitoring/         # 监控工具
+│   └── test_data/          # 测试数据
+├── tests/                  # 测试文件
+│   └── manual/             # 手动测试脚本
+├── scripts/                # 脚本
+│   ├── startup/            # 启动脚本
+│   ├── admin/              # 管理员脚本
+│   ├── batch/              # 批处理脚本
+│   └── web_utils/          # Web工具脚本
+├── docs/                   # 文档
+│   └── diagrams/           # 流程图和图表
+├── data/                   # 数据目录
+│   ├── temp_icons/         # 临时图标
+│   └── diagrams/           # 图表数据
+└── ...其他系统文件
+```
+
+### 重要工具说明
+
+1. **批改结果同步工具** (根目录和debug/tools/fix_correction_sync.py)
+   - 用于解决corrections表和essays表之间的数据同步问题
+   - 支持自动修复、批量修复和监控服务模式
+
+2. **启动脚本** (scripts/startup/)
+   - start-services.bat: 启动主应用服务
+   - start_celery.bat: 启动Celery工作器
+   - restart-services.bat: 重启所有服务
+   - start_sync_monitor.bat: 启动批改结果同步监控服务
+
+3. **监控工具** (debug/tools/)
+   - check_essay_status.py: 检查特定文章状态
+   - check_task_status.py: 检查任务状态
+
+4. **数据库工具** (debug/db_tools/)
+   - db_maintenance.py: 数据库维护工具
+   - cleanup_essay_status.py: 清理文章状态
+
+5. **管理员工具** (scripts/admin/)
+   - create_new_admin.py: 创建新管理员
+   - update_admin.py: 更新管理员信息
+
+### 使用方法
+
+要启动批改结果同步监控服务：
+
+```bash
+python fix_correction_sync.py -m -i 60
+```
+
+- `-m`: 启动监控服务
+- `-i 60`: 设置检查间隔为60秒
+
+该服务会定期检查并自动修复数据库中的同步问题，确保批改结果正确显示。
+
+或者使用批处理脚本：
+
+```bash
+scripts/startup/start_sync_monitor.bat
+```

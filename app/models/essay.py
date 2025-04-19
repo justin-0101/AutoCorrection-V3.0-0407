@@ -12,6 +12,7 @@ from sqlalchemy.orm import relationship, validates
 import logging
 
 # 创建logger实例
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 from app.models.db import db, BaseModel
@@ -169,35 +170,36 @@ class Essay(BaseModel):
         更新作文状态
         
         Args:
-            new_status: 新状态（可以是EssayStatus枚举或字符串）
-            error_message: 错误信息（当状态为FAILED时使用）
+            new_status: 新状态
+            error_message: 错误信息（可选）
             
         Returns:
-            bool: 状态是否成功更新
+            bool: 是否更新成功
         """
+        # 如果传入的是枚举对象，获取它的值
         if isinstance(new_status, EssayStatus):
             new_status = new_status.value
             
-        # 验证状态转换的合法性
+        # 定义有效的状态转换
         valid_transitions = {
             EssayStatus.DRAFT.value: [EssayStatus.PENDING.value],
             EssayStatus.PENDING.value: [EssayStatus.PROCESSING.value, EssayStatus.CORRECTING.value, EssayStatus.FAILED.value],
             EssayStatus.PROCESSING.value: [EssayStatus.CORRECTING.value, EssayStatus.FAILED.value, EssayStatus.PENDING.value],
             EssayStatus.CORRECTING.value: [EssayStatus.COMPLETED.value, EssayStatus.FAILED.value],
             EssayStatus.COMPLETED.value: [EssayStatus.ARCHIVED.value],
-            EssayStatus.FAILED.value: [EssayStatus.PENDING.value, EssayStatus.PROCESSING.value],  # 允许重试
-            EssayStatus.ARCHIVED.value: []  # 归档状态是终态
+            EssayStatus.FAILED.value: [EssayStatus.PENDING.value, EssayStatus.PROCESSING.value],
+            EssayStatus.ARCHIVED.value: []
         }
         
         old_status = self.status
         
         # 检查状态转换是否有效
         if old_status not in valid_transitions:
-            logger.error(f"当前状态无效: {old_status}")
+            logger.warning(f"当前状态无效: {old_status}")
             return False
             
         if new_status not in valid_transitions[old_status]:
-            logger.error(f"状态转换无效: {old_status} -> {new_status}")
+            logger.warning(f"状态转换无效: {old_status} -> {new_status}")
             return False
             
         try:
@@ -284,7 +286,7 @@ class Essay(BaseModel):
                 self.corrected_at = datetime.utcnow()
                 return True
         except Exception as e:
-            logger.error(f"同步批改结果时出错: {str(e)}")
+            print(f"同步批改结果时出错: {str(e)}")
         
         return False
     
@@ -476,7 +478,7 @@ class Essay(BaseModel):
                 updated_at=datetime.utcnow()
             )
         except Exception as e:
-            logger.warning(f"作文状态更新冲突 [id={self.id}, status={new_status}]: {str(e)}")
+            print(f"作文状态更新冲突 [id={self.id}, status={new_status}]: {str(e)}")
             return False
 
 class UserFeedback(BaseModel):

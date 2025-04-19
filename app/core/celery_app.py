@@ -10,7 +10,6 @@ import os
 import logging
 from celery import Celery
 from flask import Flask, current_app
-# 移除从app导入create_app
 
 # 创建日志记录器
 logger = logging.getLogger(__name__)
@@ -26,7 +25,6 @@ def create_celery_app(app: Flask = None) -> Celery:
         Celery: Celery应用实例
     """
     # 如果没有提供 Flask 应用，创建一个简单的Celery实例
-    # 避免循环导入，不再直接创建Flask应用
     if not app:
         # 创建一个简单的Celery实例，使用环境变量中的配置
         broker = os.environ.get('CELERY_BROKER_URL', 'redis://localhost:6379/0')
@@ -72,53 +70,25 @@ def create_celery_app(app: Flask = None) -> Celery:
             worker_prefetch_multiplier=1
         )
         
-        # 添加错误处理
-        from celery.signals import task_failure
-        @task_failure.connect
-        def handle_task_failure(task_id, exception, args, kwargs, traceback, einfo, **_):
-            logger.error(
-                f"任务失败 [task_id={task_id}]: {str(exception)}\n"
-                f"参数: args={args}, kwargs={kwargs}\n"
-                f"错误详情:\n{einfo}"
-            )
-        
         class ContextTask(celery.Task):
             """确保任务在应用上下文中运行"""
             abstract = True
             
             def __call__(self, *args, **kwargs):
-                with app.app_context():
+                # 正确检查是否在应用上下文中
+                from flask import has_app_context
+                if has_app_context():
                     return super().__call__(*args, **kwargs)
-            
-            def on_failure(self, exc, task_id, args, kwargs, einfo):
-                """任务失败时的处理"""
+                    
+                # 否则创建新的应用上下文
+                from app import create_app
+                app = create_app()
                 with app.app_context():
-                    logger.error(
-                        f"任务执行失败 [task_id={task_id}]: {str(exc)}\n"
-                        f"参数: args={args}, kwargs={kwargs}\n"
-                        f"错误详情:\n{einfo}"
-                    )
-                    super().on_failure(exc, task_id, args, kwargs, einfo)
-            
-            def on_retry(self, exc, task_id, args, kwargs, einfo):
-                """任务重试时的处理"""
-                with app.app_context():
-                    logger.warning(
-                        f"任务重试 [task_id={task_id}]: {str(exc)}\n"
-                        f"参数: args={args}, kwargs={kwargs}"
-                    )
-                    super().on_retry(exc, task_id, args, kwargs, einfo)
-            
-            def after_return(self, status, retval, task_id, args, kwargs, einfo):
-                """任务完成后的处理"""
-                with app.app_context():
-                    if status == 'SUCCESS':
-                        logger.info(
-                            f"任务完成 [task_id={task_id}]\n"
-                            f"参数: args={args}, kwargs={kwargs}\n"
-                            f"返回值: {retval}"
-                        )
-                    super().after_return(status, retval, task_id, args, kwargs, einfo)
+                    # 确保数据库初始化
+                    from app.extensions import db
+                    if not db.get_engine(app, bind=None):
+                        db.init_app(app)
+                    return super().__call__(*args, **kwargs)
         
         # 设置默认任务基类
         celery.Task = ContextTask
@@ -129,5 +99,5 @@ def create_celery_app(app: Flask = None) -> Celery:
         logger.error(f"创建Celery应用时出错: {str(e)}")
         raise
 
-# 使用简单配置创建Celery实例，避免循环导入
-celery = create_celery_app() 
+# 使用简单配置创建Celery实例
+celery_app = create_celery_app() 

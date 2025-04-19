@@ -1,210 +1,478 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>作文批改 - 小园丁作文批改</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
-    <style>
-        body {
-            background-color: #f8f9fa;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-        }
-        .navbar-brand {
-            font-weight: bold;
-        }
-        .main-content {
-            flex: 1;
-        }
-        .footer {
-            background-color: #212529;
-            color: rgba(255,255,255,0.6);
-            padding: 20px 0;
-            margin-top: auto;
-        }
-        .footer-link {
-            color: rgba(255,255,255,0.6);
-            text-decoration: none;
-        }
-        .footer-link:hover {
-            color: white;
-        }
-        #loadingSpinner {
-            display: none;
-        }
-        .progress {
-            height: 5px;
-        }
+{% extends "base.html" %}
+
+{% block title %}作文批改 - 小园丁作文批改系统{% endblock %}
+
+{% block head_meta %}
+<meta name="description" content="小园丁作文批改系统 - 智能作文批改服务，采用广东省中考评分标准，提供专业的作文评估和建议">
+<meta name="keywords" content="作文批改,智能批改,中考作文,写作辅导,AI批改">
+{% if form and form.csrf_token %}
+<meta name="csrf-token" content="{{ form.csrf_token.current_token }}">
+{% endif %}
+{% endblock %}
+
+{% block style %}
+<style>
+    :root {
+        --primary-color: #0d6efd;
+        --secondary-color: #6c757d;
+        --success-color: #198754;
+        --info-color: #0dcaf0;
+        --warning-color: #ffc107;
+        --danger-color: #dc3545;
+        --light-color: #f8f9fa;
+        --dark-color: #212529;
+        --transition-speed: 0.3s;
+        --box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+
+    .card {
+        border: none;
+        box-shadow: var(--box-shadow);
+        transition: transform var(--transition-speed) ease;
+        border-radius: 12px;
+        overflow: hidden;
+    }
+
+    .card:hover {
+        transform: translateY(-2px);
+    }
+
+    .membership-info {
+        background: linear-gradient(135deg, #f1f8ff, #e7f3ff);
+        border-left: 4px solid var(--primary-color);
+        padding: 1.25rem;
+        margin-bottom: 1.5rem;
+        border-radius: 12px;
+        box-shadow: var(--box-shadow);
+    }
+
+    .membership-badge {
+        padding: 0.5rem 1rem;
+        border-radius: 20px;
+        font-size: 0.875rem;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+    }
+
+    .badge-free { background-color: var(--secondary-color); color: white; }
+    .badge-regular { background-color: var(--success-color); color: white; }
+    .badge-premium { 
+        background: linear-gradient(135deg, #ffd700, #ffa500);
+        color: var(--dark-color);
+    }
+
+    .upload-area {
+        border: 2px dashed var(--primary-color);
+        border-radius: 12px;
+        background-color: rgba(13, 110, 253, 0.05);
+        transition: all var(--transition-speed) ease;
+        cursor: pointer;
+    }
+
+    .upload-area:hover, .upload-area.dragover {
+        background-color: rgba(13, 110, 253, 0.1);
+        border-color: var(--info-color);
+    }
+
+    .upload-area i {
+        font-size: 3rem;
+        color: var(--primary-color);
+        margin-bottom: 1rem;
+    }
+
+    #loadingSpinner {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(255,255,255,0.9);
+        display: none;
+        justify-content: center;
+        align-items: center;
+        z-index: 9999;
+    }
+
+    .loading-content {
+        text-align: center;
+        padding: 2rem;
+        background: white;
+        border-radius: 12px;
+        box-shadow: var(--box-shadow);
+    }
+
+    .progress {
+        height: 6px;
+        border-radius: 3px;
+        overflow: hidden;
+        margin: 1rem 0;
+    }
+
+    /* 响应式优化 */
+    @media (max-width: 768px) {
         .membership-info {
-            background-color: #f1f8ff;
-            border-left: 4px solid #0d6efd;
-            padding: 15px;
-            margin-bottom: 20px;
-            border-radius: 4px;
+            padding: 1rem;
         }
+
+        .upload-area {
+            padding: 2rem !important;
+        }
+
         .membership-badge {
-            padding: 5px 10px;
-            border-radius: 12px;
-            font-size: 0.8rem;
-            font-weight: bold;
+            padding: 0.25rem 0.75rem;
+            font-size: 0.75rem;
         }
-        .badge-free {
-            background-color: #6c757d;
-            color: white;
-        }
-        .badge-regular {
-            background-color: #198754;
-            color: white;
-        }
-        .badge-premium {
-            background-color: #ffc107;
-            color: black;
-        }
-    </style>
-</head>
-<body>
-    <!-- 导航栏 -->
-    {% include 'navbar.html' %}
-    
-    <div class="main-content py-5">
-        <div class="container">
-            <h2 class="mb-4">作文批改</h2>
+    }
+
+    /* 表单验证样式 */
+    .form-control:focus {
+        border-color: var(--primary-color);
+        box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+    }
+
+    .was-validated .form-control:invalid {
+        border-color: var(--danger-color);
+        background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' width='12' height='12' fill='none' stroke='%23dc3545'%3e%3ccircle cx='6' cy='6' r='4.5'/%3e%3cpath stroke-linejoin='round' d='M5.8 3.6h.4L6 6.5z'/%3e%3ccircle cx='6' cy='8.2' r='.6' fill='%23dc3545' stroke='none'/%3e%3c/svg%3e");
+        background-repeat: no-repeat;
+        background-position: right calc(0.375em + 0.1875rem) center;
+        background-size: calc(0.75em + 0.375rem) calc(0.75em + 0.375rem);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <nav aria-label="breadcrumb" class="mb-4">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ url_for('main.index') }}">首页</a></li>
+            <li class="breadcrumb-item active" aria-current="page">作文批改</li>
+        </ol>
+    </nav>
+
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            <!-- 会员信息展示 -->
+            {% if remaining_info %}
+            <div class="membership-info">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div>
+                        <h5 class="mb-0">您的批改次数</h5>
+                        <p class="text-muted mb-0 small">享受智能批改服务</p>
+                    </div>
+                    <span class="membership-badge 
+                        {% if remaining_info.user_type == 'free' %}badge-free
+                        {% elif remaining_info.user_type == 'regular' %}badge-regular
+                        {% elif remaining_info.user_type == 'premium' %}badge-premium{% endif %}">
+                        {{ '免费用户' if remaining_info.user_type == 'free' else
+                            '普通会员' if remaining_info.user_type == 'regular' else
+                            '高级会员' if remaining_info.user_type == 'premium' else
+                            '未知' }}
+                    </span>
+                </div>
+                <div class="d-flex justify-content-between align-items-center">
+                        <div class="d-flex align-items-center">
+                            <i class="bi bi-check-circle-fill text-success me-2"></i>
+                    <div>
+                        <strong>总剩余次数:</strong> 
+                                <span class="ms-2">{{ remaining_info.total_remaining }}</span>
+                            </div>
+                        </div>
+                        <div class="d-flex align-items-center">
+                            <i class="bi bi-calendar-check text-primary me-2"></i>
+                    <div>
+                        <strong>今日剩余:</strong> 
+                                <span class="ms-2">{{ remaining_info.daily_remaining }}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
             
-            <div class="row">
-                <div class="col-lg-8 mx-auto">
-                    <!-- 会员信息展示 -->
-                    {% if remaining_info %}
-                    <div class="membership-info mb-4">
-                        <div class="d-flex justify-content-between align-items-center mb-2">
-                            <div>
-                                <h5 class="mb-0">您的批改次数</h5>
-                            </div>
-                            <span class="membership-badge 
-                                {% if remaining_info.user_type == 'free' %}badge-free
-                                {% elif remaining_info.user_type == 'regular' %}badge-regular
-                                {% elif remaining_info.user_type == 'premium' %}badge-premium{% endif %}">
-                                {{ '免费用户' if remaining_info.user_type == 'free' else
-                                   '普通会员' if remaining_info.user_type == 'regular' else
-                                   '高级会员' if remaining_info.user_type == 'premium' else
-                                   '未知' }}
-                            </span>
-                        </div>
-                        <div class="d-flex justify-content-between">
-                            <div>
-                                <strong>总剩余次数:</strong> 
-                                <span>{{ remaining_info.total_remaining }}</span>
-                            </div>
-                            <div>
-                                <strong>今日剩余:</strong> 
-                                <span>{{ remaining_info.daily_remaining }}</span>
-                            </div>
-                        </div>
+            <div class="card mb-4">
+                <div class="card-header bg-white py-3">
+                    <h4 class="mb-0">提交作文批改</h4>
+                </div>
+                <div class="card-body">
+                    {% with messages = get_flashed_messages(with_categories=true) %}
+                        {% if messages %}
+                            {% for category, message in messages %}
+                                <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                                    {{ message }}
+                                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="关闭"></button>
+                                </div>
+                            {% endfor %}
+                        {% endif %}
+                    {% endwith %}
+
+                    <!-- 上传成功提示 -->
+                    {% if success_message %}
+                    <div class="alert alert-success alert-dismissible fade show" role="alert">
+                        <i class="bi bi-check-circle-fill me-2"></i>
+                        文件上传成功，正在批改中，请在我的作文中查看进度
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="关闭"></button>
                     </div>
                     {% endif %}
-                    
-                    <div class="card shadow-sm mb-4">
-                        <div class="card-header bg-white">
-                            <h4 class="mb-0">提交作文批改</h4>
-                        </div>
-                        <div class="card-body">
-                            {% with messages = get_flashed_messages(with_categories=true) %}
-                                {% if messages %}
-                                    {% for category, message in messages %}
-                                        <div class="alert alert-{{ category }}">{{ message }}</div>
-                                    {% endfor %}
-                                {% endif %}
-                            {% endwith %}
 
-                            <!-- 上传成功提示 -->
-                            {% if success_message %}
-                            <div class="alert alert-success">
-                                <i class="bi bi-check-circle-fill me-2"></i>
-                                文件上传成功，正在批改中，请在我的作文中查看进度
+                    <form id="essayForm" method="post" action="{{ url_for('main.correction') }}" 
+                            enctype="multipart/form-data" class="needs-validation" novalidate>
+                        <!-- 添加 CSRF token -->
+                        {% if form %}
+                            {{ form.hidden_tag() }}
+                        {% endif %}
+                        
+                        <div class="mb-4">
+                            <label for="subject" class="form-label">作文标题</label>
+                            <input type="text" class="form-control" id="subject" name="subject" 
+                                    placeholder="请输入作文标题（选填）">
+                            <div class="form-text">标题不是必填项，但填写后更易于管理和查找</div>
+                        </div>
+                        
+                        <input type="hidden" id="source_type" name="source_type" value="upload">
+                        
+                        <div class="mb-4">
+                            <div class="upload-area p-5 text-center" id="dropZone">
+                                <i class="bi bi-cloud-upload"></i>
+                                <h5 class="mb-3">拖拽文件到此处或点击选择文件</h5>
+                                <input type="file" class="form-control" id="file" name="file" 
+                                        accept=".txt,.doc,.docx,.pdf" required>
+                                <div class="form-text mt-2">
+                                    支持的文件格式：.txt, .doc, .docx, .pdf
+                                    <br>
+                                    <span class="text-muted">建议文件大小不超过10MB</span>
+                                </div>
                             </div>
-                            {% endif %}
+                            <div class="invalid-feedback">请选择一个有效的文件</div>
+                        </div>
 
-                            <form id="essayForm" method="post" action="{{ url_for('main.correction') }}" enctype="multipart/form-data">
-                                <div class="mb-3">
-                                    <label for="subject" class="form-label">作文标题</label>
-                                    <input type="text" class="form-control" id="subject" name="subject">
-                                    <div class="form-text">标题不是必选项</div>
-                                </div>
-                                
-                                <!-- 添加隐藏的source_type字段 -->
-                                <input type="hidden" id="source_type" name="source_type" value="upload">
-                                
-                                <div class="mb-4">
-                                    <div class="upload-area p-5 text-center border rounded bg-light">
-                                        <i class="bi bi-cloud-upload fs-1 text-primary mb-3"></i>
-                                        <h5>拖拽文件到此处或点击选择文件</h5>
-                                        <input type="file" class="form-control mt-3" id="file" name="file" accept=".txt,.doc,.docx" required>
-                                        <div class="form-text">支持 .txt, .doc, .docx 格式</div>
-                                    </div>
-                                </div>
-
-                                <div class="d-grid gap-2">
-                                    <button type="submit" class="btn btn-primary">
-                                        <i class="bi bi-check-circle me-1"></i> 提交批改
-                                    </button>
-                                </div>
-                            </form>
+                        <div class="d-grid gap-2">
+                            <button type="submit" class="btn btn-primary btn-lg" id="submitBtn">
+                                <i class="bi bi-check-circle me-2"></i>
+                                提交批改
+                            </button>
                         </div>
-                    </div>
-                    
-                    <!-- 说明内容 -->
-                    <div class="card shadow-sm mt-4">
-                        <div class="card-header bg-white">
-                            <h5 class="mb-0">说明</h5>
-                        </div>
-                        <div class="card-body">
-                            <ul class="list-unstyled mb-0">
-                                <li class="mb-2">
-                                    <i class="bi bi-check-circle-fill text-success me-2"></i>
-                                    评分标准采用广东省中考作文评分标准
-                                </li>
-                                <li class="mb-2">
-                                    <i class="bi bi-check-circle-fill text-success me-2"></i>
-                                    AI批改评分调用deepseeek-R1大模型
-                                </li>
-                                <li>
-                                    <i class="bi bi-check-circle-fill text-success me-2"></i>
-                                    图片识别调用阿里qwen-v1-plus-latest大模型
-                                </li>
-                            </ul>
-                        </div>
-                    </div>
-                    
-                    <!-- 加载动画 -->
-                    <div id="loadingSpinner" class="text-center p-5">
-                        <div class="spinner-border text-primary mb-3" role="status"></div>
-                        <h5>正在批改中，请稍候...</h5>
-                        <div class="progress mt-3">
-                            <div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 100%"></div>
-                        </div>
-                        <p id="processingStatus" class="d-none mt-3">
-                            <span class="badge bg-info">处理中</span>
-                            <span id="statusText">正在处理您的作文...</span>
-                        </p>
-                    </div>
+                    </form>
+                </div>
+            </div>
+            
+            <!-- 说明内容 -->
+            <div class="card">
+                <div class="card-header bg-white py-3">
+                    <h5 class="mb-0">
+                        <i class="bi bi-info-circle me-2"></i>
+                        批改说明
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <ul class="list-unstyled mb-0">
+                        <li class="mb-3 d-flex align-items-start">
+                            <i class="bi bi-check-circle-fill text-success me-2 mt-1"></i>
+                            <div>
+                                <strong>评分标准</strong>
+                                <p class="mb-0 text-muted">采用广东省中考作文评分标准，确保评分的权威性和准确性</p>
+                            </div>
+                        </li>
+                        <li class="mb-3 d-flex align-items-start">
+                            <i class="bi bi-check-circle-fill text-success me-2 mt-1"></i>
+                            <div>
+                                <strong>AI批改技术</strong>
+                                <p class="mb-0 text-muted">使用deepseeek-R1大模型进行智能评分，提供专业的写作建议</p>
+                            </div>
+                        </li>
+                        <li class="d-flex align-items-start">
+                            <i class="bi bi-check-circle-fill text-success me-2 mt-1"></i>
+                            <div>
+                                <strong>图片识别</strong>
+                                <p class="mb-0 text-muted">采用阿里qwen-v1-plus-latest大模型，支持手写作文识别</p>
+                            </div>
+                        </li>
+                    </ul>
                 </div>
             </div>
         </div>
     </div>
-    
-    <!-- 页脚 -->
-    <footer class="footer py-3">
-        <div class="container">
-            <div class="text-center">
-                <p class="small mb-0">&copy; 2025 小园丁作文批改系统</p>
-            </div>
+</div>
+
+<!-- 加载动画 -->
+<div id="loadingSpinner" class="d-none">
+    <div class="loading-content">
+        <div class="spinner-border text-primary mb-3" role="status">
+            <span class="visually-hidden">正在加载...</span>
         </div>
-    </footer>
-    
-    <!-- JavaScript -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="{{ url_for('static', filename='js/correction.js') }}"></script>
-</body>
-</html> 
+        <h5>正在批改中，请稍候...</h5>
+        <div class="progress">
+            <div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 100%"></div>
+        </div>
+        <p id="processingStatus" class="mt-3 mb-0">
+            <span class="badge bg-info">处理中</span>
+            <span id="statusText">正在分析您的作文...</span>
+        </p>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const form = document.getElementById('essayForm');
+        const fileInput = document.getElementById('file');
+        const dropZone = document.getElementById('dropZone');
+        const submitBtn = document.getElementById('submitBtn');
+        const loadingSpinner = document.getElementById('loadingSpinner');
+        
+        if (!form || !fileInput || !dropZone || !submitBtn || !loadingSpinner) {
+            console.error('某些必要的DOM元素不存在');
+            return;
+        }
+        
+        // 拖放文件处理
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+            document.body.addEventListener(eventName, preventDefaults, false);
+        });
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, highlight, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, unhighlight, false);
+        });
+
+        dropZone.addEventListener('drop', handleDrop, false);
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        function highlight(e) {
+            dropZone.classList.add('dragover');
+        }
+
+        function unhighlight(e) {
+            dropZone.classList.remove('dragover');
+        }
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            fileInput.files = files;
+            validateFile();
+        }
+
+        // 文件验证 - 更新以匹配后端允许的文件类型
+        function validateFile() {
+            const file = fileInput.files[0];
+            if (file) {
+                const allowedTypes = ['.txt', '.doc', '.docx', '.pdf'];
+                const fileExtension = '.' + file.name.split('.').pop().toLowerCase();
+                
+                if (!allowedTypes.includes(fileExtension)) {
+                    fileInput.value = '';
+                    showMessage('请上传支持的文件格式：.txt, .doc, .docx, .pdf', 'warning');
+                    return false;
+                }
+
+                if (file.size > 10 * 1024 * 1024) { // 10MB
+                    fileInput.value = '';
+                    showMessage('文件大小不能超过10MB', 'warning');
+                    return false;
+                }
+
+                return true;
+            }
+            return false;
+        }
+
+        // 显示消息的函数
+        function showMessage(message, type) {
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
+            alertDiv.role = 'alert';
+            alertDiv.innerHTML = `
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            `;
+            form.insertAdjacentElement('beforebegin', alertDiv);
+            
+            // 5秒后自动关闭
+            setTimeout(() => {
+                alertDiv.remove();
+            }, 5000);
+        }
+        
+        // 表单提交处理 - 改进错误处理
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            if (!form.checkValidity()) {
+                e.stopPropagation();
+                form.classList.add('was-validated');
+                return;
+            }
+
+            if (!validateFile()) {
+                return;
+            }
+
+            // 显示加载动画并禁用按钮
+            loadingSpinner.classList.remove('d-none');
+            loadingSpinner.style.display = 'flex';
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> 正在提交...';
+            
+            // 添加超时处理，确保如果服务器无响应，用户也能得到反馈
+            let timeoutId = setTimeout(() => {
+                console.error('请求超时');
+                showMessage('服务器响应超时，请检查网络连接后重试', 'danger');
+                loadingSpinner.classList.add('d-none');
+                loadingSpinner.style.display = 'none';
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<i class="bi bi-check-circle me-2"></i> 提交批改';
+            }, 30000); // 30秒超时
+            
+            // 创建FormData对象
+            const formData = new FormData(form);
+            
+            // 确保CSRF令牌是最新的
+            const metaToken = document.querySelector('meta[name="csrf-token"]');
+            const csrfToken = metaToken ? metaToken.getAttribute('content') : 
+                             document.querySelector('input[name="csrf_token"]')?.value;
+            
+            // 如果存在CSRF令牌但formData中没有，则添加
+            if (csrfToken && !formData.has('csrf_token')) {
+                formData.set('csrf_token', csrfToken);
+                // 创建隐藏的input来确保表单提交时包含CSRF令牌
+                if (!document.querySelector('input[name="csrf_token"]')) {
+                    const tokenInput = document.createElement('input');
+                    tokenInput.type = 'hidden';
+                    tokenInput.name = 'csrf_token';
+                    tokenInput.value = csrfToken;
+                    form.appendChild(tokenInput);
+                }
+            }
+                
+                // 调试日志
+                console.group('表单提交调试');
+                console.log('提交按钮被点击，即将发送请求');
+                console.log('表单数据:');
+                for (const pair of formData.entries()) {
+                    console.log(`${pair[0]}: ${pair[1]}`);
+                }
+                console.log('CSRF Token:', csrfToken);
+                console.log('表单目标URL:', form.action);
+                console.log('表单方法:', form.method);
+                console.groupEnd();
+            
+            // 使用传统表单提交
+            form.submit();
+            
+            // 清除超时计时器 - 表单已提交
+                clearTimeout(timeoutId);
+        });
+
+        // 文件选择监听
+        fileInput.addEventListener('change', validateFile);
+    });
+</script>
+{% endblock %} 

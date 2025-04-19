@@ -32,16 +32,17 @@ class AICorrectionService:
         
         # 初始化AI客户端
         try:
-            # 尝试直接导入DeepseekClient
-            from app.core.ai.deepseek_client import DeepseekClient
+            # 尝试从环境变量获取API密钥
             api_key = os.environ.get('DEEPSEEK_API_KEY', '')
             base_url = os.environ.get('DEEPSEEK_BASE_URL', 'https://api.deepseek.com/v1')
-            model = os.environ.get('DEEPSEEK_MODEL', 'deepseek-chat')
+            model = os.environ.get('DEEPSEEK_MODEL', 'deepseek-reasoner')
             
-            if not api_key:
-                logger.warning("未配置DeepSeek API密钥，将使用调试模式")
+            if not api_key or api_key == 'your_api_key_here':
+                logger.warning("未配置DeepSeek API密钥或密钥无效，将使用调试模式")
                 self.debug_mode = True
             else:
+                # 尝试直接导入DeepseekClient
+                from app.core.ai.deepseek_client import DeepseekClient
                 self.ai_client = DeepseekClient(api_key=api_key, base_url=base_url, model=model)
                 logger.info(f"已创建DeepseekClient实例，模型: {model}")
         except Exception as e:

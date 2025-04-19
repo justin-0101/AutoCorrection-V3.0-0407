@@ -12,7 +12,8 @@ from app.models.user import (
     UserRole, RolePermission
 )
 from app.models.essay import (
-    Essay, UserFeedback, EssayTemplate, CorrectionRule, EssayStatus
+    Essay, UserFeedback, EssayTemplate, CorrectionRule, EssayStatus,
+    EssaySourceType
 )
 from app.models.correction import Correction
 from app.models.membership import (
@@ -36,6 +37,7 @@ __all__ = [
     'RolePermission',
     'Essay',
     'EssayStatus',
+    'EssaySourceType',
     'Correction',
     'UserFeedback',
     'EssayTemplate',

@@ -339,6 +339,7 @@
                             <div class="modal-footer">
                                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
                                 <form action="{{ url_for('main.delete_essay', essay_id=essay.id) }}" method="POST" style="display: inline;">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <button type="submit" class="btn btn-danger">确认删除</button>
                                 </form>
                             </div>
@@ -385,6 +386,7 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
                     <form id="batchDeleteForm" action="{{ url_for('main.batch_delete_essays') }}" method="POST">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <input type="hidden" name="essay_ids" id="selectedEssayIds">
                         <button type="submit" class="btn btn-danger">确认删除</button>
                     </form>

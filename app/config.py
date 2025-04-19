@@ -8,23 +8,31 @@
 
 import os
 from dotenv import load_dotenv
+import logging
+from datetime import timedelta
+from pathlib import Path
 
 # 加载 .env 文件中的环境变量
 basedir = os.path.abspath(os.path.dirname(__file__))
 load_dotenv(os.path.join(basedir, '../.env')) # 假设.env在项目根目录
 
+# ---- 将 SECRET_KEY 的获取和检查移到这里 ----
+SECRET_KEY = os.getenv('SECRET_KEY')
+if not SECRET_KEY:
+    raise ValueError("必须设置 SECRET_KEY 环境变量！")
+# ----------------------------------------------
+
 class Config:
     """基础配置类"""
-    SECRET_KEY = os.environ.get('SECRET_KEY') or 'a_hard_to_guess_string'
+    SECRET_KEY = SECRET_KEY
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-    SQLALCHEMY_DATABASE_URI = 'sqlite:///instance/essay_correction.db'
     
     # 使用绝对路径
     DB_PATH = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'instance', 'essay_correction.db'))
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or f'sqlite:///{DB_PATH}'
     
     # JWT 配置
-    JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY') or 'another_hard_to_guess_string'
+    JWT_SECRET_KEY = SECRET_KEY
     JWT_ACCESS_TOKEN_EXPIRES = 3600  # 1 hour
     JWT_REFRESH_TOKEN_EXPIRES = 30 * 24 * 3600 # 30 days
     
@@ -35,7 +43,9 @@ class Config:
     # 文件上传配置
     UPLOAD_FOLDER = 'uploads'
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16 MB
+    # ---- 保留顶层的扁平集合 ----
     ALLOWED_EXTENSIONS = {'txt', 'pdf', 'png', 'jpg', 'jpeg', 'docx', 'doc'}
+    # ---------------------------
     
     # DeepSeek API 配置
     DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY')
@@ -95,12 +105,12 @@ class Config:
         }
     }
     
-    # 应用通用配置
+    # 应用通用配置 (这个是字典，给 FileHandler 用)
     APP_CONFIG = {
         'max_essay_length': 5000,  # 最大作文长度(字符)
-        'allowed_extensions': {
-            'text': ['txt', 'docx', 'pdf'],
-            'image': ['jpg', 'jpeg', 'png']
+        'allowed_extensions': { # 保持字典结构
+            'text': ['txt', 'doc', 'docx', 'pdf'],
+            'image': ['jpg', 'jpeg', 'png'] # 确保图片类型也包含在内
         },
         'temp_dir': 'temp',
         'upload_dir': 'uploads'
@@ -255,14 +265,17 @@ class DevelopmentConfig(Config):
         }
     }
     
-    # 应用配置
+    # 应用配置 (也使用字典结构)
     APP_CONFIG = {
         'name': 'AutoCorrection',
         'version': '2.0.0',
         'debug': True,
         'log_level': 'DEBUG',
-        'secret_key': os.getenv('SECRET_KEY', 'dev-secret-key'),
-        'allowed_extensions': ['txt', 'doc', 'docx', 'pdf'],
+        'secret_key': SECRET_KEY,
+        'allowed_extensions': { # 确保这里也是字典
+            'text': ['txt', 'doc', 'docx', 'pdf'],
+            'image': ['jpg', 'jpeg', 'png']
+        },
         'upload_folder': os.path.join(basedir, 'uploads'),
         'max_content_length': 16 * 1024 * 1024,  # 16MB
     }

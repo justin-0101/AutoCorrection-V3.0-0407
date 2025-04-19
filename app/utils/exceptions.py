@@ -162,6 +162,18 @@ class DatabaseError(Exception):
     """数据库操作错误"""
     pass
 
+class PermissionDeniedError(Exception):
+    """权限错误异常"""
+    def __init__(self, message="没有执行此操作的权限"):
+        self.message = message
+        super().__init__(self.message)
+
+class BusinessError(Exception):
+    """业务逻辑错误异常"""
+    def __init__(self, message="业务处理过程中发生错误"):
+        self.message = message
+        super().__init__(self.message)
+
 def api_error_handler(f):
     """API错误处理装饰器"""
     @wraps(f)

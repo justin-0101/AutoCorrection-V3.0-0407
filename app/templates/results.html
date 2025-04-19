@@ -137,6 +137,14 @@
     
     <div class="main-content py-5">
         <div class="container">
+            <!-- 添加加载状态指示器 -->
+            <div id="loadingIndicator" class="text-center" style="display: none;">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">加载中...</span>
+                </div>
+                <p class="mt-2">正在加载批改结果，请稍候...</p>
+            </div>
+            
             <div class="row mb-4">
                 <div class="col">
                     <nav aria-label="breadcrumb">
@@ -154,11 +162,11 @@
                 </div>
             </div>
             
-            <div id="resultSection">
+            <div id="resultSection" style="display: none;">
                 <div class="card shadow-sm mb-4">
                     <div class="card-body pdf-content">
                         <h3 id="essayTitle" class="text-center mb-4" style="font-size: 20px; font-weight: bold;">
-                            作文标题：{% if title and title.strip() and title != '无标题' %}《{{ title }}》{% else %}【无标题】{% endif %}
+                            作文标题：{% if essay and essay.title and essay.title.strip() and essay.title != '无标题' %}《{{ essay.title }}》{% else %}【无标题】{% endif %}
                         </h3>
                         
                         <!-- 表格集成样式 -->
@@ -169,38 +177,38 @@
                                         <tr>
                                             <!-- 总分和等级突出显示在表头 -->
                                             <th class="text-center py-3" colspan="2" style="font-size: 1.5rem;"> <!-- 调整字体大小和内边距 -->
-                                                总分: <strong class="text-success">{{ total_score }}/50</strong> 
+                                                总分: <strong class="text-success">{{ results.total_score if results and results.total_score else '0' }}/50</strong> 
                                                 <span class="mx-3">|</span> <!-- 分隔符 -->
-                                                等级: <strong class="text-primary">{{ grade }}</strong>
+                                                等级: <strong class="text-primary">{{ results.grade if results and results.grade else 'N/A' }}</strong>
                                             </th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         <tr>
                                             <td class="fw-bold ps-4" style="width: 50%;">作文字数</td> <!-- 增加左内边距 -->
-                                            <td>{{ word_count }}</td>
+                                            <td>{{ results.word_count if results and results.word_count else '0' }}</td>
                                         </tr>
                                         <tr>
                                             <td class="fw-bold ps-4">错别字扣分</td>
-                                            <td class="{% if spelling_errors.解析|length > 0 %}text-danger fw-bold{% else %}text-success{% endif %}">
-                                                {% if spelling_errors.解析|length > 0 %}-{{ spelling_errors.解析|length }}{% else %}0{% endif %}
+                                            <td class="{% if results and results.spelling_errors and results.spelling_errors.解析|length > 0 %}text-danger fw-bold{% else %}text-success{% endif %}">
+                                                {% if results and results.spelling_errors and results.spelling_errors.解析|length > 0 %}-{{ results.spelling_errors.解析|length }}{% else %}0{% endif %}
                                             </td>
                                         </tr>
                                         <tr>
                                             <td class="fw-bold ps-4">内容主旨得分</td>
-                                            <td>{{ content_score }}</td>
+                                            <td>{{ results.content_score if results and results.content_score else '0' }}</td>
                                         </tr>
                                         <tr>
                                             <td class="fw-bold ps-4">表达文采得分</td>
-                                            <td>{{ language_score }}</td>
+                                            <td>{{ results.language_score if results and results.language_score else '0' }}</td>
                                         </tr>
                                         <tr>
                                             <td class="fw-bold ps-4">结构得分</td>
-                                            <td>{{ structure_score }}</td>
+                                            <td>{{ results.structure_score if results and results.structure_score else '0' }}</td>
                                         </tr>
                                         <tr>
                                             <td class="fw-bold ps-4">书写得分</td>
-                                            <td>{{ writing_score }}</td>
+                                            <td>{{ results.writing_score if results and results.writing_score else '0' }}</td>
                                         </tr>
                                     </tbody>
                                 </table>
@@ -210,33 +218,33 @@
                         <!-- 评分详情 -->
                         <div class="analysis-block">
                             <h4 class="analysis-title"><i class="bi bi-star"></i> 总体评价</h4>
-                            <p>{{ overall_assessment|safe }}</p>
+                            <p>{{ results.overall_assessment|safe if results and results.overall_assessment else '暂无评价' }}</p>
                         </div>
                         
                         <div class="analysis-block">
                             <h4 class="analysis-title"><i class="bi bi-clipboard-check"></i> 内容分析</h4>
-                            <p>{{ content_analysis|safe }}</p>
+                            <p>{{ results.content_analysis|safe if results and results.content_analysis else '暂无分析' }}</p>
                         </div>
                         
                         <div class="analysis-block">
                             <h4 class="analysis-title"><i class="bi bi-chat-quote"></i> 表达与文采分析</h4>
-                            <p>{{ language_analysis|safe }}</p>
+                            <p>{{ results.language_analysis|safe if results and results.language_analysis else '暂无分析' }}</p>
                         </div>
                         
-                        {% if structure_analysis %}
+                        {% if results and results.structure_analysis %}
                         <div class="analysis-block">
                             <h4 class="analysis-title"><i class="bi bi-layout-text-window"></i> 结构分析</h4>
-                            <p>{{ structure_analysis|safe }}</p>
+                            <p>{{ results.structure_analysis|safe }}</p>
                         </div>
                         {% endif %}
                         
                         <div class="analysis-block">
                             <h4 class="analysis-title"><i class="bi bi-spellcheck"></i> 错别字分析</h4>
                             <p>
-                                {% if spelling_errors and spelling_errors.解析 and spelling_errors.解析|length > 0 %}
-                                共发现 {{ spelling_errors.解析|length }} 个错别字或语法错误。
+                                {% if results and results.spelling_errors and results.spelling_errors.解析 and results.spelling_errors.解析|length > 0 %}
+                                共发现 {{ results.spelling_errors.解析|length }} 个错别字或语法错误。
                                 <ul class="mt-2">
-                                    {% for error in spelling_errors.解析 %}
+                                    {% for error in results.spelling_errors.解析 %}
                                     <li>
                                         <strong>错误：</strong>{{ error.错误 if '错误' in error else error.wrong }}，
                                         <strong>位置：</strong>{{ error.位置 if '位置' in error else error.position|default('未知') }}，
@@ -253,17 +261,17 @@
                             </p>
                         </div>
                         
-                        {% if writing_analysis %}
+                        {% if results and results.writing_analysis %}
                         <div class="analysis-block">
                             <h4 class="analysis-title"><i class="bi bi-pencil"></i> 书写分析</h4>
-                            <p>{{ writing_analysis|safe }}</p>
+                            <p>{{ results.writing_analysis|safe }}</p>
                         </div>
                         {% endif %}
                         
                         <!-- 作文原文 -->
                         <div id="originalTextSection" class="mt-4 pt-3 border-top">
                             <h4 class="text-center mb-3">作文原文</h4>
-                            <div id="originalTextContent" class="p-3 bg-light rounded" style="white-space: pre-wrap; font-family: SimSun, serif;">{{ content }}</div>
+                            <div id="originalTextContent" class="p-3 bg-light rounded" style="white-space: pre-wrap; font-family: SimSun, serif;">{{ essay.content if essay and essay.content else '' }}</div>
                         </div>
                     </div>
                 </div>
@@ -283,6 +291,34 @@
     <!-- JavaScript -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // 获取服务器渲染的数据状态
+            var resultExists = {% if results %}true{% else %}false{% endif %};
+            
+            // 根据结果状态显示相应的UI元素
+            if (resultExists) {
+                // 有结果数据，显示结果隐藏加载指示器
+                document.getElementById('loadingIndicator').style.display = 'none';
+                document.getElementById('resultSection').style.display = 'block';
+            } else {
+                // 无结果数据，显示加载指示器
+                document.getElementById('loadingIndicator').style.display = 'block';
+                document.getElementById('resultSection').style.display = 'none';
+            }
+            
+            // 添加错误处理
+            var errorElement = document.querySelector('.alert-danger');
+            if (errorElement) {
+                document.getElementById('loadingIndicator').style.display = 'none';
+                errorElement.style.display = 'block';
+            }
+        });
+
+        // 打印功能
+        function printResults() {
+            window.print();
+        }
+
         // PDF下载功能
         document.getElementById('downloadPdfBtn').addEventListener('click', function() {
             try {

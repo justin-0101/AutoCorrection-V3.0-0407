@@ -51,6 +51,7 @@ def token_required(f):
         
         # 将用户信息存储在g中，以便后续使用
         g.user = user
+        g.current_user = user  # 同时设置current_user，保持一致性
         return f(*args, **kwargs)
     
     return decorated_function
@@ -64,6 +65,9 @@ def login_required(f):
     def decorated_function(*args, **kwargs):
         # Web 认证：检查 Flask-Login 的登录状态
         if current_user.is_authenticated:
+            # 同时设置g.user和g.current_user，保持一致性
+            g.user = current_user._get_current_object()
+            g.current_user = current_user._get_current_object()
             return f(*args, **kwargs)
         
         # API 认证：检查 JWT 令牌
@@ -72,6 +76,7 @@ def login_required(f):
             user = AuthService.verify_token(token)
             if user:
                 g.current_user = user
+                g.user = user  # 同时设置g.user，保持一致性
                 return f(*args, **kwargs)
         
         # 认证失败

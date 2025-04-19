@@ -159,24 +159,34 @@ class AIService:
             json.JSONDecodeError: 如果解析失败
         """
         try:
-            # 提取生成的内容
+            # 提取消息内容
             content = response.get('choices', [{}])[0].get('message', {}).get('content', '')
             
-            # 提取JSON部分
-            json_start = content.find('```json')
-            json_end = content.rfind('```')
+            if not content:
+                raise ValueError("API响应中没有找到content字段")
             
-            if json_start != -1 and json_end != -1 and json_end > json_start:
-                json_text = content[json_start + 7:json_end].strip()
+            # 提取JSON代码块
+            json_start = content.find('```json')
+            json_end = content.find('```', json_start + 7)
+            
+            if json_start == -1 or json_end == -1:
+                raise ValueError("未找到JSON代码块")
+            
+            # 提取并解析JSON
+            json_text = content[json_start + 7:json_end].strip()
+            try:
                 return json.loads(json_text)
-            else:
-                # 尝试从整个内容中解析JSON
-                return json.loads(content)
+            except json.JSONDecodeError as e:
+                logger.error(f"JSON解析失败: {str(e)}")
+                logger.debug(f"JSON文本: {json_text}")
+                raise
                 
-        except (json.JSONDecodeError, IndexError, KeyError) as e:
-            logger.error(f"解析AI响应失败: {str(e)}", exc_info=True)
-            logger.debug(f"原始响应: {response}")
-            raise json.JSONDecodeError(f"无法解析AI响应: {str(e)}", "", 0)
+        except Exception as e:
+            logger.error(f"解析AI响应失败: {str(e)}")
+            logger.debug(f"原始响应: {json.dumps(response, ensure_ascii=False)}")
+            if isinstance(e, json.JSONDecodeError):
+                raise
+            raise json.JSONDecodeError(f"解析AI响应时发生错误: {str(e)}", doc="", pos=0)
     
     def _prepare_correction_prompt(self, content: str, grade: str, title: str = None) -> str:
         """
@@ -248,26 +258,23 @@ D级（0-26分）：内容立意不明确，材料难以表现中心；语言不
         return """
 ```json
 {
-"总得分": "45",
-"等级评定": "A-优秀",
-"分项得分": {
-    "内容主旨": "18",
-    "语言文采": "14",
-    "文章结构": "9",
-    "文面书写": "4"
-},
-"扣分项": {
+    "总得分": 45,
+    "等级评定": "A-优秀",
+    "分项得分": {
+        "内容主旨": 18,
+        "语言文采": 14,
+        "文章结构": 9,
+        "文面书写": 4
+    },
     "错别字": [
-    {"错误": "错别字1", "位置": "第二段第3行", "正确写法": "正确写法1", "上下文": "包含错别字的上下文"},
-    {"错误": "错别字2", "位置": "第三段第1行", "正确写法": "正确写法2", "上下文": "包含错别字的上下文"}
+        "错别字1->正确写法1",
+        "错别字2->正确写法2"
     ],
-    "其他扣分": ["无标题扣2分"]
-},
-"总体评价": "这篇作文...(详细评价)",
-"内容分析": "文章主题...(详细分析)",
-"语言分析": "本文语言流畅，使用了多种修辞手法，词汇丰富...(详细分析)",
-"结构分析": "文章结构...(详细分析)",
-"写作建议": "建议作者...(具体建议)"
+    "总体评价": "这篇作文...(详细评价)",
+    "内容分析": "文章主题...(详细分析)",
+    "语言分析": "本文语言流畅，使用了多种修辞手法，词汇丰富...(详细分析)",
+    "结构分析": "文章结构...(详细分析)",
+    "写作建议": "建议作者...(具体建议)"
 }
 ```
 """
@@ -280,61 +287,79 @@ D级（0-26分）：内容立意不明确，材料难以表现中心；语言不
             ai_result: AI返回的原始结果
             
         Returns:
-            Dict: 格式化后的结果
+            Dict: 格式化后的结果，确保与数据库字段类型匹配
         """
         try:
-            # 提取分数
-            total_score = self._safe_extract_score(ai_result.get('总得分', '0'))
+            # 提取分数（确保是浮点数）
+            total_score = float(ai_result.get('总得分', 0))
             
-            # 提取分项得分
+            # 提取分项得分（确保是浮点数）
             分项得分 = ai_result.get('分项得分', {})
-            content_score = self._safe_extract_score(分项得分.get('内容主旨', '0'))
-            language_score = self._safe_extract_score(分项得分.get('语言文采', '0'))
-            structure_score = self._safe_extract_score(分项得分.get('文章结构', '0'))
-            writing_score = self._safe_extract_score(分项得分.get('文面书写', '0'))
+            content_score = float(分项得分.get('内容主旨', 0))
+            language_score = float(分项得分.get('语言文采', 0))
+            structure_score = float(分项得分.get('文章结构', 0))
+            writing_score = float(分项得分.get('文面书写', 0))
             
-            # 提取等级
-            level = ai_result.get('等级评定', 'C')
-            if '-' in level:
-                level = level.split('-')[0]
-                
-            # 提取错别字
-            spelling_errors = []
-            if '扣分项' in ai_result and isinstance(ai_result['扣分项'], dict) and '错别字' in ai_result['扣分项']:
-                spelling_errors = ai_result['扣分项']['错别字']
+            # 提取等级（保留完整的等级评定）
+            full_level = ai_result.get('等级评定', 'C-合格')
+            # 提取等级字母部分用于数据库存储
+            level = full_level.split('-')[0] if '-' in full_level else full_level
             
-            # 构建反馈内容
-            feedback = {
-                "总体评价": ai_result.get('总体评价', ''),
-                "内容分析": ai_result.get('内容分析', ''),
-                "语言分析": ai_result.get('语言分析', ''),
-                "结构分析": ai_result.get('结构分析', ''),
-                "写作建议": ai_result.get('写作建议', ''),
-                "错别字": spelling_errors
+            # 提取错别字（已经是简化格式）
+            spelling_errors = ai_result.get('错别字', [])
+            
+            # 构建错误分析（作为JSON对象存储）
+            error_analysis = {
+                "spelling_errors": spelling_errors,
+                "content_issues": {
+                    "等级评定": full_level,
+                    "内容分析": ai_result.get('内容分析', ''),
+                    "语言分析": ai_result.get('语言分析', ''),
+                    "结构分析": ai_result.get('结构分析', '')
+                }
             }
+            
+            # 构建评语（作为Text存储）
+            comments = ai_result.get('总体评价', '')
+            
+            # 构建改进建议（作为Text存储）
+            improvement_suggestions = ai_result.get('写作建议', '')
             
             # 返回统一格式的结果
             return {
-                "score": int(total_score),
-                "level": level,
-                "content_score": int(content_score),
-                "language_score": int(language_score),
-                "structure_score": int(structure_score),
-                "writing_score": int(writing_score),
-                "feedback": json.dumps(feedback, ensure_ascii=False)
+                "score": total_score,  # Float
+                "level": level,  # String
+                "content_score": content_score,  # Float
+                "language_score": language_score,  # Float
+                "structure_score": structure_score,  # Float
+                "writing_score": writing_score,  # Float
+                "error_analysis": error_analysis,  # JSON
+                "comments": comments,  # Text
+                "improvement_suggestions": improvement_suggestions,  # Text
+                "corrected_content": None  # 当前API不提供修改后的内容
             }
             
         except Exception as e:
             logger.error(f"格式化批改结果失败: {str(e)}", exc_info=True)
+            logger.debug(f"原始结果: {json.dumps(ai_result, ensure_ascii=False)}")
             # 返回基本结果
             return {
-                "score": 0,
-                "level": "C",
-                "content_score": 0,
-                "language_score": 0,
-                "structure_score": 0,
-                "writing_score": 0,
-                "feedback": json.dumps({"总体评价": "评分失败，请重试"}, ensure_ascii=False)
+                "score": 0.0,  # Float
+                "level": "C",  # String
+                "content_score": 0.0,  # Float
+                "language_score": 0.0,  # Float
+                "structure_score": 0.0,  # Float
+                "writing_score": 0.0,  # Float
+                "error_analysis": {  # JSON
+                    "等级评定": "C-合格",
+                    "spelling_errors": [],
+                    "content_issues": {
+                        "总体评价": "评分失败，请重试"
+                    }
+                },
+                "comments": "评分失败，请重试",  # Text
+                "improvement_suggestions": "",  # Text
+                "corrected_content": None  # Text
             }
     
     def _safe_extract_score(self, score_value: Any) -> str:

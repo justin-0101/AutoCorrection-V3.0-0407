@@ -7,8 +7,9 @@ API 装饰器工具模块
 
 import logging
 from functools import wraps
-from flask import jsonify, request, current_app
+from flask import jsonify, request, current_app, g
 from app.utils.exceptions import APIError, ValidationError, AuthenticationError
+from flask_login import current_user
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,12 @@ def api_error_handler(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         try:
+            # 确保用户对象的一致性
+            if hasattr(g, 'current_user') and not hasattr(g, 'user'):
+                g.user = g.current_user
+            elif hasattr(g, 'user') and not hasattr(g, 'current_user'):
+                g.current_user = g.user
+                
             return f(*args, **kwargs)
         except APIError as e:
             logger.warning(f"API错误: {e.message}, 状态码: {e.status_code}, 路径: {request.path}")
@@ -189,5 +196,33 @@ def require_api_key(f):
         if api_key != current_app.config.get('API_KEY'):
             raise AuthenticationError('无效的 API 密钥')
         
+        return f(*args, **kwargs)
+    return decorated_function
+
+def user_compatibility(f):
+    """确保g.user和g.current_user的兼容性装饰器"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # 如果flask_login的current_user已认证，优先使用它
+        if current_user.is_authenticated:
+            user_obj = current_user._get_current_object()
+            g.user = user_obj
+            g.current_user = user_obj
+        # 否则检查g对象中是否已经存在用户信息
+        elif hasattr(g, 'current_user') and not hasattr(g, 'user'):
+            g.user = g.current_user
+        elif hasattr(g, 'user') and not hasattr(g, 'current_user'):
+            g.current_user = g.user
+            
+        return f(*args, **kwargs)
+    return decorated_function
+
+# 更新现有的API路由装饰器，使其包含用户兼容性
+def api_route_auth(f):
+    """API路由认证装饰器，结合了错误处理和用户兼容性"""
+    @wraps(f)
+    @api_error_handler
+    @user_compatibility
+    def decorated_function(*args, **kwargs):
         return f(*args, **kwargs)
     return decorated_function 

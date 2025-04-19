@@ -26,6 +26,7 @@ class ServiceRegistry:
     CORE_SERVICES = {
         'redis_service': ('app.core.services.redis_service', 'RedisService'),
         'ai_client_factory': ('app.core.ai', 'AIClientFactory'),
+        'ai_correction_service': ('app.core.correction.ai_corrector', 'AICorrectionService'),
         'correction_service': ('app.core.correction.correction_service', 'CorrectionService'),
         'source_type_manager': ('app.core.source_type_manager', 'SourceTypeManager'),
         'notification_service': ('app.core.notification.notification_service', 'NotificationService'),
@@ -110,8 +111,11 @@ class ServiceRegistry:
         # Redis服务不依赖其他服务
         dependency_manager.declare_dependencies('redis_service', [])
         
-        # 批改服务依赖AI客户端工厂
-        dependency_manager.declare_dependencies('correction_service', ['ai_client_factory'])
+        # AI批改服务依赖AI客户端工厂
+        dependency_manager.declare_dependencies('ai_correction_service', ['ai_client_factory'])
+        
+        # 批改服务依赖AI批改服务
+        dependency_manager.declare_dependencies('correction_service', ['ai_correction_service'])
         
         # 通知服务依赖Redis服务
         dependency_manager.declare_dependencies('notification_service', ['redis_service'])

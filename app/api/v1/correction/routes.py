@@ -13,7 +13,7 @@ from werkzeug.utils import secure_filename
 
 from app.core.correction import CorrectionService, FileService, AnalysisService
 from app.core.auth import login_required, admin_required
-from app.utils.api_decorators import api_error_handler
+from app.utils.api_decorators import api_error_handler, user_compatibility
 
 # 创建蓝图
 correction_bp = Blueprint('correction', __name__)
@@ -81,6 +81,7 @@ def submit_essay():
 @correction_bp.route('/essays/file', methods=['POST'])
 @login_required
 @api_error_handler
+@user_compatibility
 def submit_essay_file():
     """
     上传文件提交作文进行批改

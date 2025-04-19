@@ -76,6 +76,21 @@ class SessionManager:
             
             logger.info("会话管理器初始化完成")
             
+            # 注册 Celery 信号处理器
+            try:
+                from celery.signals import task_prerun, task_postrun
+                
+                @task_prerun.connect
+                def setup_celery_session(*args, **kwargs):
+                    logger.debug("Celery 任务开始前设置数据库会话")
+                
+                @task_postrun.connect
+                def cleanup_celery_session(*args, **kwargs):
+                    logger.debug("Celery 任务结束后清理数据库会话")
+                    self.remove()
+            except ImportError:
+                pass
+            
             # 清理资源的回调函数
             @app.teardown_appcontext
             def remove_session(exception=None):
@@ -98,6 +113,19 @@ class SessionManager:
         """
         if not self._initialized:
             raise RuntimeError("会话管理器未初始化")
+        
+        # 检查是否在 Celery 任务中
+        try:
+            from celery._state import get_current_task
+            is_celery_task = get_current_task() is not None
+        except ImportError:
+            is_celery_task = False
+        
+        if is_celery_task:
+            # 在 Celery 任务中，返回一个新的会话
+            logger.debug("在 Celery 任务中创建新的会话")
+            return self._session_factory()
+        
         return self._scoped_session()
     
     @contextmanager
@@ -113,12 +141,30 @@ class SessionManager:
         """
         session = self.session
         try:
+            # 检查是否在 Celery 任务中
+            is_celery_task = False
+            try:
+                from celery.signals import task_prerun, task_postrun
+                from celery._state import get_current_task
+                is_celery_task = get_current_task() is not None
+            except ImportError:
+                pass
+
+            if is_celery_task:
+                # 在 Celery 任务中，确保有一个新的会话
+                logger.debug("在 Celery 任务中创建新的数据库会话")
+                session = self._session_factory()
+
             yield session
             session.commit()
         except Exception as e:
             session.rollback()
             logger.error(f"事务回滚: {str(e)}")
             raise
+        finally:
+            if is_celery_task:
+                logger.debug("关闭 Celery 任务的数据库会话")
+                session.close()
     
     def commit(self) -> bool:
         """

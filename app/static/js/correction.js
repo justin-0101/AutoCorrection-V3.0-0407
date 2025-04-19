@@ -98,7 +98,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         // 跳转到结果页面
                         showAlert('success', '批改已完成，正在跳转到结果页面...');
                         setTimeout(() => {
-                            window.location.href = `/results/${essayId}`;
+                        window.location.href = `/results/${essayId}`;
                         }, 1000);
                         break;
                     case 'failed':

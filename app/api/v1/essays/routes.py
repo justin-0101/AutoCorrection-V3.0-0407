@@ -13,7 +13,8 @@ import os
 
 from app.core.correction.correction_service import CorrectionService
 from app.core.auth.auth_decorators import token_required, admin_required
-from app.utils import FileHandler
+from app.utils import get_file_handler
+from app.core.services import get_file_service
 
 # 创建蓝图
 essays_bp = Blueprint('essays', __name__, url_prefix='/essays')
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 # 初始化服务
 correction_service = CorrectionService()
-file_handler = FileHandler()
+file_handler = get_file_handler()
 
 @essays_bp.route('', methods=['POST'])
 @token_required
@@ -58,7 +59,7 @@ def submit_essay():
                 'message': '标题和内容不能为空'
             }), 400
         
-        # 调用服务提交作文
+        # 从g.user获取用户ID (令牌验证中间件设置)
         user_id = g.user.get('id')
         result = correction_service.submit_essay(user_id, title, content)
         
@@ -109,7 +110,7 @@ def submit_essay_file():
                 'message': '文件名和标题不能为空'
             }), 400
         
-        # 调用服务提交作文文件
+        # 从g.user获取用户ID (令牌验证中间件设置)
         user_id = g.user.get('id')
         result = correction_service.submit_essay_file(user_id, title, file, file.filename)
         
@@ -141,7 +142,7 @@ def get_essay(essay_id):
         作文及批改详情
     """
     try:
-        # 调用服务获取作文信息
+        # 从g.user获取用户ID (令牌验证中间件设置)
         user_id = g.user.get('id')
         result = correction_service.get_essay(essay_id, user_id)
         
@@ -187,7 +188,7 @@ def get_user_essays():
                 'message': '无效的分页参数'
             }), 400
         
-        # 调用服务获取作文列表
+        # 从g.user获取用户ID (令牌验证中间件设置)
         user_id = g.user.get('id')
         result = correction_service.get_user_essays(user_id, page, per_page, status)
         
@@ -216,7 +217,7 @@ def delete_essay(essay_id):
         删除结果
     """
     try:
-        # 调用服务删除作文
+        # 从g.user获取用户ID (令牌验证中间件设置)
         user_id = g.user.get('id')
         result = correction_service.delete_essay(essay_id, user_id)
         
@@ -259,6 +260,7 @@ def get_supported_file_types():
         }), 500
 
 @essays_bp.route('/<int:essay_id>/retry-correction', methods=['POST'])
+@token_required
 def retry_essay_correction(essay_id):
     """
     重试作文批改API
@@ -274,9 +276,9 @@ def retry_essay_correction(essay_id):
     try:
         logger.info(f"接收到重试批改请求，作文ID: {essay_id}")
         
-        # 临时使用固定值进行测试
-        user_id = 1  # 假设用户ID为1
-        is_admin = True  # 假设是管理员
+        # 从g.user获取用户ID和管理员状态
+        user_id = g.user.get('id')
+        is_admin = g.user.get('is_admin', False)
         
         # 调用服务重试作文批改
         result = correction_service.retry_essay_correction(essay_id, user_id, is_admin)

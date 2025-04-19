@@ -6,28 +6,48 @@ Flask 扩展模块
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from flask_migrate import Migrate
+from flask_wtf.csrf import CSRFProtect
 import logging
-from threading import Lock
+import os
 
 logger = logging.getLogger(__name__)
 
-class SafeSQLAlchemy(SQLAlchemy):
-    """线程安全的SQLAlchemy扩展"""
-    _lock = Lock()
-    _initialized = False
-    
-    def init_app(self, app):
-        """线程安全的初始化方法"""
-        with self._lock:
-            if not self._initialized or app.config.get('TESTING', False):
-                super().init_app(app)
-                self._initialized = True
-                logger.info(f"SQLAlchemy已初始化，应用名称: {app.name}")
-            else:
-                logger.debug(f"SQLAlchemy已经初始化，跳过重复初始化，应用名称: {app.name}")
+# 检查是否使用eventlet
+is_using_eventlet = os.environ.get('CELERY_WORKER_POOL', '').lower() == 'eventlet'
 
-# 初始化 SQLAlchemy
-db = SafeSQLAlchemy()
+# 全局配置
+if is_using_eventlet:
+    # 当使用eventlet时，完全禁用连接池，使用NullPool避免并发问题
+    from sqlalchemy.pool import NullPool
+    engine_options = {
+        'poolclass': NullPool,
+    }
+    db = SQLAlchemy(engine_options=engine_options)
+    logger.info("检测到Eventlet环境，使用NullPool（无连接池）配置")
+    
+    # 修补SQLAlchemy的互斥锁，避免循环导入
+    try:
+        import sqlalchemy.util.queue
+        original_notify = sqlalchemy.util.queue.Queue.notify
+        
+        # 定义安全的notify方法
+        def safe_notify(self):
+            if not hasattr(self, 'mutex') or not self.mutex.locked():
+                return
+            return original_notify(self)
+            
+        # 应用补丁
+        sqlalchemy.util.queue.Queue.notify = safe_notify
+        logger.info("已修补SQLAlchemy Queue.notify方法")
+    except Exception as e:
+        logger.error(f"修补SQLAlchemy时出错: {str(e)}")
+else:
+    # 正常模式下使用标准配置，但启用连接池健康检查
+    db = SQLAlchemy(engine_options={
+        'pool_pre_ping': True,
+        'pool_recycle': 3600,  # 1小时后回收连接
+    })
+    logger.info("使用标准SQLAlchemy连接池配置")
 
 # 初始化 LoginManager
 login_manager = LoginManager()
@@ -37,6 +57,9 @@ login_manager.login_message_category = 'info'  # 设置消息分类
 
 # 初始化 Flask-Migrate
 migrate = Migrate()
+
+# 初始化 CSRFProtect
+csrf = CSRFProtect()
 
 # 添加user_loader回调函数 - 在模块级别定义
 @login_manager.user_loader
@@ -60,6 +83,14 @@ def init_extensions(app, skip_db=False):
     try:
         # 初始化 SQLAlchemy（如果需要）
         if not skip_db:
+            # 检查数据库配置
+            if is_using_eventlet:
+                logger.warning("在Eventlet环境中禁用了SQLAlchemy连接池，使用NullPool")
+                # 确保app配置反映这一点
+                app.config['SQLALCHEMY_POOL_SIZE'] = None
+                app.config['SQLALCHEMY_POOL_TIMEOUT'] = None
+                app.config['SQLALCHEMY_POOL_RECYCLE'] = None
+                
             db.init_app(app)
             # 初始化 Flask-Migrate
             migrate.init_app(app, db)
@@ -69,9 +100,13 @@ def init_extensions(app, skip_db=False):
         login_manager.init_app(app)
         logger.info("登录管理器初始化成功")
         
+        # 初始化 CSRFProtect
+        csrf.init_app(app)
+        logger.info("CSRF保护初始化成功")
+        
         # 在这里可以添加其他扩展的初始化
         
         return app
     except Exception as e:
         logger.error(f"初始化扩展时出错: {e}")
-        raise 
+        raise

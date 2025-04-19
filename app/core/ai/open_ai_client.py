@@ -11,6 +11,7 @@ import json
 import logging
 import traceback
 import requests
+import re
 from typing import Dict, Any, List, Optional, Union
 
 from app.core.ai.api_client import BaseAPIClient, APIError
@@ -141,7 +142,7 @@ class OpenAIClient(BaseAPIClient):
                 result_json = json.loads(content)
                 
                 # 解析分析结果
-                return self.format_response(self._extract_result(result_json))
+                return self.format_response(self._parse_correction_result(result_json))
                 
             except requests.RequestException as e:
                 status_code = getattr(e.response, 'status_code', 'unknown') if hasattr(e, 'response') else 'unknown'
@@ -170,50 +171,115 @@ class OpenAIClient(BaseAPIClient):
                 "message": f"分析失败: {str(e)}"
             }
     
-    def _extract_result(self, response: Dict) -> Dict[str, Any]:
+    def _parse_correction_result(self, response: Dict[str, Any]) -> Dict[str, Any]:
         """
-        从API响应中提取结果
+        解析AI批改返回的结果
         
         Args:
-            response: API响应
+            response: API响应数据
             
         Returns:
-            Dict: 提取的结果
+            Dict: 解析后的结果
         """
-        # 提取分数
-        total_score = response.get("总得分", 0)
-        
-        # 提取分项得分
-        分项得分 = response.get("分项得分", {})
-        content_score = 分项得分.get("内容主旨", 0)
-        language_score = 分项得分.get("语言文采", 0)
-        structure_score = 分项得分.get("文章结构", 0)
-        writing_score = 分项得分.get("写作技巧", 0)
-        
-        # 提取评价和分析
-        overall_assessment = response.get("总体评价", "")
-        content_analysis = response.get("内容分析", "")
-        language_analysis = response.get("语言分析", "")
-        structure_analysis = response.get("结构分析", "")
-        improvement_suggestions = response.get("写作建议", "")
-        
-        # 提取错别字
-        spelling_errors = response.get("错别字", [])
-        
-        # 返回格式化的结果
-        return {
-            "total_score": total_score,
-            "content_score": content_score,
-            "language_score": language_score,
-            "structure_score": structure_score,
-            "writing_score": writing_score,
-            "overall_assessment": overall_assessment,
-            "content_analysis": content_analysis,
-            "language_analysis": language_analysis,
-            "structure_analysis": structure_analysis,
-            "improvement_suggestions": improvement_suggestions,
-            "spelling_errors": spelling_errors
-        }
+        try:
+            # 获取content和reasoning_content
+            content = None
+            reasoning_content = None
+            
+            if response and "choices" in response:
+                message = response["choices"][0].get("message", {})
+                content = message.get("content", "")
+                reasoning_content = message.get("reasoning_content", "")
+                
+            if not content and not reasoning_content:
+                logger.error("API响应中没有找到有效的content或reasoning_content")
+                return {
+                    "status": "error",
+                    "message": "API返回结果格式错误"
+                }
+                
+            # 优先使用content中的JSON数据
+            result_data = None
+            if content:
+                try:
+                    # 提取JSON字符串
+                    json_match = re.search(r'```json\n(.*?)\n```', content, re.DOTALL)
+                    if json_match:
+                        json_str = json_match.group(1)
+                        result_data = json.loads(json_str)
+                except Exception as e:
+                    logger.warning(f"从content解析JSON失败: {str(e)}")
+                    
+            # 如果content中没有有效的JSON，尝试使用reasoning_content
+            if not result_data and reasoning_content:
+                try:
+                    result_data = {
+                        "总得分": 0,
+                        "分项得分": {},
+                        "总体评价": "",
+                        "内容分析": "",
+                        "语言分析": "",
+                        "结构分析": "",
+                        "写作建议": "",
+                        "错别字": []
+                    }
+                    
+                    # 从reasoning_content中提取评分和评语
+                    score_match = re.search(r'总得分可能在(\d+)分左右', reasoning_content)
+                    if score_match:
+                        result_data["总得分"] = int(score_match.group(1))
+                        
+                    # 提取分项得分
+                    score_patterns = {
+                        "内容主旨": r'内容主旨.*?(\d+)分',
+                        "语言文采": r'语言文采.*?(\d+)分',
+                        "文章结构": r'结构.*?(\d+)分',
+                        "文面书写": r'文面书写.*?(\d+)分'
+                    }
+                    
+                    for key, pattern in score_patterns.items():
+                        match = re.search(pattern, reasoning_content)
+                        if match:
+                            result_data["分项得分"][key] = int(match.group(1))
+                            
+                except Exception as e:
+                    logger.warning(f"从reasoning_content提取信息失败: {str(e)}")
+                    
+            if not result_data:
+                logger.error("无法从API响应中提取有效的批改结果")
+                return {
+                    "status": "error",
+                    "message": "无法解析批改结果"
+                }
+                
+            # 转换为标准格式
+            return {
+                "status": "success",
+                "result": {
+                    "score": result_data.get("总得分", 0),
+                    "corrected_content": "",  # 暂不支持
+                    "comments": result_data.get("总体评价", ""),
+                    "error_analysis": result_data.get("错别字", []),
+                    "improvement_suggestions": result_data.get("写作建议", ""),
+                    "details": {
+                        "content_score": result_data.get("分项得分", {}).get("内容主旨", 0),
+                        "language_score": result_data.get("分项得分", {}).get("语言文采", 0),
+                        "structure_score": result_data.get("分项得分", {}).get("文章结构", 0),
+                        "writing_score": result_data.get("分项得分", {}).get("文面书写", 0),
+                        "content_analysis": result_data.get("内容分析", ""),
+                        "language_analysis": result_data.get("语言分析", ""),
+                        "structure_analysis": result_data.get("结构分析", "")
+                    }
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"解析批改结果时发生错误: {str(e)}")
+            logger.error(f"错误详情: {traceback.format_exc()}")
+            return {
+                "status": "error",
+                "message": f"解析批改结果时发生错误: {str(e)}"
+            }
     
     def format_response(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """

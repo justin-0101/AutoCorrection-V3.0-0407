@@ -9,6 +9,7 @@
 import os
 import sys
 import codecs
+from app.core.services.file_service import FileService
 
 # 确保工作目录正确
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -27,7 +28,8 @@ def view_log(file_path, lines=50):
     
     for encoding in encodings:
         try:
-            with open(file_path, 'r', encoding=encoding, errors='replace') as f:
+            file_service = FileService()
+            with file_service.open(file_path, 'r', encoding=encoding, errors='replace') as f:
                 all_lines = f.readlines()
                 print(f"成功使用 {encoding} 编码读取日志文件")
                 break
