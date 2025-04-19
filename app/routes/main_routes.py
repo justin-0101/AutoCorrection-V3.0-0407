@@ -23,9 +23,10 @@ from werkzeug.security import generate_password_hash
 from app.core.correction.file_service import FileService
 from app.core.correction.correction_service import CorrectionService
 from app.utils.input_sanitizer import sanitize_input
+from flask_wtf.csrf import generate_csrf
 
 # 导入文档处理模块
-from app.utils.document_processor import process_document, extract_text_from_txt, extract_text_from_docx, extract_text_from_doc
+from app.utils.document_processor import process_document, extract_text_from_txt, extract_text_from_docx, extract_text_from_doc, allowed_file
 
 # 创建蓝图
 main_bp = Blueprint('main', __name__)
@@ -37,6 +38,9 @@ logger = logging.getLogger('app')
 from app.models.essay import Essay, EssaySourceType, EssayStatus
 from app.models.correction import Correction, CorrectionType, CorrectionStatus
 from app.models.user import User, UserProfile
+
+# Import form classes
+from app.forms import EssayCorrectionForm
 
 @main_bp.route('/')
 def index():
@@ -68,229 +72,184 @@ def about():
 @main_bp.route('/correction', methods=['GET', 'POST'])
 @login_required
 def correction():
-    """作文批改页面和处理提交"""
+    """处理作文批改请求"""
+    # 导入依赖
+    import os
+    from flask import current_app, request, session, flash, redirect, url_for, jsonify
+    # 导入EssaySourceType和EssayStatus
+    from app.models import Essay, User, EssaySourceType, EssayStatus
+    # 修改导入路径，从 app.forms 导入 EssayCorrectionForm
+    from app.forms import EssayCorrectionForm
+    from flask_login import current_user
+    # 修改文件处理工具的导入
+    from app.utils.file_handler import FileHandler
+    from app.tasks.correction_tasks import process_essay_correction
+    
+    # 初始化表单
+    form = EssayCorrectionForm()
+    
+    # 初始化文件处理器
+    file_handler = FileHandler()
+    
+    # 会员信息展示 - 使用current_user而不是security
+    user_id = current_user.id
+    user = User.query.get(user_id)
+    
+    # 正确获取会员信息和批改限制
+    remaining_info = {
+        'user_type': user.membership_level or 'free',  # 使用membership_level而不是membership_type
+        'total_remaining': user.get_remaining_corrections(),  # 使用用户方法获取剩余次数
+        'daily_remaining': user.get_daily_remaining_corrections()  # 使用用户方法获取每日剩余次数
+    }
+    
+    # 处理POST请求
     if request.method == 'POST':
-        logger.info("接收到作文提交请求")
         try:
-            # 检查用户当前是否有权限提交
-            correction_service = CorrectionService()
-            limits_check = correction_service.check_user_limits(current_user.id)
+            logger.info(f"接收到提交请求: {request.form}")
             
-            if not limits_check.get('can_submit', False):
-                error_msg = limits_check.get('message', '您已达到批改次数限制')
-                logger.warning(f"用户 {current_user.id} 没有权限提交作文: {error_msg}")
+            # 记录提交的数据，便于调试
+            logger.debug(f"表单数据: {request.form}")
+            logger.debug(f"文件数据: {request.files}")
+            logger.debug(f"CSRF Token: {form.csrf_token.current_token}")
+            
+            # 表单验证处理
+            if not form.validate_on_submit():
+                logger.error(f"表单验证失败: {form.errors}")
+                # 将表单错误记录到日志中，便于调试
+                for field, errors in form.errors.items():
+                    for error in errors:
+                        logger.error(f"表单字段 {field} 错误: {error}")
                 
-                return jsonify({
-                    'success': False,
-                    'message': error_msg
-                })
+                # 如果是CSRF错误，提供更明确的错误信息
+                if 'csrf_token' in form.errors:
+                    error_msg = "CSRF验证失败。请刷新页面后重试。"
+                    logger.error(f"CSRF Error: {form.csrf_token.errors}")
+                    logger.error(f"Expected token: {form.csrf_token.current_token}")
+                    logger.error(f"Received token: {request.form.get('csrf_token', 'None')}")
+                else:
+                    error_msg = "表单验证失败，请检查输入。"
+                
+                flash(error_msg, 'danger')
+                return render_template('correction.html', form=form, remaining_info=remaining_info), 400
             
-            source_type = request.form.get('source_type', 'text')
-            logger.info(f"接收到source_type: {source_type}")
+            # 提取表单数据
+            source_type = request.form.get('source_type', 'upload')
+            subject = request.form.get('subject', '未命名作文')
             
-            # 验证source_type
-            valid_types = ['text', 'paste', 'upload', 'api']
-            if source_type not in valid_types:
-                source_type = 'text'  # 默认为text类型
-            
-            logger.info("source_type值有效: '%s'", source_type)
-            
-            # 处理文件上传
-            if 'file' in request.files:
+            # 判断是否是文件上传
+            if source_type == 'upload' and 'file' in request.files:
                 file = request.files['file']
-                if file and file.filename:
-                    logger.info("处理文件上传: %s", file.filename)
+                
+                # 检查文件是否存在
+                if file.filename == '':
+                    flash('未选择文件', 'warning')
+                    return render_template('correction.html', form=form, remaining_info=remaining_info)
+                
+                # 检查文件类型
+                # 使用自定义逻辑获取文件扩展名
+                file_extension = os.path.splitext(file.filename)[1].lower()
+                if file_extension not in ['.txt', '.doc', '.docx', '.pdf']:
+                    flash('不支持的文件类型，仅支持 .txt, .doc, .docx, .pdf 格式', 'warning')
+                    return render_template('correction.html', form=form, remaining_info=remaining_info)
+                
+                # --- 检查会员剩余批改次数限制（管理员跳过） ---
+                if not user.is_admin:
+                    remaining_corrections = user.get_remaining_corrections()
+                    if remaining_corrections <= 0:
+                        flash('您的批改次数已用完，请升级会员或等待次月刷新', 'warning')
+                        return render_template('correction.html', form=form, remaining_info=remaining_info)
                     
-                    # 确保上传目录存在
-                    upload_folder = current_app.config.get('UPLOAD_FOLDER', 'uploads')
-                    os.makedirs(upload_folder, exist_ok=True)
+                    daily_remaining = user.get_daily_remaining_corrections()
+                    if daily_remaining <= 0:
+                        flash('您今日的批改次数已用完，请明天再试或升级会员获取更多次数', 'warning')
+                        return render_template('correction.html', form=form, remaining_info=remaining_info)
+                else:
+                    logger.info(f"管理员用户 {user_id} 跳过批改次数限制检查")
+                # -------------------------------------------------
+                
+                # 处理文件并保存
+                try:
+                    # 生成临时文件名和存储路径
+                    base_path = current_app.config['UPLOAD_FOLDER']
+                    timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+                    filename = f"{user_id}_{timestamp}{file_extension}"
+                    filepath = os.path.join(base_path, filename)
                     
-                    # 检查文件类型
-                    allowed_extensions = {'txt', 'docx', 'pdf', 'doc'}
-                    file_ext = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else ''
+                    # 确保目录存在
+                    os.makedirs(base_path, exist_ok=True)
                     
-                    if file_ext not in allowed_extensions:
-                        logger.warning(f"不支持的文件类型: {file_ext}")
-                        return jsonify({
-                            'success': False,
-                            'message': f'不支持的文件类型，仅支持: {", ".join(allowed_extensions)}'
-                        })
-                    
-                    # 处理文件
+                    # 保存文件
+                    file.save(filepath)
+                    logger.info(f"文件已保存: {filepath}")
+
+                    # --- 读取文件字节内容 --- 
+                    file.stream.seek(0) # 确保从文件开头读取
+                    file_bytes = file.read() # 读取文件的所有字节
+                    # -----------------------
+
+                    # 读取文件内容（现在传递字节）
                     try:
-                        file_service = FileService()
-                        file_result = file_service.process_uploaded_file(file)
+                        # 使用FileHandler处理文件内容
+                        file_info = file_handler.process_file(file_bytes, file.filename, save_file=False)
+                        if not file_info or 'content' not in file_info:
+                            raise ValueError("无法从文件提取内容")
+                        essay_content = file_info['content']
+                        file_size = file_info['size']
                         
-                        if not file_result.get('success'):
-                            logger.error(f"文件处理失败: {file_result.get('message')}")
-                            return jsonify({
-                                'success': False,
-                                'message': file_result.get('message', '文件处理失败')
-                            })
+                        # 提取文件名作为标题（如果表单未提供有效标题）
+                        file_title = os.path.splitext(file.filename)[0]  # 直接使用原始文件名，不使用secure_filename
+                        # 使用表单标题或文件名作为标题
+                        essay_title = subject if subject and subject.strip() and subject != '未命名作文' else file_title
                         
-                        title = file_result.get('title', '') or request.form.get('subject', '')
-                        if not title:
-                            # 使用文件名作为标题
-                            title = os.path.splitext(file.filename)[0]
-                            
-                        logger.info("文件处理成功: %s, 标题: %s", file.filename, title)
+                        logger.info(f"使用标题: {essay_title}, 来源: {'表单输入' if essay_title == subject else '文件名'}")
                         
-                        # 提交作文
-                        result = correction_service.submit_essay(
-                            user_id=current_user.id,
-                            title=title,
-                            content=file_result['content'],
-                            grade=request.form.get('grade', 'junior')  # 获取年级信息
+                        # 创建Essay记录 (使用 essay_content)
+                        essay = Essay(
+                            title=essay_title,
+                            content=essay_content, # 使用读取到的内容
+                            user_id=user_id,
+                            status=EssayStatus.PENDING.value, # 使用枚举确保一致性
+                            source_type=EssaySourceType.upload.value # 明确来源类型
                         )
                         
-                        logger.info(f"作文提交结果: {result}")
+                        db.session.add(essay)
+                        db.session.commit()
+                        logger.info(f"Essay记录已创建: {essay.id}")
                         
-                        if result.get('status') == 'success':
-                            essay_id = result.get('essay_id')
-                            task_id = result.get('task_id')
-                            
-                            # 检查essay_id是否有效
-                            if not essay_id:
-                                logger.error("提交成功但返回的essay_id无效")
-                                return jsonify({
-                                    'success': False,
-                                    'message': '系统错误：作文提交成功但返回的ID无效'
-                                })
-                            
-                            # 检查数据库中是否存在该作文
-                            essay = Essay.query.filter_by(id=essay_id).first()
-                            if not essay:
-                                logger.error(f"严重错误：作文提交成功但在数据库中找不到ID为{essay_id}的作文")
-                                return jsonify({
-                                    'success': False,
-                                    'message': f'系统错误：作文提交成功但在数据库中找不到作文(ID:{essay_id})'
-                                })
-                            
-                            logger.info(f"异步批改任务已提交，essay_id: {essay_id}, task_id: {task_id}")
-                            
-                            flash('作文已提交并开始批改，请稍候...', 'success')
-                            
-                            return jsonify({
-                                'success': True,
-                                'message': '作文已提交并开始批改，请稍候...',
-                                'essay_id': essay_id,
-                                'task_id': task_id
-                            })
-                        else:
-                            logger.error(f"提交作文失败: {result.get('message')}")
-                            return jsonify({
-                                'success': False,
-                                'message': result.get('message', '提交失败')
-                            })
-                    except Exception as e:
-                        logger.error("处理上传文件时出错: %s", str(e), exc_info=True)
-                        return jsonify({
-                            'success': False,
-                            'message': f'处理文件时出错: {str(e)}'
-                        })
-                else:
-                    logger.warning("请求中包含空文件")
-                    return jsonify({
-                        'success': False,
-                        'message': '请选择要上传的文件'
-                    })
-            
-            # 处理文本内容提交（非文件上传）
-            elif source_type == 'text' or source_type == 'paste':
-                logger.info("处理文本内容提交")
-                
-                content = request.form.get('content', '')
-                if not content or len(content.strip()) < 10:
-                    logger.warning("提交的作文内容过短或为空")
-                    return jsonify({
-                        'success': False,
-                        'message': '作文内容过短，请至少输入10个字'
-                    })
-                
-                title = request.form.get('subject', '')
-                if not title:
-                    # 从内容中提取前10个字作为标题
-                    title = content[:10] + '...'
-                
-                # 提交作文
-                result = correction_service.submit_essay(
-                    user_id=current_user.id,
-                    title=title,
-                    content=content,
-                    grade=request.form.get('grade', 'junior')
-                )
-                
-                logger.info(f"作文提交结果: {result}")
-                
-                if result.get('status') == 'success':
-                    essay_id = result.get('essay_id')
-                    task_id = result.get('task_id')
-                    
-                    # 检查essay_id是否有效
-                    if not essay_id:
-                        logger.error("提交成功但返回的essay_id无效")
-                        return jsonify({
-                            'success': False,
-                            'message': '系统错误：作文提交成功但返回的ID无效'
-                        })
-                    
-                    # 检查数据库中是否存在该作文
-                    essay = Essay.query.filter_by(id=essay_id).first()
-                    if not essay:
-                        logger.error(f"严重错误：作文提交成功但在数据库中找不到ID为{essay_id}的作文")
-                        return jsonify({
-                            'success': False,
-                            'message': f'系统错误：作文提交成功但在数据库中找不到作文(ID:{essay_id})'
-                        })
-                    
-                    logger.info(f"异步批改任务已提交，essay_id: {essay_id}, task_id: {task_id}")
-                    
-                    flash('作文已提交并开始批改，请稍候...', 'success')
-                    
-                    return jsonify({
-                        'success': True,
-                        'message': '作文已提交并开始批改，请稍候...',
-                        'essay_id': essay_id,
-                        'task_id': task_id
-                    })
-                else:
-                    logger.error(f"提交作文失败: {result.get('message')}")
-                    return jsonify({
-                        'success': False,
-                        'message': result.get('message', '提交失败')
-                    })
+                        # 更新用户的批改次数（如果有profile）
+                        if user.profile:
+                            # 如果不是无限制用户，则扣减次数
+                            if not user.profile.is_subscription_active():
+                                user.profile.essay_monthly_used += 1
+                                db.session.commit()
+                                logger.info(f"用户 {user_id} 批改次数已更新，剩余 {user.get_remaining_corrections()} 次")
+                        
+                        # 创建异步批改任务
+                        logger.info(f"创建异步批改任务: {essay.id}")
+                        process_essay_correction.delay(essay.id)
+                        
+                        flash('文件上传成功，批改进行中，请耐心等待通知', 'success')
+                        return redirect(url_for('main.user_history'))
+                        
+                    except Exception as read_err:
+                        logger.error(f"读取或处理文件内容失败: {read_err}")
+                        flash(f"读取文件内容失败: {read_err}", 'danger')
+                        return render_template('correction.html', form=form, remaining_info=remaining_info)
+                except Exception as e:
+                    logger.error(f"文件处理失败: {str(e)}")
+                    flash(f'文件处理失败: {str(e)}', 'danger')
+                    return render_template('correction.html', form=form, remaining_info=remaining_info)
             else:
-                logger.warning(f"未提供有效的source_type或文件: {source_type}")
-                return jsonify({
-                    'success': False,
-                    'message': '请提供作文内容或上传文件'
-                })
-            
+                flash('未找到上传的文件', 'warning')
+                return render_template('correction.html', form=form, remaining_info=remaining_info)
+                
         except Exception as e:
-            logger.error("处理作文提交时出错: %s", str(e), exc_info=True)
-            return jsonify({
-                'success': False,
-                'message': f'处理作文提交时出错: {str(e)}'
-            })
+            logger.error(f"作文批改请求处理异常: {str(e)}")
+            flash(f'处理请求时发生错误: {str(e)}', 'danger')
+            return render_template('correction.html', form=form, remaining_info=remaining_info)
     
-    # GET请求处理
-    remaining_info = None
-    if current_user.is_authenticated:
-        try:
-            remaining_info = {
-                'user_type': current_user.membership_level,
-                'total_remaining': current_user.get_remaining_corrections(),
-                'daily_remaining': current_user.get_daily_remaining_corrections()
-            }
-        except Exception as e:
-            logger.error("获取用户剩余批改次数时出错: %s", str(e), exc_info=True)
-            remaining_info = {
-                'user_type': 'unknown',
-                'total_remaining': 0,
-                'daily_remaining': 0
-            }
-    
-    return render_template('correction.html', remaining_info=remaining_info)
+    # GET请求，显示表单页面
+    return render_template('correction.html', form=form, remaining_info=remaining_info)
 
 @main_bp.route('/batch_upload', methods=['GET', 'POST'])
 def batch_upload():
@@ -325,71 +284,49 @@ def batch_upload():
                 continue
                 
             try:
-                # 验证文件
-                if not allowed_file(file.filename):
-                    raise ValueError(f'不支持的文件格式：{file.filename}')
+                # 处理文件内容
+                content, file_title = process_document(file)
+                if not content:
+                    raise ValueError('文件处理失败，内容为空')
                 
-                # 保存文件并处理内容
-                filename = secure_filename(file.filename)
-                file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
-                file.save(file_path)
+                # 创建Essay记录
+                essay = Essay(
+                    title=file_title or os.path.splitext(secure_filename(file.filename))[0],
+                    content=content,
+                    user_id=current_user.id,
+                    source_type=EssaySourceType.upload.value,
+                    status=EssayStatus.PENDING.value
+                )
+                db.session.add(essay)
+                db.session.flush()  # 获取essay.id
                 
-                try:
-                    # 处理文件内容
-                    content, file_title = process_document(file_path)
-                    if not content:
-                        raise ValueError('文件处理失败，内容为空')
-                    
-                    # 创建Essay记录
-                    essay = Essay(
-                        title=file_title or os.path.splitext(filename)[0],
-                        content=content,
-                        user_id=current_user.id,
-                        source_type=EssaySourceType.upload,
-                        status=EssayStatus.PENDING.value
-                    )
-                    db.session.add(essay)
-                    db.session.flush()  # 获取essay.id
-                    
-                    # 创建Correction记录
-                    correction = Correction(
-                        essay_id=essay.id,
-                        type=CorrectionType.AI.value,
-                        status=CorrectionStatus.PENDING.value
-                    )
-                    db.session.add(correction)
-                    db.session.flush()  # 获取correction.id
-                    
-                    # 提交批改任务
-                    from app.tasks.correction_tasks import process_essay_correction
-                    task = process_essay_correction.delay(essay.id)
-                    
-                    # 更新任务ID
-                    correction.task_id = task.id
-                    db.session.commit()
-                    
-                    # 记录成功结果
-                    results.append({
-                        'filename': filename,
-                        'status': 'processing',
-                        'essay_id': essay.id,
-                        'task_id': task.id
-                    })
-                    success_count += 1
-                    current_app.logger.info(f"成功处理文件: {filename}, essay_id: {essay.id}, task_id: {task.id}")
-                    
-                except Exception as e:
-                    db.session.rollback()
-                    raise ValueError(f'处理失败: {str(e)}')
-                    
-                finally:
-                    # 清理临时文件
-                    try:
-                        if os.path.exists(file_path):
-                            os.remove(file_path)
-                    except Exception as e:
-                        current_app.logger.error(f"清理临时文件失败: {str(e)}")
-            
+                # 创建Correction记录
+                correction = Correction(
+                    essay_id=essay.id,
+                    type=CorrectionType.AI.value,
+                    status=CorrectionStatus.PENDING.value
+                )
+                db.session.add(correction)
+                db.session.flush()  # 获取correction.id
+                
+                # 提交批改任务
+                from app.tasks.correction_tasks import process_essay_correction
+                task = process_essay_correction.apply_async(args=[essay.id])
+                
+                # 更新任务ID
+                correction.task_id = task.id
+                db.session.commit()
+                
+                # 记录成功结果
+                results.append({
+                    'filename': file.filename,
+                    'status': 'processing',
+                    'essay_id': essay.id,
+                    'task_id': task.id
+                })
+                success_count += 1
+                current_app.logger.info(f"成功处理文件: {file.filename}, essay_id: {essay.id}, task_id: {task.id}")
+                
             except Exception as e:
                 error_message = str(e)
                 current_app.logger.error(f"处理文件失败 {file.filename}: {error_message}")
@@ -399,6 +336,8 @@ def batch_upload():
                     'error': error_message
                 })
                 error_count += 1
+                if 'db' in locals():
+                    db.session.rollback()
         
         # 返回处理结果
         response_data = {
@@ -421,17 +360,29 @@ def batch_upload():
         return jsonify(response_data)
     
     # GET请求：显示上传页面
+    csrf_token = generate_csrf() # 生成CSRF令牌
+    
+    # 获取会员剩余次数信息 (需要移到GET请求部分)
+    remaining_info = None
+    if current_user.is_authenticated:
+        membership = current_user.membership
+        if membership:
+            remaining_info = membership.get_remaining_info()
+        else:
+            remaining_info = {
+                'user_type': 'free',
+                'total_remaining': 5,
+                'daily_remaining': 1
+            }
+            
     return render_template(
         'batch_upload.html',
         max_files=10,
         max_file_size=5 * 1024 * 1024,  # 5MB
-        allowed_extensions=['txt', 'doc', 'docx']
+        allowed_extensions=['txt', 'doc', 'docx', 'pdf', 'jpg', 'jpeg', 'png'],
+        csrf_token=csrf_token,  # 传递令牌到模板
+        remaining_info=remaining_info # 传递会员信息
     )
-
-def allowed_file(filename):
-    """检查文件是否允许上传"""
-    ALLOWED_EXTENSIONS = {'txt', 'doc', 'docx'}
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 @main_bp.route('/history')
 @login_required
@@ -590,57 +541,40 @@ def profile():
 @main_bp.route('/results/<int:essay_id>')
 @login_required
 def results(essay_id):
-    """批改结果页面"""
+    """显示作文批改结果"""
     try:
-        # Fetch the essay and its correction results
         essay = Essay.query.get_or_404(essay_id)
         
-        # Optional: Check if the current user owns this essay
+        # 检查权限
         if essay.user_id != current_user.id:
-            flash('您没有权限查看此作文的结果。', 'danger')
+            flash('您没有权限查看该作文的批改结果。', 'warning')
             return redirect(url_for('main.user_history'))
         
         correction = Correction.query.filter_by(essay_id=essay_id).first()
         
         if not correction or not correction.results:
-            flash('找不到该作文的批改结果或结果仍在处理中。', 'warning')
-            # Redirect to history or another appropriate page
-            return redirect(url_for('main.user_history'))
+            flash('作文正在批改中，请稍后刷新页面查看结果。', 'info')
+            return render_template('results.html', essay=essay, correction=None, results=None)
             
-        # Assuming correction.results is stored as a JSON string
+        # 解析批改结果
         try:
             results_data = json.loads(correction.results)
         except json.JSONDecodeError:
-            current_app.logger.error(f"Failed to decode JSON results for essay {essay_id}")
-            flash('无法解析批改结果数据。', 'danger')
+            current_app.logger.error(f"解析批改结果JSON数据失败，essay_id={essay_id}")
+            flash('解析批改结果数据出错。', 'danger')
             return redirect(url_for('main.user_history'))
 
-        # Pass all necessary data to the template
+        # 渲染结果页面
         return render_template(
             'results.html', 
             essay=essay,
             correction=correction,
-            results=results_data,
-            # 确保从results_data中提取所有需要的字段
-            total_score=results_data.get('total_score', 0),
-            grade=results_data.get('level', 'N/A'),
-            content_score=results_data.get('content_score', 0),
-            language_score=results_data.get('language_score', 0),
-            structure_score=results_data.get('structure_score', 0),
-            writing_score=results_data.get('writing_score', 0),
-            overall_assessment=results_data.get('overall_assessment', ''),
-            content_analysis=results_data.get('content_analysis', ''),
-            language_analysis=results_data.get('language_analysis', ''),
-            structure_analysis=results_data.get('structure_analysis', ''),
-            writing_analysis=results_data.get('writing_analysis', ''),
-            content=essay.content,
-            word_count=len(essay.content),
-            spelling_errors=results_data.get('spelling_errors', {'解析': []})
+            results=results_data
         )
     except Exception as e:
-        tb = traceback.format_exc()
-        current_app.logger.error(f"Failed to render results.html for essay {essay_id}. Error: {e}\nTraceback:\n{tb}")
-        return render_template('error.html', error_code=500, error_message=f"加载作文 {essay_id} 结果时出错。请稍后再试或联系管理员。")
+        current_app.logger.error(f"显示批改结果时出错: {str(e)}")
+        flash('加载批改结果时出错，请稍后重试。', 'danger')
+        return redirect(url_for('main.user_history'))
 
 @main_bp.route('/login', methods=['GET', 'POST'])
 def login():
@@ -663,13 +597,36 @@ def login():
             )
             
             if user:
-                # 更新用户登录信息
-                user.last_login_at = datetime.now()
-                user.last_login_ip = request.remote_addr
-                db.session.commit()
+                # 获取用户ID，避免在不同的数据库会话间使用相同的对象
+                user_id = user.id
                 
-                # 设置session变量（不依赖roles属性）
-                session['user_id'] = user.id
+                # 仅在调试环境添加日志
+                logger.debug(f"用户验证成功: {user_id}")
+                
+                # 使用Flask-Login登录用户，但不更新用户最后登录时间
+                login_user(user, remember=bool(request.form.get('remember')))
+                
+                # 异步更新用户登录信息
+                try:
+                    # 使用单独的线程异步更新用户登录数据
+                    from threading import Thread
+                    update_thread = Thread(
+                        target=update_login_info, 
+                        args=(
+                            user_id, 
+                            datetime.now(), 
+                            request.remote_addr,
+                            current_app.config['SQLALCHEMY_DATABASE_URI']
+                        )
+                    )
+                    update_thread.daemon = True  # 设置为守护线程
+                    update_thread.start()
+                    logger.info(f"已启动异步线程更新用户登录信息: {user_id}")
+                except Exception as thread_err:
+                    logger.error(f"启动异步更新线程失败: {str(thread_err)}")
+                
+                # 设置session变量
+                session['user_id'] = user_id
                 session['username'] = user.username
                 
                 # 设置角色信息
@@ -677,9 +634,6 @@ def login():
                     session['role'] = 'admin'
                 else:
                     session['role'] = 'user'
-                
-                # 使用Flask-Login登录用户
-                login_user(user, remember=bool(request.form.get('remember')))
                 
                 # 尝试生成令牌但不中断登录流程
                 try:
@@ -698,6 +652,50 @@ def login():
             flash('服务器错误，请稍后再试。', 'danger')
     
     return render_template('login.html')
+
+def update_login_info(user_id, login_time, login_ip, db_uri):
+    """
+    异步更新用户登录信息
+    
+    Args:
+        user_id: 用户ID
+        login_time: 登录时间
+        login_ip: 登录IP地址
+        db_uri: 数据库连接URI
+    """
+    try:
+        # 延迟导入以避免循环引用
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        from sqlalchemy.pool import NullPool
+        
+        # 创建不使用连接池的引擎
+        engine = create_engine(db_uri, poolclass=NullPool)
+        Session = sessionmaker(bind=engine)
+        session = Session()
+        
+        try:
+            # 延迟导入用户模型
+            from app.models.user import User
+            
+            # 查询用户并更新登录信息
+            user = session.query(User).get(user_id)
+            if user:
+                user.last_login_at = login_time
+                user.last_login_ip = login_ip
+                session.commit()
+                logging.getLogger(__name__).info(f"异步更新用户登录信息成功: {user_id}")
+            else:
+                logging.getLogger(__name__).warning(f"异步更新登录信息失败: 用户 {user_id} 不存在")
+        except Exception as db_error:
+            session.rollback()
+            logging.getLogger(__name__).error(f"异步更新用户登录信息时数据库错误: {str(db_error)}")
+        finally:
+            # 务必关闭会话和连接
+            session.close()
+            engine.dispose()
+    except Exception as e:
+        logging.getLogger(__name__).error(f"异步更新用户登录信息失败: {str(e)}")
 
 @main_bp.route('/register', methods=['GET', 'POST'])
 def register():
@@ -939,3 +937,51 @@ def get_essay_status(essay_id):
         }), 500
 
 # 可以在这里添加更多主路由... 
+
+@main_bp.route('/debug/correction', methods=['GET', 'POST'])
+def debug_correction():
+    """调试作文批改提交"""
+    import json
+    from datetime import datetime
+    
+    if request.method == 'POST':
+        # 记录所有请求信息
+        debug_info = {
+            'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'method': request.method,
+            'path': request.path,
+            'args': dict(request.args),
+            'form': dict(request.form),
+            'files': [f.filename for f in request.files.values()] if request.files else [],
+            'cookies': dict(request.cookies),
+            'headers': dict(request.headers)
+        }
+        
+        # 记录到文件
+        debug_dir = Path(current_app.config.get('UPLOAD_FOLDER', 'uploads')).resolve() / 'debug'
+        debug_dir.mkdir(exist_ok=True, parents=True)
+        
+        debug_file = debug_dir / f"debug_request_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        with open(debug_file, 'w', encoding='utf-8') as f:
+            json.dump(debug_info, f, ensure_ascii=False, indent=2)
+        
+        # 处理上传的文件
+        file = None
+        if 'file' in request.files:
+            file = request.files['file']
+            if file and file.filename:
+                filename = secure_filename(file.filename)
+                file_path = debug_dir / filename
+                file.save(str(file_path))
+                current_app.logger.info(f"已保存上传的文件: {file_path}")
+        
+        # 返回调试信息
+        return jsonify({
+            'status': 'debug_success',
+            'message': '已记录调试信息',
+            'debug_info': debug_info,
+            'file_saved': bool(file and file.filename)
+        })
+    
+    # GET请求 - 显示测试表单
+    return render_template('correction.html', form=EssayCorrectionForm(), debug_mode=True)

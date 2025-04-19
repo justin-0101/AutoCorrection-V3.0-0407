@@ -31,6 +31,7 @@ wheels/
 # Virtual Environment
 venv/
 ENV/
+.venv/
 
 # IDE
 .idea/
@@ -48,3 +49,17 @@ Thumbs.db
 # Local configuration
 .env
 .env.local
+
+# 用户数据 - 添加此部分以排除用户数据
+instance/*.db
+uploads/
+uploads/*
+data/
+debug/
+*.bak
+celerybeat-schedule
+
+# 临时文件
+uploads/essays/
+uploads/temp/
+uploads/debug/
