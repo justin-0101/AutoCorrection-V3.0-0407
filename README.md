@@ -2,6 +2,13 @@
 
 基于人工智能的作文批改系统，提供智能评分、详细点评和建议改进的在线服务平台。V3.0版本采用依赖注入架构，解决了循环导入问题，提高了系统的稳定性和可维护性。
 
+## 最新更新 (2024年4月)
+
+- **修复中文文件名识别问题**：修复了单文件上传时中文文件名不能正确提取为标题的问题
+- **优化项目结构**：将脚本文件整理到专用目录中，提高代码组织性
+- **增强异步任务系统**：改进Celery任务处理，增加监控和错误处理
+- **完善数据一致性**：添加数据库触发器和唯一索引，确保数据一致性
+
 ## 功能特点
 
 - **智能评分**：使用AI模型对作文进行全方位评分
@@ -13,6 +20,7 @@
 - **日志追踪**：完整的日志记录系统，支持问题排查和用户行为分析
 - **服务监控**：Prometheus指标监控，健康检查端点
 - **依赖注入**：基于容器的依赖注入架构，解决循环依赖
+- **批量上传**：支持多文件批量上传和处理
 
 ## 架构亮点
 
@@ -22,11 +30,12 @@
 - **可观测性**：完整的监控和指标收集
 - **异步任务处理**：基于Celery的任务队列系统
 - **数据库会话管理**：SQLAlchemy ORM + 事务控制
+- **数据一致性保障**：数据库触发器和唯一索引
 
 ## 技术栈
 
 - **后端**：Python + Flask
-- **前端**：HTML + CSS + JavaScript
+- **前端**：HTML + CSS + JavaScript + Bootstrap 5
 - **数据库**：SQLite/MySQL
 - **AI模型**：DashScope API + DeepSeek API
 - **Web服务器**：Nginx + Gunicorn
@@ -40,7 +49,7 @@
 - Python 3.8+
 - Redis 6.0+
 - Nginx 1.20+（生产环境）
-- CentOS Stream 9（推荐）或其他Linux发行版
+- CentOS Stream 9（推荐）或其他Linux发行版/Windows
 - 4GB+ RAM
 - 20GB+ 存储空间
 
@@ -62,13 +71,9 @@ pip install -r requirements.txt
 
 ### 3. 配置环境变量
 ```bash
-# 创建 .env 文件并添加以下内容
-AI_API_KEY=your_api_key_here
-AI_API_ENDPOINT=your_api_endpoint_here
-REDIS_HOST=localhost
-REDIS_PORT=6379
-FLASK_ENV=development  # 开发环境使用 development，生产环境使用 production
-FLASK_APP=wsgi.py
+# 复制示例环境配置文件
+cp .env.example .env
+# 编辑.env文件，添加您的API密钥和配置
 ```
 
 ### 4. 初始化数据库
@@ -77,30 +82,24 @@ flask init-db
 ```
 
 ### 5. 启动服务
-根据您的操作系统，选择相应的启动方式：
 
 #### Windows环境
+使用已提供的启动脚本：
 ```bash
-python run_all_services.py
+scripts\startup\start-services.bat
 ```
+
 这将启动所有必要的服务：
-- Redis服务器
-- Celery工作进程
+- Redis服务器检查
+- 数据库索引和触发器检查
 - Flask Web应用
+- Celery工作进程
 
 #### Linux环境
 ```bash
-chmod +x start_server.sh  # 首次运行前添加执行权限
-./start_server.sh --all   # 启动所有服务
+chmod +x scripts/startup/start-services.sh  # 首次运行前添加执行权限
+./scripts/startup/start-services.sh         # 启动所有服务
 ```
-
-支持的启动参数：
-- `--all`: 启动所有服务（Redis、Celery、Web）
-- `--debug`: 开启调试模式
-- `--port PORT`: 指定Web服务器端口（默认5000）
-- `--workers`: 仅启动Celery工作进程
-- `--workers-only`: 仅启动Celery（不启动Web服务器）
-- `--concurrency N`: 设置Celery工作进程数（默认2）
 
 服务启动后，访问 http://localhost:5000 开始使用系统。
 
@@ -208,12 +207,20 @@ AutoCorrection-V3.0/
 ├── config/              # 配置文件
 │   └── services.yaml    # 服务配置
 ├── docs/                # 文档
-│   └── 循环导入问题解决方案.md
+│   ├── 循环导入问题解决方案.md
+│   ├── fix_summary.md  # 修复总结
+│   └── diagrams/       # 流程图和架构图
 ├── instance/            # 实例配置和数据
 ├── logs/                # 日志目录
 ├── migrations/          # 数据库迁移
-├── static/              # 静态资源
+├── scripts/             # 脚本目录
+│   ├── admin/          # 管理员操作脚本
+│   ├── batch/          # 批处理脚本
+│   ├── maintenance/    # 维护脚本
+│   ├── startup/        # 启动脚本
+│   └── utils/          # 工具脚本
 ├── tests/               # 测试代码
+│   └── manual/         # 手动测试脚本
 ├── uploads/             # 上传文件目录
 ├── wsgi.py              # WSGI入口
 ├── requirements.txt     # 项目依赖
@@ -231,6 +238,7 @@ AutoCorrection-V3.0/
    - 作文提交和评分
    - 详细评语生成
    - 修改建议
+   - 中文文件名正确识别与处理
 
 3. **历史记录**
    - 作文历史查看
@@ -241,11 +249,25 @@ AutoCorrection-V3.0/
    - 日志记录
    - 性能监控
    - 数据备份
+   - 数据一致性维护
 
 5. **服务监控**
    - 健康检查
    - 指标收集
    - 服务状态
+
+## 问题修复
+
+### 中文文件名处理
+系统现已修复单文件上传时中文文件名无法正确识别的问题：
+- 移除了对`secure_filename`函数的不当使用，该函数会移除非ASCII字符
+- 直接使用原始文件名作为标题来源，确保中文字符得到保留
+- 批量上传和单文件上传现在都能正确处理中文文件名
+
+### 数据一致性保障
+添加了数据库触发器和唯一索引：
+- 唯一索引确保每篇作文只有一个活跃的"completed"状态批改
+- 触发器自动同步批改状态到作文记录
 
 ## 使用说明
 
