@@ -11,12 +11,23 @@ import logging
 from typing import Dict, Any, Optional
 
 from app.core.ai.api_client import BaseAPIClient
-from app.core.ai.open_ai_client import OpenAIClient
 from app.core.ai.deepseek_client import DeepseekClient
+from app.core.ai.open_ai_client import OpenAIClient
 from app.core.ai.aliyun_qianwen_client import AliyunQianwenClient
+from app.core.ai.mock_results import create_mock_result, create_mock_deepseek_result
 
 # 配置日志
 logger = logging.getLogger(__name__)
+
+# 导出所有客户端类
+__all__ = [
+    'BaseAPIClient', 
+    'DeepseekClient', 
+    'OpenAIClient',
+    'AliyunQianwenClient',
+    'create_mock_result',
+    'create_mock_deepseek_result'
+]
 
 class AIClientFactory:
     """
@@ -97,6 +108,27 @@ class AIClientFactory:
         """清除客户端缓存"""
         self._clients.clear()
         logger.debug("已清除AI客户端缓存")
+        
+    @staticmethod
+    def create_client(provider_name, **config):
+        """
+        根据提供商名称创建相应的AI客户端，不缓存
+
+        Args:
+            provider_name: AI服务提供商名称
+            **config: 配置参数
+
+        Returns:
+            AIClient实例
+        """
+        if provider_name.lower() == 'openai':
+            return OpenAIClient(**config)
+        elif provider_name.lower() == 'deepseek':
+            return DeepseekClient(**config)
+        elif provider_name.lower() == 'aliyun_qianwen':
+            return AliyunQianwenClient(**config)
+        else:
+            raise ValueError(f"不支持的AI提供商: {provider_name}")
 
 # 创建全局工厂实例
 ai_client_factory = AIClientFactory()
@@ -111,4 +143,24 @@ def get_ai_client(provider_name: str) -> Any:
     Returns:
         Any: 客户端实例
     """
-    return ai_client_factory.get_client(provider_name) 
+    return ai_client_factory.get_client(provider_name)
+
+# 自动注册服务
+def register_ai_services():
+    """
+    将AI客户端工厂注册到服务容器
+    """
+    try:
+        from app.core.services.service_container import ServiceContainer
+        # 注册AI客户端工厂
+        ServiceContainer.register('ai_client_factory', AIClientFactory)
+        import logging
+        logging.getLogger(__name__).info("AI客户端工厂已自动注册到服务容器")
+        return True
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"注册AI服务时出错: {str(e)}")
+        return False
+
+# 尝试自动注册服务
+register_ai_services() 

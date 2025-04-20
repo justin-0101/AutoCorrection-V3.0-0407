@@ -640,6 +640,8 @@ class CorrectionService(ICorrectionService):
             Dict: 批改结果
         """
         essay = None
+        correction = None
+        
         try:
             # 获取作文对象
             essay = essay_id if isinstance(essay_id, Essay) else Essay.query.get(essay_id)
@@ -650,12 +652,31 @@ class CorrectionService(ICorrectionService):
                     "message": f"作文不存在，ID: {essay_id}"
                 }
 
-            # 记录开始批改
-            logger.info(f"开始批改作文 [ID: {essay.id}, 标题: {essay.title}]")
-            
-            # 更新作文状态为批改中
-            essay.status = EssayStatus.CORRECTING.value
-            db.session.commit()
+            # 在事务中创建或获取批改记录，并更新状态
+            try:
+                # 开始外部事务
+                db.session.begin()
+                
+                # 获取或创建批改记录
+                correction = self._get_or_create_correction(essay.id)
+                
+                # 记录开始批改
+                logger.info(f"开始批改作文 [ID: {essay.id}, 标题: {essay.title}]")
+                
+                # 更新作文状态为批改中
+                essay.status = EssayStatus.CORRECTING.value
+                correction.status = CorrectionStatus.CORRECTING.value
+                correction.updated_at = datetime.datetime.now()
+                
+                # 提交事务
+                db.session.commit()
+            except Exception as e:
+                db.session.rollback()
+                logger.error(f"初始化批改状态失败: {str(e)}")
+                return {
+                    "status": "error",
+                    "message": f"初始化批改状态失败: {str(e)}"
+                }
 
             # 调用AI批改
             logger.info(f"调用AI批改服务，作文ID: {essay.id}")
@@ -666,10 +687,22 @@ class CorrectionService(ICorrectionService):
                 error_msg = correction_data.get("message", "AI返回结果状态错误")
                 logger.error(f"AI批改失败 [ID: {essay.id}] - {error_msg}")
                 
-                # 更新作文状态为失败
-                essay.status = EssayStatus.FAILED.value
-                essay.error_message = error_msg
-                db.session.commit()
+                # 在新事务中更新作文状态为失败
+                try:
+                    db.session.begin()
+                    
+                    essay.status = EssayStatus.FAILED.value
+                    essay.error_message = error_msg
+                    
+                    # 同步更新批改记录状态
+                    correction.status = CorrectionStatus.FAILED.value
+                    correction.error_message = error_msg
+                    correction.updated_at = datetime.datetime.now()
+                    
+                    db.session.commit()
+                except Exception as e:
+                    db.session.rollback()
+                    logger.error(f"更新失败状态时发生错误: {str(e)}")
                 
                 return {
                     "status": "error",
@@ -682,18 +715,32 @@ class CorrectionService(ICorrectionService):
                 error_msg = "AI返回结果数据为空"
                 logger.error(f"AI批改失败 [ID: {essay.id}] - {error_msg}")
                 
-                # 更新作文状态为失败
-                essay.status = EssayStatus.FAILED.value
-                essay.error_message = error_msg
-                db.session.commit()
+                # 在新事务中更新作文状态为失败
+                try:
+                    db.session.begin()
+                    
+                    essay.status = EssayStatus.FAILED.value
+                    essay.error_message = error_msg
+                    
+                    # 同步更新批改记录状态
+                    correction.status = CorrectionStatus.FAILED.value
+                    correction.error_message = error_msg
+                    correction.updated_at = datetime.datetime.now()
+                    
+                    db.session.commit()
+                except Exception as e:
+                    db.session.rollback()
+                    logger.error(f"更新失败状态时发生错误: {str(e)}")
                 
                 return {
                     "status": "error",
                     "message": error_msg
                 }
             
-            # 更新作文信息
+            # 在新事务中更新作文和批改记录
             try:
+                db.session.begin()
+                
                 logger.info(f"更新作文信息，ID: {essay.id}")
                 
                 # 基本信息
@@ -721,11 +768,21 @@ class CorrectionService(ICorrectionService):
                 essay.language_score = details.get("language_score", 0)
                 essay.structure_score = details.get("structure_score", 0)
                 essay.writing_score = details.get("writing_score", 0)
-
+                
                 # 更新作文状态
                 essay.status = EssayStatus.COMPLETED.value
                 
-                # 保存更改
+                # 同步更新批改记录
+                correction.results = json.dumps(result_data, ensure_ascii=False)
+                correction.score = essay.score
+                correction.comments = essay.comments
+                correction.error_analysis = essay.error_analysis
+                correction.improvement_suggestions = essay.improvement_suggestions
+                correction.status = CorrectionStatus.COMPLETED.value
+                correction.updated_at = datetime.datetime.now()
+                correction.completed_at = datetime.datetime.now()
+                
+                # 提交事务
                 db.session.commit()
                 
                 logger.info(f"AI批改完成，作文ID: {essay.id}, 得分: {essay.score}")
@@ -736,13 +793,27 @@ class CorrectionService(ICorrectionService):
                     "score": essay.score
                 }
             except Exception as update_err:
+                db.session.rollback()
                 logger.error(f"更新作文信息失败 [ID: {essay.id}]: {str(update_err)}")
                 logger.error(traceback.format_exc())
                 
-                # 更新作文状态为失败
-                essay.status = EssayStatus.FAILED.value
-                essay.error_message = f"更新作文信息失败: {str(update_err)}"
-                db.session.commit()
+                # 再次尝试，只更新状态
+                try:
+                    db.session.begin()
+                    
+                    # 更新作文状态为失败
+                    essay.status = EssayStatus.FAILED.value
+                    essay.error_message = f"更新作文信息失败: {str(update_err)}"
+                    
+                    # 同步更新批改记录状态
+                    correction.status = CorrectionStatus.FAILED.value
+                    correction.error_message = f"更新作文信息失败: {str(update_err)}"
+                    correction.updated_at = datetime.datetime.now()
+                    
+                    db.session.commit()
+                except Exception as e:
+                    db.session.rollback()
+                    logger.error(f"设置失败状态时出错: {str(e)}")
                 
                 return {
                     "status": "error",
@@ -753,10 +824,8 @@ class CorrectionService(ICorrectionService):
             error_msg = f"解析AI返回结果JSON失败: {str(je)}"
             logger.error(f"批改作文失败 [ID: {essay_id if not isinstance(essay_id, Essay) else essay_id.id}] - {error_msg}")
             
-            if essay:
-                essay.status = EssayStatus.FAILED.value
-                essay.error_message = error_msg
-                db.session.commit()
+            # 更新状态
+            self._set_error_status(essay, correction, error_msg)
                 
             return {
                 "status": "error",
@@ -768,15 +837,33 @@ class CorrectionService(ICorrectionService):
             logger.error(f"批改作文失败 [ID: {essay_id if not isinstance(essay_id, Essay) else (essay.id if essay else 'Unknown')}] - {error_msg}")
             logger.error(traceback.format_exc())
             
-            if essay:
-                essay.status = EssayStatus.FAILED.value
-                essay.error_message = error_msg
-                db.session.commit()
+            # 更新状态
+            self._set_error_status(essay, correction, error_msg)
                 
             return {
                 "status": "error",
                 "message": error_msg
             }
+    
+    def _set_error_status(self, essay, correction, error_msg):
+        """设置错误状态，确保作文和批改记录状态一致"""
+        try:
+            db.session.begin()
+            
+            if essay:
+                essay.status = EssayStatus.FAILED.value
+                essay.error_message = error_msg
+                
+            if correction:
+                correction.status = CorrectionStatus.FAILED.value
+                correction.error_message = error_msg
+                correction.updated_at = datetime.datetime.now()
+                
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"设置错误状态失败: {str(e)}")
+            logger.error(traceback.format_exc())
     
     def get_supported_file_types(self) -> Dict[str, Any]:
         """
@@ -1182,66 +1269,4 @@ class CorrectionService(ICorrectionService):
             "错别字": [],
             "写作建议": "1. 增加论据的说服力；2. 丰富句式和修辞手法；3. 加强段落间的过渡；4. 注意错别字的修正。",
             "is_mock": True
-        }
-
-    def update_correction_result(self, essay_id, correction_data, auto_commit=True):
-        """
-        更新批改结果
-        :param essay_id: 作文ID
-        :param correction_data: 批改数据
-        :param auto_commit: 是否自动提交事务
-        :return: 更新后的correction对象
-        """
-        try:
-            # 在一个事务中处理所有操作
-            with db.session.begin_nested():
-                # 获取批改记录
-                correction = Correction.query.filter_by(
-                    essay_id=essay_id, 
-                    status='pending',
-                    is_deleted=False
-                ).first()
-                
-                if not correction:
-                    # 如果没有找到pending状态的记录，检查是否存在其他状态的记录
-                    correction = Correction.query.filter_by(
-                        essay_id=essay_id,
-                        is_deleted=False
-                    ).order_by(Correction.created_at.desc()).first()
-                    
-                    if not correction:
-                        self.logger.error(f"未找到作文ID={essay_id}的批改记录")
-                        return None
-                
-                # 更新批改记录
-                correction.score = correction_data.get('score', 0)
-                correction.comments = correction_data.get('comments', '')
-                correction.error_analysis = correction_data.get('error_analysis', '')
-                correction.improvement_suggestions = correction_data.get('improvement_suggestions', '')
-                correction.results = json.dumps(correction_data, ensure_ascii=False)
-                correction.status = 'completed'
-                correction.updated_at = datetime.now()
-                
-                # 同步更新essay记录，确保数据一致性
-                essay = Essay.query.get(essay_id)
-                if essay:
-                    essay.score = correction.score
-                    essay.comments = correction.comments
-                    essay.error_analysis = correction.error_analysis
-                    essay.improvement_suggestions = correction.improvement_suggestions
-                    essay.status = 'completed'
-                    essay.updated_at = datetime.now()
-                    self.logger.info(f"成功更新作文数据，ID={essay_id}")
-                else:
-                    self.logger.error(f"未找到作文ID={essay_id}，无法同步更新作文数据")
-                
-                if auto_commit:
-                    db.session.commit()
-                    self.logger.info(f"成功提交作文和批改记录的更新，ID={essay_id}")
-                    
-                return correction
-        except Exception as e:
-            if auto_commit:
-                db.session.rollback()
-            self.logger.error(f"更新批改结果失败: {str(e)}")
-            raise 
+        } 

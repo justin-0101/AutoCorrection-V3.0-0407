@@ -155,6 +155,11 @@ project-root/
    - `/api/v1/monitoring/metrics` - Prometheus指标
    - `/api/v1/monitoring/services` - 服务状态详情
 
+5. **开发规范**
+   - 项目开发规范和指南已迁移到 `.cursor/rules` 目录
+   - 包含Python编码规范、项目规则和开发环境设置指南
+   - 代码检查与修复工具位于 `rules/` 目录
+
 ## 日志系统说明
 
 系统使用多级日志记录机制：
@@ -472,6 +477,9 @@ AutoCorrection-V3.0-0407/
 ├── data/                   # 数据目录
 │   ├── temp_icons/         # 临时图标
 │   └── diagrams/           # 图表数据
+├── rules/                  # 代码检查和修复工具
+│   ├── syntax_checker.py   # 语法检查工具
+│   └── auto_fix.py         # 自动修复工具
 └── ...其他系统文件
 ```
 
@@ -499,7 +507,33 @@ AutoCorrection-V3.0-0407/
    - create_new_admin.py: 创建新管理员
    - update_admin.py: 更新管理员信息
 
+6. **代码检查和修复工具** (rules/)
+   - syntax_checker.py: 检查缩进和try-except结构问题
+   - auto_fix.py: 自动修复语法问题
+
 ### 使用方法
+
+#### 代码检查和修复工具
+
+语法检查工具:
+```bash
+python rules/syntax_checker.py [项目路径] [排除目录(可选)]
+```
+
+自动修复工具:
+```bash
+python rules/auto_fix.py [项目路径] [排除目录(可选)]
+```
+
+**日常开发流程**:
+- 提交代码前运行 `syntax_checker.py` 检查语法问题
+- 如发现问题，使用 `auto_fix.py` 自动修复
+
+**定期维护**:
+- 每周运行一次 `syntax_checker.py` 检查整个项目
+- 在大型合并后运行检查和修复脚本
+
+#### 批改结果同步监控服务
 
 要启动批改结果同步监控服务：
 
@@ -517,3 +551,22 @@ python fix_correction_sync.py -m -i 60
 ```bash
 scripts/startup/start_sync_monitor.bat
 ```
+
+### 常见问题
+
+#### 缩进问题
+
+缩进问题是Python中最常见的问题之一，特别是在大型项目中。遵循以下建议可以减少缩进问题:
+
+1. 始终使用4个空格作为缩进单位，不要使用Tab
+2. 启用编辑器的"显示空白字符"功能
+3. 使用支持EditorConfig的编辑器
+
+#### Try-Except结构
+
+Python中的try-except结构必须完整，每个try必须有对应的except或finally语句。常见错误包括:
+
+1. 遗漏except或finally语句
+2. 缩进不正确导致except语句不与try关联
+
+使用 `syntax_checker.py` 可以检测这些问题，使用 `auto_fix.py` 可以自动修复。

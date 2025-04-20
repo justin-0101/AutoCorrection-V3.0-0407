@@ -268,35 +268,13 @@ beat_schedule = {
         },
     },
     
-    # 每日重新处理失败的作文批改任务
-    'reprocess-failed-corrections': {
-        'task': 'app.tasks.batch_processor_tasks.reprocess_failed_corrections',
-        'schedule': timedelta(days=1),  # 每24小时执行一次
-        'kwargs': {
-            'time_range_days': 3,  # 处理最近3天内的失败作文
-            'max_essays': 100,     # 最多处理100篇
-            'batch_size': 20,      # 每批20篇
-            'high_priority': False # 使用普通优先级
-        },
+    # 修复空批改结果
+    'fix-empty-correction-results': {
+        'task': 'app.tasks.maintenance_tasks.fix_empty_correction_results',
+        'schedule': timedelta(hours=6),  # 每6小时执行一次
         'options': {
             'queue': 'periodic',
-            'expires': 7200,  # 2小时后过期
-        },
-    },
-    
-    # 每周清理旧的任务状态记录
-    'cleanup-old-task-statuses': {
-        'task': 'app.tasks.batch_processor_tasks.bulk_delete_old_data',
-        'schedule': timedelta(days=7),  # 每周执行一次
-        'kwargs': {
-            'data_type': 'task_status',
-            'days_to_keep': 30,    # 保留30天的数据
-            'batch_size': 5000,    # 每批处理5000条记录
-            'dry_run': False       # 实际执行删除操作
-        },
-        'options': {
-            'queue': 'periodic',
-            'expires': 7200,  # 2小时后过期
+            'expires': 3600,  # 1小时后过期
         },
     },
 }

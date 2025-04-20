@@ -13,16 +13,16 @@ import traceback
 from flask import current_app
 from celery import shared_task
 from sqlalchemy.exc import SQLAlchemyError
-from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text
 
-from app.models.essay import Essay
+from app.models.essay import Essay, EssayStatus
+from app.models.correction import Correction, CorrectionStatus
 from app.core.correction.correction_service import CorrectionService
 from app.extensions import db
 
 logger = logging.getLogger(__name__)
 
-@shared_task(bind=True, name='app.tasks.correction_tasks.process_essay_correction')
+@shared_task(bind=True, name='app.tasks.correction_tasks.process_essay_correction', queue='correction')
 def process_essay_correction(self, essay_id):
     """
     处理文章批改任务
@@ -67,38 +67,34 @@ def process_essay_correction(self, essay_id):
             # Windows不支持tzset
             logger.warning("Windows环境不支持tzset，时区设置可能不生效")
         
-        # 创建本地数据库连接，避免使用全局数据库对象
-        from flask_sqlalchemy import SQLAlchemy
-        local_db = SQLAlchemy()
-        local_db.init_app(app)
-        
-        # 先测试数据库连接
+        # 使用应用中已注册的db实例，而不是创建新的实例
         logger.info("测试数据库连接...")
         try:
-            local_db.session.execute(text('SELECT 1'))
+            db.session.execute(text('SELECT 1'))
             logger.info("数据库连接测试成功")
         except Exception as e:
             logger.error(f"数据库连接测试失败: {str(e)}")
             raise
         
-        # 查询文章
+        # 查询文章并更新状态，使用事务确保原子性
         logger.info(f"查询文章 ID: {essay_id}")
-        essay = local_db.session.get(Essay, essay_id)
         
-        if not essay:
-            logger.error(f"找不到文章 ID: {essay_id}")
-            return {"success": False, "error": f"找不到文章 ID: {essay_id}"}
+        with db.session.begin():
+            essay = db.session.get(Essay, essay_id)
+            
+            if not essay:
+                logger.error(f"找不到文章 ID: {essay_id}")
+                return {"success": False, "error": f"找不到文章 ID: {essay_id}"}
+            
+            # 更新文章状态为处理中
+            logger.info(f"更新文章状态为处理中: {essay_id}")
+            essay.status = EssayStatus.CORRECTING.value
+            db.session.commit()
         
-        # 更新文章状态为处理中
-        logger.info(f"更新文章状态为处理中: {essay_id}")
-        essay.status = "CORRECTING"
-        local_db.session.commit()
-        
-        # 初始化批改服务，并传入本地数据库会话
+        # 初始化批改服务
         logger.info("初始化批改服务...")
         service = CorrectionService()
         
-        # 修改perform_correction调用方式，确保传入正确的数据库会话
         # 执行批改
         logger.info(f"开始执行文章批改: {essay_id}")
         result = service.perform_correction(essay)
@@ -116,16 +112,19 @@ def process_essay_correction(self, essay_id):
                 # 批改失败，记录错误信息
                 error_msg = result.get('message', '未知错误')
                 logger.error(f"文章批改失败: {essay_id}, 错误: {error_msg}")
-                # perform_correction应该已经更新了状态，但为了安全起见再次检查
+                # 检查状态并更新
                 try:
-                    essay = local_db.session.get(Essay, essay_id)
-                    if essay and essay.status != "ERROR" and essay.status != "FAILED":
-                        essay.status = "ERROR"
-                        essay.error_message = error_msg
-                        local_db.session.commit()
-                        logger.info(f"已更新文章状态为ERROR: {essay_id}")
+                    with db.session.begin():
+                        # 重新获取最新状态
+                        essay = db.session.get(Essay, essay_id)
+                        if essay and essay.status != EssayStatus.FAILED.value:
+                            essay.status = EssayStatus.FAILED.value
+                            essay.error_message = error_msg
+                            db.session.commit()
+                            logger.info(f"已更新文章状态为失败: {essay_id}")
                 except Exception as update_err:
                     logger.error(f"更新文章错误状态失败: {str(update_err)}")
+                    logger.error(traceback.format_exc())
                 
                 return {
                     "success": False, 
@@ -138,10 +137,28 @@ def process_essay_correction(self, essay_id):
         elif result is False:
             # 兼容旧版API返回False表示失败
             logger.error(f"文章批改失败(旧版API): {essay_id}")
+            try:
+                with db.session.begin():
+                    essay = db.session.get(Essay, essay_id)
+                    if essay and essay.status != EssayStatus.FAILED.value:
+                        essay.status = EssayStatus.FAILED.value
+                        essay.error_message = "批改服务返回失败"
+                        db.session.commit()
+            except Exception as e:
+                logger.error(f"更新文章状态失败: {str(e)}")
             return {"success": False, "error": "批改失败"}
         else:
             # 未知返回类型
             logger.error(f"文章批改返回未知类型: {essay_id}, 类型: {type(result)}, 值: {result}")
+            try:
+                with db.session.begin():
+                    essay = db.session.get(Essay, essay_id)
+                    if essay and essay.status != EssayStatus.FAILED.value:
+                        essay.status = EssayStatus.FAILED.value
+                        essay.error_message = f"批改服务返回未知类型: {type(result)}"
+                        db.session.commit()
+            except Exception as e:
+                logger.error(f"更新文章状态失败: {str(e)}")
             return {"success": False, "error": f"批改服务返回未知类型: {type(result)}"}
         
     except SQLAlchemyError as e:
@@ -151,14 +168,15 @@ def process_essay_correction(self, essay_id):
         
         # 尝试标记文章为错误状态
         try:
-            if 'local_db' in locals():
-                essay = local_db.session.get(Essay, essay_id)
+            with db.session.begin():
+                essay = db.session.get(Essay, essay_id)
                 if essay:
-                    essay.status = "ERROR"
-                    essay.error = error_msg
-                    local_db.session.commit()
+                    essay.status = EssayStatus.FAILED.value
+                    essay.error_message = error_msg
+                    db.session.commit()
         except Exception as ex:
             logger.error(f"无法更新文章错误状态: {str(ex)}")
+            logger.error(traceback.format_exc())
             
         return {"success": False, "error": error_msg}
         
@@ -169,28 +187,21 @@ def process_essay_correction(self, essay_id):
         
         # 尝试标记文章为错误状态
         try:
-            if 'local_db' in locals():
-                essay = local_db.session.get(Essay, essay_id)
+            with db.session.begin():
+                essay = db.session.get(Essay, essay_id)
                 if essay:
-                    essay.status = "ERROR"
-                    essay.error = str(e)
-                    local_db.session.commit()
+                    essay.status = EssayStatus.FAILED.value
+                    essay.error_message = str(e)
+                    db.session.commit()
         except Exception as ex:
             logger.error(f"无法更新文章错误状态: {str(ex)}")
+            logger.error(traceback.format_exc())
             
         return {"success": False, "error": error_msg}
         
     finally:
         logger.info(f"文章批改任务处理完毕: {essay_id}")
         
-        # 确保数据库会话被清理
-        try:
-            if 'local_db' in locals():
-                local_db.session.remove()
-                logger.info("本地数据库会话已清理")
-        except Exception as ex:
-            logger.warning(f"清理数据库会话时出错: {str(ex)}")
-            
         # 如果我们创建了应用上下文，确保弹出它
         if ctx:
             try:
@@ -198,3 +209,4 @@ def process_essay_correction(self, essay_id):
                 logger.info("应用上下文已弹出")
             except Exception as ex:
                 logger.warning(f"弹出应用上下文时出错: {str(ex)}")
+                logger.warning(traceback.format_exc())

@@ -286,7 +286,7 @@ class Essay(BaseModel):
                 self.corrected_at = datetime.utcnow()
                 return True
         except Exception as e:
-            print(f"同步批改结果时出错: {str(e)}")
+            logger.error(f"同步批改结果时出错: {str(e)}")
         
         return False
     
@@ -478,7 +478,7 @@ class Essay(BaseModel):
                 updated_at=datetime.utcnow()
             )
         except Exception as e:
-            print(f"作文状态更新冲突 [id={self.id}, status={new_status}]: {str(e)}")
+            logger.error(f"作文状态更新冲突 [id={self.id}, status={new_status}]: {str(e)}")
             return False
 
 class UserFeedback(BaseModel):

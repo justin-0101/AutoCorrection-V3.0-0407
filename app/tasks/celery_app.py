@@ -10,28 +10,19 @@ Celery应用配置模块
 import os
 import sys
 
-# 检查是否使用eventlet池，但只在尚未应用补丁时才应用
-if os.environ.get('CELERY_WORKER_POOL', '').lower() == 'eventlet' or '-P' in sys.argv and 'eventlet' in sys.argv:
-    # 检查eventlet是否已导入并应用了补丁
-    eventlet_already_patched = False
-    try:
-        import eventlet
-        eventlet_already_patched = hasattr(eventlet, 'monkey_patched') and eventlet.monkey_patched or False
-    except ImportError:
-        pass
-    
-    if not eventlet_already_patched:
-        try:
-            print("检测到使用eventlet池，但尚未应用补丁，正在应用eventlet猴子补丁...")
-            import eventlet
-            eventlet.monkey_patch()
-            print("eventlet猴子补丁应用成功")
-        except ImportError:
-            print("警告: 使用eventlet池但未安装eventlet，请执行 pip install eventlet")
-        except Exception as e:
-            print(f"应用eventlet猴子补丁失败: {str(e)}")
-    else:
-        print("eventlet猴子补丁已经被应用，跳过")
+# 强制应用eventlet猴子补丁，不再进行检查
+try:
+    print("正在应用eventlet猴子补丁...")
+    import eventlet
+    # 完全应用补丁，包括所有模块
+    eventlet.monkey_patch(os=True, socket=True, time=True, thread=True, select=True)
+    print("eventlet猴子补丁应用成功")
+    # 标记已应用补丁
+    eventlet.monkey_patched = True
+except ImportError:
+    print("警告: 未安装eventlet，请执行 pip install eventlet")
+except Exception as e:
+    print(f"应用eventlet猴子补丁失败: {str(e)}")
 
 # 导入其他模块
 import logging
@@ -59,13 +50,15 @@ celery_app = Celery(
     # task_cls=FlaskTask # Still commented out
 )
 
-# 更新 Celery 配置 (保持不变)
+# 更新 Celery 配置
 celery_app.conf.update(
     task_serializer='json',
     accept_content=['json'],
     result_serializer='json',
     timezone='Asia/Shanghai',
     enable_utc=True,
+    worker_pool='eventlet',  # 明确指定worker pool
+    worker_concurrency=10,   # 并发数
 )
 
 # 导入信号处理器，确保它们被注册
@@ -97,4 +90,12 @@ if not os.environ.get('FLASK_APP'):
 
 # 仅在直接执行此文件时运行worker
 if __name__ == '__main__':
-    celery_app.start() 
+    celery_app.start()
+
+# 连接到应用启动信号
+@celery_app.on_after_configure.connect
+def setup_periodic_tasks(sender, **kwargs):
+    """设置定时任务"""
+    # 导入任务调度器并设置任务
+    from app.tasks.scheduler import setup_periodic_tasks as scheduler_setup
+    scheduler_setup(sender, **kwargs) 

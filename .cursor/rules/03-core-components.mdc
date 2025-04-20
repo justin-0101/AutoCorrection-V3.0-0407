@@ -1,0 +1,47 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+# 核心组件
+
+AutoCorrection V3.0的核心组件负责系统的主要功能逻辑，遵循依赖注入和接口分离原则。
+
+## 依赖注入容器
+依赖注入容器是系统的核心，负责管理和解析服务依赖：
+- [app/core/services/service_registry_di.py](mdc:app/core/services/service_registry_di.py) - 服务容器实现
+- [config/services.yaml](mdc:config/services.yaml) - 服务配置
+
+## 批改服务
+批改服务负责处理作文评分和点评逻辑：
+- [app/core/correction/interface.py](mdc:app/core/correction/interface.py) - 批改服务接口
+- [app/core/correction/correction_service.py](mdc:app/core/correction/correction_service.py) - 批改服务实现
+
+## AI集成
+AI集成模块负责与外部AI模型进行交互：
+- [app/core/ai/ai_service.py](mdc:app/core/ai/ai_service.py) - AI服务
+- [app/core/ai/ai_interface.py](mdc:app/core/ai/ai_interface.py) - AI服务接口
+
+## 任务处理
+异步任务处理模块负责后台任务执行：
+- [app/tasks/correction_tasks.py](mdc:app/tasks/correction_tasks.py) - 批改任务
+- [app/tasks/__init__.py](mdc:app/tasks/__init__.py) - 任务初始化
+
+## 数据模型
+系统使用SQLAlchemy ORM进行数据库交互：
+- [app/models/__init__.py](mdc:app/models/__init__.py) - 模型初始化
+- [app/models/essay.py](mdc:app/models/essay.py) - 作文模型
+- [app/models/correction.py](mdc:app/models/correction.py) - 批改结果模型
+- [app/models/user.py](mdc:app/models/user.py) - 用户模型
+
+## Web路由
+Web路由处理HTTP请求和响应：
+- [app/routes/__init__.py](mdc:app/routes/__init__.py) - 路由初始化
+- [app/routes/correction.py](mdc:app/routes/correction.py) - 批改相关路由
+- [app/routes/auth.py](mdc:app/routes/auth.py) - 认证相关路由
+
+## API路由
+API路由提供RESTful接口：
+- [app/api/v1/__init__.py](mdc:app/api/v1/__init__.py) - API初始化
+- [app/api/v1/correction/](mdc:app/api/v1/correction/) - 批改相关API
+- [app/api/v1/monitoring/](mdc:app/api/v1/monitoring/) - 监控相关API

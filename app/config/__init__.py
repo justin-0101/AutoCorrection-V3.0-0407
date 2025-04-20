@@ -19,6 +19,24 @@ spec.loader.exec_module(config_module)
 Config = config_module.Config
 load_config = config_module.load_config
 config = config_module.config
+config_dict = config_module.config
+
+# 添加get_settings函数
+def get_settings():
+    """获取应用配置
+    
+    返回:
+        dict: 包含应用配置的字典
+    """
+    config_name = os.environ.get('FLASK_ENV', 'default')
+    if config_name == 'development':
+        return config_module.DevelopmentConfig()
+    elif config_name == 'testing':
+        return config_module.TestingConfig()
+    elif config_name == 'production':
+        return config_module.ProductionConfig()
+    else:
+        return config_module.Config()
 
 # 导出Celery配置
 from app.config.celery_config import * 

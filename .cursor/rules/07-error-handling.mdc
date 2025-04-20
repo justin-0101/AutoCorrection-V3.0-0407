@@ -1,0 +1,81 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# 错误处理机制
+
+AutoCorrection V3.0实现了完善的错误处理机制，确保系统稳定运行并提供良好的用户体验。
+
+## 全局异常处理
+
+1. **Flask错误处理器**
+   - 注册全局异常处理函数
+   - 提供友好的错误页面
+   - 相关文件：[app/utils/error_handlers.py](mdc:app/utils/error_handlers.py)
+
+2. **API异常处理**
+   - 定制API错误响应格式
+   - 确保返回一致的错误结构
+   - 相关文件：[app/api/v1/__init__.py](mdc:app/api/v1/__init__.py)
+
+3. **自定义异常类**
+   - 业务逻辑相关异常
+   - 数据验证异常
+   - 相关文件：[app/utils/exceptions.py](mdc:app/utils/exceptions.py)
+
+## 日志记录
+
+1. **错误日志**
+   - 记录异常堆栈和上下文
+   - 多级日志分类
+   - 相关文件：[app/utils/logger.py](mdc:app/utils/logger.py)
+
+2. **结构化日志**
+   - 采用JSON格式记录错误
+   - 包含请求信息和上下文
+   - 便于错误分析和监控
+
+## 错误恢复
+
+1. **任务重试机制**
+   - Celery任务失败自动重试
+   - 退避策略和最大尝试次数
+   - 相关文件：[app/tasks/correction_tasks.py](mdc:app/tasks/correction_tasks.py)
+
+2. **事务回滚**
+   - 数据库操作失败自动回滚
+   - 保持数据一致性
+   - 相关文件：[app/core/db/session.py](mdc:app/core/db/session.py)
+
+3. **故障修复脚本**
+   - 修复数据不一致问题
+   - 处理失败的批改任务
+   - 相关文件：
+     - [fix_correction_results.py](mdc:fix_correction_results.py)
+     - [fix_correction_sync.py](mdc:fix_correction_sync.py)
+     - [fix_duplicate_corrections.py](mdc:fix_duplicate_corrections.py)
+
+## 错误监控
+
+1. **健康检查端点**
+   - 监控系统状态
+   - 检测服务是否可用
+   - 相关文件：[app/api/v1/monitoring/health.py](mdc:app/api/v1/monitoring/health.py)
+
+2. **指标收集**
+   - 错误率指标
+   - 响应时间指标
+   - 相关文件：[app/api/v1/monitoring/metrics.py](mdc:app/api/v1/monitoring/metrics.py)
+
+## 用户反馈
+
+1. **错误页面**
+   - 友好的错误提示
+   - 引导用户操作
+   - 相关文件：[app/templates/errors/](mdc:app/templates/errors)
+
+2. **API错误响应**
+   - 清晰的错误信息
+   - 错误码和错误描述
+   - 相关文件：[app/api/v1/__init__.py](mdc:app/api/v1/__init__.py)

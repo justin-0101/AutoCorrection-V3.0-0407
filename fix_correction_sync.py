@@ -6,13 +6,23 @@
 用于解决corrections表和essays表之间的数据同步问题
 """
 
+# 在导入任何其他模块之前应用eventlet猴子补丁
 import os
+import sys
+
+try:
+    import eventlet
+    eventlet.monkey_patch(os=True, select=True, socket=True, thread=True, time=True)
+    os.environ['EVENTLET_PATCHED'] = 'true'
+    print("eventlet猴子补丁已提前应用于修复工具")
+except ImportError:
+    print("警告: 未安装eventlet，某些功能可能无法正常工作")
+
 import json
 import sqlite3
 import logging
 from datetime import datetime
 import argparse
-import sys
 import time
 import threading
 

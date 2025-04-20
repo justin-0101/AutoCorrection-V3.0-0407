@@ -6,12 +6,120 @@
 用于应用必要的猴子补丁，确保各个库能够正常协同工作
 """
 
+# 在导入任何其他模块之前应用eventlet补丁
 import os
 import sys
+
+# 标记变量，避免重复应用补丁
+_EVENTLET_PATCHED = False
+_SQLALCHEMY_PATCHED = False
+
+def apply_eventlet_patch_early():
+    """
+    在导入任何其他模块之前应用eventlet补丁
+    """
+    global _EVENTLET_PATCHED
+    
+    # 如果已经应用了补丁，直接返回
+    if _EVENTLET_PATCHED or os.environ.get('EVENTLET_PATCHED') == 'true':
+        return True
+    
+    # 检查是否需要应用Eventlet补丁
+    worker_pool = os.environ.get('CELERY_WORKER_POOL', '').lower()
+    if worker_pool == 'eventlet' or 'eventlet' in sys.argv:
+        try:
+            import eventlet
+            # 在导入其他模块前应用eventlet补丁
+            eventlet.monkey_patch(os=True, select=True, socket=True, thread=True, time=True)
+            
+            # 标记已应用补丁
+            os.environ['EVENTLET_PATCHED'] = 'true'
+            _EVENTLET_PATCHED = True
+            
+            # 稍后会设置日志，这里只打印到标准输出
+            print("eventlet猴子补丁已成功应用")
+            return True
+        except ImportError:
+            print("警告: 未安装eventlet，请执行 pip install eventlet")
+            return False
+        except Exception as e:
+            print(f"应用eventlet猴子补丁时出错: {str(e)}")
+            return False
+    return False
+
+# 立即应用eventlet补丁
+apply_eventlet_patch_early()
+
+# 导入其他模块
 import logging
 from threading import local as threading_local
 
+# 设置基础日志
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+def fix_sqlalchemy_queue():
+    """修复SQLAlchemy队列通知问题"""
+    global _SQLALCHEMY_PATCHED
+    
+    if _SQLALCHEMY_PATCHED:
+        return True
+        
+    try:
+        # 方法1: 修复Queue.notify
+        import queue
+        # 如果Queue没有notify方法，则添加
+        if not hasattr(queue.Queue, 'notify'):
+            # 添加一个空的notify方法
+            queue.Queue.notify = lambda self: None
+            logger.info("已添加Queue.notify空方法补丁")
+        
+        # 方法2: 修补SQLAlchemy的互斥锁，避免循环导入
+        try:
+            import sqlalchemy.util.queue
+            if hasattr(sqlalchemy.util.queue, 'Queue'):
+                original_notify = getattr(sqlalchemy.util.queue.Queue, 'notify', None)
+                
+                # 如果原方法存在，定义安全的notify方法
+                if original_notify:
+                    def safe_notify(self):
+                        if not hasattr(self, 'mutex') or not self.mutex.locked():
+                            return
+                        return original_notify(self)
+                        
+                    # 应用补丁
+                    sqlalchemy.util.queue.Queue.notify = safe_notify
+                    logger.info("已修补SQLAlchemy Queue.notify方法")
+                else:
+                    # 如果原方法不存在，添加空方法
+                    sqlalchemy.util.queue.Queue.notify = lambda self: None
+                    logger.info("已添加SQLAlchemy Queue.notify空方法")
+        except ImportError:
+            logger.debug("未找到sqlalchemy.util.queue模块，跳过修补")
+        except Exception as e:
+            logger.warning(f"修补SQLAlchemy.util.queue时出错: {str(e)}")
+        
+        _SQLALCHEMY_PATCHED = True
+        return True
+    except Exception as e:
+        logger.error(f"修复SQLAlchemy队列通知问题失败: {e}")
+        return False
+
+# 立即应用SQLAlchemy修复
+fix_sqlalchemy_queue()
+
+def is_eventlet_patched():
+    """
+    检查当前环境是否已应用Eventlet补丁
+    """
+    if os.environ.get('EVENTLET_PATCHED') == 'true' or _EVENTLET_PATCHED:
+        return True
+        
+    try:
+        import eventlet
+        return eventlet.patcher.is_monkey_patched('thread')
+    except ImportError:
+        return False
 
 def apply_eventlet_patch():
     """
@@ -19,83 +127,32 @@ def apply_eventlet_patch():
     
     此函数必须在应用启动时最早调用，以确保所有I/O操作都被正确补丁
     """
+    global _EVENTLET_PATCHED
+    
+    # 如果已经应用了补丁，直接返回
+    if is_eventlet_patched():
+        logger.info("eventlet补丁已应用，跳过重复应用")
+        return True
+    
     logger.info("准备应用Eventlet补丁...")
     
     # 检查是否需要应用Eventlet补丁
     worker_pool = os.environ.get('CELERY_WORKER_POOL', '').lower()
-    if worker_pool != 'eventlet':
+    if worker_pool != 'eventlet' and 'eventlet' not in sys.argv:
         logger.info(f"当前工作池不是eventlet ({worker_pool})，跳过应用补丁")
         return False
     
     try:
-        # 1. 保存原始的threading.get_ident函数引用
-        import threading
-        original_get_ident = threading.get_ident
-        
-        # 2. 保存原始的SQLAlchemy队列通知函数
-        import sqlalchemy.util.queue
-        original_notify = sqlalchemy.util.queue.Queue.notify
-    
-        # 3. 应用全面的Eventlet补丁
         import eventlet
-        eventlet.monkey_patch(all=True)
-        logger.info("已完成Eventlet全面补丁应用")
-
-        # 4. 创建线程本地存储用于跟踪线程状态
-        _thread_context = threading_local()
         
-        # 5. 安全的notify补丁，避免"cannot notify on un-acquired lock"错误
-        def safe_notify(self):
-            if not hasattr(self, 'mutex') or not self.mutex.locked():
-                logger.debug("跳过未锁定互斥锁的通知")
-                return
-            try:
-                return original_notify(self)
-            except Exception as e:
-                logger.warning(f"Queue.notify调用失败: {e}")
-                return None
-                
-        # 应用notify补丁
-        sqlalchemy.util.queue.Queue.notify = safe_notify
-        logger.info("已应用SQLAlchemy Queue.notify安全补丁")
+        # 应用补丁
+        eventlet.monkey_patch(os=True, select=True, socket=True, thread=True, time=True)
         
-        # 6. 为SQLAlchemy添加连接处理
-        try:
-            from sqlalchemy import event
-            from sqlalchemy.engine import Engine
-            
-            @event.listens_for(Engine, "checkout")
-            def checkout_connection(dbapi_connection, connection_record, connection_proxy):
-                # 标记所有连接为有效，避免在eventlet环境中的线程检查问题
-                if hasattr(connection_proxy, '_is_valid'):
-                    connection_proxy._is_valid = True
-                if hasattr(connection_record, '_is_valid'):
-                    connection_record._is_valid = True
-                
-            logger.info("已为SQLAlchemy Engine添加连接检出事件处理器")
-        except ImportError:
-            logger.warning("无法为SQLAlchemy添加连接事件处理器")
+        # 标记已应用补丁
+        os.environ['EVENTLET_PATCHED'] = 'true'
+        _EVENTLET_PATCHED = True
         
-        # 7. 重定向数据库URL以支持SQLite内存数据库的并发访问（如果正在使用）
-        from sqlalchemy.engine.url import make_url
-        original_make_url = make_url
-        
-        def patched_make_url(url_string):
-            url = original_make_url(url_string)
-            # 对于SQLite内存数据库，添加共享缓存模式
-            if url.drivername == 'sqlite' and url.database in (None, '', ':memory:'):
-                url = url.set(database='file::memory:?cache=shared')
-            return url
-            
-        # 应用URL补丁（如果使用最新的SQLAlchemy版本，这可能需要调整）
-        try:
-            sqlalchemy.engine.url.make_url = patched_make_url
-            logger.info("已应用SQLite内存数据库URL补丁")
-        except (AttributeError, ImportError):
-            logger.warning("无法应用SQLite URL补丁，可能使用了不兼容的SQLAlchemy版本")
-        
-        # 8. 最后添加一些调试信息
-        logger.info("Eventlet补丁应用完成，当前环境已准备好处理异步任务")
+        logger.info("Eventlet补丁已成功应用")
         return True
         
     except ImportError as e:
@@ -105,24 +162,16 @@ def apply_eventlet_patch():
     except Exception as e:
         logger.error(f"应用Eventlet补丁时发生未知错误: {e}")
         return False
-        
-# 提供一个检查函数
-def is_eventlet_patched():
-    """
-    检查当前环境是否已应用Eventlet补丁
-    """
-    try:
-        import eventlet
-        return eventlet.patcher.is_monkey_patched('thread')
-    except ImportError:
-        return False
 
 def apply_sqlalchemy_patch():
     """应用SQLAlchemy连接池补丁，处理与eventlet的兼容性问题"""
     try:
+        # 修复Queue.notify问题
+        fix_sqlalchemy_queue()
+        
         # 这个函数会在app/__init__.py中被调用
         # 具体的SQLAlchemy配置修改已在app/extensions.py中完成
-        logger.info("SQLAlchemy补丁已在extensions.py中处理")
+        logger.info("SQLAlchemy补丁已应用")
         return True
     except Exception as e:
         logger.error(f"应用SQLAlchemy补丁时出错: {str(e)}")
@@ -130,13 +179,24 @@ def apply_sqlalchemy_patch():
 
 def apply_patches():
     """应用所有必要的猴子补丁"""
-    logger.info("开始应用猴子补丁...")
+    logger.info("检查已应用的补丁状态...")
     
     # 应用eventlet补丁
-    eventlet_patched = apply_eventlet_patch()
+    eventlet_result = apply_eventlet_patch()
     
     # 应用SQLAlchemy补丁
-    sqlalchemy_patched = apply_sqlalchemy_patch()
+    sqlalchemy_result = apply_sqlalchemy_patch()
     
-    logger.info(f"补丁应用状态: eventlet={eventlet_patched}, sqlalchemy={sqlalchemy_patched}")
-    return eventlet_patched, sqlalchemy_patched 
+    # 检查补丁应用结果
+    if eventlet_result and sqlalchemy_result:
+        logger.info("所有补丁已成功应用")
+        return True
+    else:
+        patches_status = []
+        if not eventlet_result:
+            patches_status.append("eventlet")
+        if not sqlalchemy_result:
+            patches_status.append("SQLAlchemy")
+            
+        logger.warning(f"部分补丁应用失败: {', '.join(patches_status)}")
+        return False 

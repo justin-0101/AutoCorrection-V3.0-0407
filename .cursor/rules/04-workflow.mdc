@@ -1,0 +1,71 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+# 系统工作流程
+
+AutoCorrection V3.0系统中的主要工作流程涉及作文批改、用户认证和系统监控。
+
+## 作文批改流程
+
+1. **作文提交**
+   - 用户通过Web界面或API上传作文文件
+   - 系统接收并验证文件格式
+   - 作文保存到数据库和文件系统
+   - 相关文件：[app/routes/correction.py](mdc:app/routes/correction.py)
+
+2. **任务创建**
+   - 系统创建异步批改任务
+   - 任务加入Celery队列等待处理
+   - 相关文件：[app/tasks/correction_tasks.py](mdc:app/tasks/correction_tasks.py)
+
+3. **AI评分处理**
+   - Celery工作进程获取任务
+   - 调用AI服务对作文进行评分
+   - 相关文件：[app/core/ai/ai_service.py](mdc:app/core/ai/ai_service.py)
+
+4. **结果处理**
+   - 系统接收AI评分结果
+   - 结果保存到数据库
+   - 通知用户评分完成
+   - 相关文件：[app/core/correction/correction_service.py](mdc:app/core/correction/correction_service.py)
+
+5. **结果展示**
+   - 用户查看评分结果
+   - 系统呈现详细评语和建议
+   - 相关文件：[app/routes/correction.py](mdc:app/routes/correction.py)
+
+## 用户认证流程
+
+1. **用户注册**
+   - 用户提交注册信息
+   - 系统验证信息并创建账户
+   - 相关文件：[app/routes/auth.py](mdc:app/routes/auth.py)
+
+2. **用户登录**
+   - 用户提交登录凭据
+   - 系统验证并创建会话
+   - 相关文件：[app/core/auth/auth_service.py](mdc:app/core/auth/auth_service.py)
+
+3. **会话管理**
+   - 系统验证用户会话
+   - 控制用户访问权限
+   - 相关文件：[app/core/auth/session_manager.py](mdc:app/core/auth/session_manager.py)
+
+## 系统监控流程
+
+1. **健康检查**
+   - 定期检查系统组件状态
+   - 记录服务可用性指标
+   - 相关文件：[app/api/v1/monitoring/health.py](mdc:app/api/v1/monitoring/health.py)
+
+2. **指标收集**
+   - 收集系统性能指标
+   - 提供Prometheus格式指标
+   - 相关文件：[app/api/v1/monitoring/metrics.py](mdc:app/api/v1/monitoring/metrics.py)
+
+3. **异常处理**
+   - 捕获并记录系统异常
+   - 实现故障恢复机制
+   - 相关文件：[app/utils/error_handlers.py](mdc:app/utils/error_handlers.py)

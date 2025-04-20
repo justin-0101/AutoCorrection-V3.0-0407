@@ -11,7 +11,18 @@ Returns:
     Flask应用实例
 """
 
+# 在导入任何其他模块之前应用eventlet猴子补丁
 import os
+import sys
+
+try:
+    import eventlet
+    eventlet.monkey_patch(os=True, select=True, socket=True, thread=True, time=True)
+    os.environ['EVENTLET_PATCHED'] = 'true'
+    print("eventlet猴子补丁已在应用初始化时提前应用")
+except ImportError:
+    print("警告: 未安装eventlet，某些功能可能无法正常工作")
+
 import logging
 from logging.handlers import RotatingFileHandler
 from flask import Flask
@@ -26,13 +37,15 @@ from pathlib import Path
 from flask_socketio import SocketIO
 import pytz
 import datetime
-import sys
 import time
 import threading
 import subprocess
+from sqlalchemy.orm import scoped_session, sessionmaker
+from werkzeug.middleware.proxy_fix import ProxyFix
+from flask_session import Session
 
 # 加载配置和配置类
-from app.config import load_config, Config
+from app.config import load_config, Config, get_settings, config_dict
 from app.extensions import db, login_manager, migrate, init_extensions
 
 # 加载模型
@@ -52,10 +65,6 @@ from app.api.v1.admin import admin_api_bp
 from app.api.v1.example import example_bp, register_example_blueprint
 from app.api.v1.essays import essays_bp
 from app.api.v1 import api_v1_bp  # 导入主API v1蓝图
-
-# 立即应用eventlet补丁
-from app.patch import apply_eventlet_patch
-apply_eventlet_patch()
 
 # 设置时区为中国标准时间
 os.environ['TZ'] = 'Asia/Shanghai'
@@ -86,40 +95,47 @@ def load_env_vars():
 # 设置日志
 def setup_logging(app):
     """设置日志"""
-    # 加载日志目录
-    log_dir = os.environ.get('LOG_DIR', 'logs')
-    
-    # 创建日志目录
+    log_level = getattr(logging, app.config.get('LOG_LEVEL', 'INFO'))
+    log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
     os.makedirs(log_dir, exist_ok=True)
     
-    # 设置日志文件
-    file_handler = RotatingFileHandler(os.path.join(log_dir, 'app.log'), maxBytes=1024 * 1024 * 10, backupCount=5)
+    # 设置应用日志
+    log_file = os.path.join(log_dir, 'app.log')
+    file_handler = RotatingFileHandler(log_file, maxBytes=10485760, backupCount=5)
     file_handler.setFormatter(logging.Formatter(
-        '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
+        '%(asctime)s [%(levelname)s] %(name)s: %(message)s'
     ))
-    file_handler.setLevel(logging.INFO)
+    file_handler.setLevel(log_level)
     
     # 设置控制台日志
     console_handler = logging.StreamHandler()
-    console_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
-    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(logging.Formatter(
+        '%(asctime)s [%(levelname)s] %(name)s: %(message)s'
+    ))
+    console_handler.setLevel(log_level)
     
-    # 设置根日志记录器
+    # 配置根日志器
     root_logger = logging.getLogger()
-    root_logger.setLevel(logging.INFO)
+    root_logger.setLevel(log_level)
     root_logger.addHandler(file_handler)
     root_logger.addHandler(console_handler)
     
-    # 添加Flask日志记录器
+    # 设置Flask日志
+    app.logger.setLevel(log_level)
+    for handler in app.logger.handlers:
+        app.logger.removeHandler(handler)
     app.logger.addHandler(file_handler)
     app.logger.addHandler(console_handler)
-    app.logger.setLevel(logging.INFO)
     
-    # 设置Flask应用程序的日志级别
+    # 设置SQLAlchemy日志
+    logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO if app.debug else logging.WARNING)
+    
+    # 确保第三方库的日志级别不会太低
     logging.getLogger('werkzeug').setLevel(logging.WARNING)
-    logging.getLogger('sqlalchemy').setLevel(logging.WARNING)
+    logging.getLogger('socketio').setLevel(logging.WARNING)
+    logging.getLogger('engineio').setLevel(logging.WARNING)
     
-    return app
+    app.logger.info('日志系统已初始化')
 
 # 加载项目根目录
 PROJECT_ROOT = Path(__file__).parent.parent.absolute()
@@ -335,6 +351,18 @@ def create_app(config_name='default'):
     
     # 启动批改结果同步监控服务
     start_correction_sync_monitor(app)
+    
+    # 配置反向代理
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+    
+    # 注册上下文处理器
+    from app.context_processors import register_context_processors
+    register_context_processors(app)
+    
+    # 启动任务调度器
+    from app.tasks.scheduler import start_scheduler
+    start_scheduler()
+    app.logger.info('任务调度器已启动')
     
     app.logger.info("应用已初始化")
     
@@ -743,3 +771,11 @@ def create_directories(app):
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
         app.logger.info(f"日志目录已创建: {log_dir}")
+
+@login_manager.user_loader
+def load_user(user_id):
+    try:
+        user = User.query.get(int(user_id))
+        return user
+    except:
+        return None

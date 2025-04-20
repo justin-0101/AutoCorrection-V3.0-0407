@@ -1,0 +1,59 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+# 系统架构
+
+AutoCorrection V3.0采用依赖注入架构，以解决循环导入问题，提高系统稳定性和可维护性。
+
+## 依赖注入架构
+系统使用`dependency-injector`实现服务容器，通过抽象接口避免循环导入，并使用声明式服务配置。
+
+核心改进：
+1. **接口定义**：通过抽象接口定义服务契约
+2. **依赖注入**：使用容器自动注入服务依赖
+3. **配置外部化**：服务配置统一管理在YAML文件中
+4. **监控端点**：健康检查和Prometheus指标端点
+
+## 目录结构
+```
+AutoCorrection-V3.0/
+├── app/                 # 应用代码
+│   ├── __init__.py      # 应用初始化
+│   ├── api/             # API路由
+│   ├── core/            # 核心业务逻辑
+│   │   ├── ai/          # AI服务集成
+│   │   ├── correction/  # 批改服务
+│   │   └── services/    # 服务容器和管理
+│   ├── models/          # 数据模型
+│   ├── routes/          # Web路由
+│   ├── tasks/           # 异步任务
+│   ├── templates/       # HTML模板
+│   └── utils/           # 工具函数
+├── config/              # 配置文件
+├── logs/                # 日志目录
+├── migrations/          # 数据库迁移
+├── scripts/             # 脚本目录
+├── tests/               # 测试代码
+├── uploads/             # 上传文件目录
+└── wsgi.py              # WSGI入口
+```
+
+## 主要功能模块
+1. **用户管理** - 用户注册和登录、个人信息管理
+2. **作文批改** - 作文提交评分、详细评语生成、修改建议
+3. **历史记录** - 作文历史查看、评分记录统计、进步追踪
+4. **系统管理** - 日志记录、性能监控
+
+## 数据流向
+1. 用户提交作文 → 应用接收并存储
+2. 系统创建异步任务 → Celery队列处理
+3. AI模型进行评分 → 生成结果
+4. 结果保存数据库 → 用户界面展示
+
+## 关键组件交互
+- [app/core/services/service_registry_di.py](mdc:app/core/services/service_registry_di.py) - 依赖注入容器
+- [app/core/correction/interface.py](mdc:app/core/correction/interface.py) - 批改服务接口
+- [app/core/correction/correction_service.py](mdc:app/core/correction/correction_service.py) - 批改服务实现
+- [app/tasks/correction_tasks.py](mdc:app/tasks/correction_tasks.py) - 异步批改任务

@@ -1,0 +1,81 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+# 依赖注入系统
+
+AutoCorrection V3.0使用依赖注入模式来解决循环导入问题，提高系统的可维护性和灵活性。
+
+## 核心概念
+
+1. **服务容器**
+   - 中央服务注册表
+   - 负责创建和管理服务实例
+   - 自动解析依赖关系
+   - 相关文件：[app/core/services/service_registry_di.py](mdc:app/core/services/service_registry_di.py)
+
+2. **服务接口**
+   - 定义服务契约
+   - 使用抽象基类分离接口和实现
+   - 相关示例：[app/core/correction/interface.py](mdc:app/core/correction/interface.py)
+
+3. **服务实现**
+   - 实现接口定义的功能
+   - 通过依赖注入获取其他服务
+   - 相关示例：[app/core/correction/correction_service.py](mdc:app/core/correction/correction_service.py)
+
+4. **服务配置**
+   - 使用YAML文件配置服务
+   - 定义服务参数和依赖
+   - 相关文件：[config/services.yaml](mdc:config/services.yaml)
+
+## 使用模式
+
+1. **服务注册**
+```python
+# 在service_registry_di.py中
+container = Container()
+container.config.from_yaml('config/services.yaml')
+
+# 注册核心服务
+container.ai_service.register(AiService)
+container.correction_service.register(CorrectionService)
+```
+
+2. **获取服务**
+```python
+# 在应用代码中
+from app.core.services.service_registry_di import ServiceContainer
+
+# 方式1: 通过容器直接获取
+correction_service = ServiceContainer.correction_service()
+
+# 方式2: 在类初始化时注入
+def __init__(self, correction_service=Provide[ServiceContainer.correction_service]):
+    self.correction_service = correction_service
+```
+
+3. **服务配置示例**
+```yaml
+# 在services.yaml中
+services:
+  ai_service:
+    class: app.core.ai.ai_service.AiService
+    params:
+      api_key: ${AI_API_KEY}
+      model_name: ${AI_MODEL_NAME}
+  
+  correction_service:
+    class: app.core.correction.correction_service.CorrectionService
+    params:
+      ai_service: ${ai_service}
+      db_session: ${db_session}
+```
+
+## 优势
+
+1. **避免循环导入**：通过接口分离和依赖注入避免Python循环导入问题
+2. **可测试性**：服务可以轻松模拟进行单元测试
+3. **配置灵活**：服务配置集中管理，便于修改
+4. **松耦合**：服务间通过接口交互，降低耦合性

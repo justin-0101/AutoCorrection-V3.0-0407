@@ -6,6 +6,13 @@ WSGI入口点
 用于生产环境启动Web应用
 """
 
+# 在导入任何其他模块之前应用eventlet猴子补丁
+import os
+import eventlet
+eventlet.monkey_patch(os=True, select=True, socket=True, thread=True, time=True)
+os.environ['EVENTLET_PATCHED'] = 'true'
+print("eventlet猴子补丁已提前应用")
+
 from app import create_app
 import logging
 

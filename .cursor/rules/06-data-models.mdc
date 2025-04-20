@@ -1,0 +1,71 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+# 数据模型
+
+AutoCorrection V3.0使用SQLAlchemy ORM进行数据库交互，下面是系统中的主要数据模型及其关系。
+
+## 核心数据模型
+
+1. **用户模型 (User)**
+   - 存储用户基本信息、认证凭据
+   - 关联用户的作文和批改记录
+   - 相关文件：[app/models/user.py](mdc:app/models/user.py)
+
+2. **作文模型 (Essay)**
+   - 存储作文内容、元数据信息
+   - 关联作者和批改结果
+   - 相关文件：[app/models/essay.py](mdc:app/models/essay.py)
+
+3. **批改结果模型 (Correction)**
+   - 存储AI批改结果和评分
+   - 关联原始作文和评审者
+   - 相关文件：[app/models/correction.py](mdc:app/models/correction.py)
+
+4. **批改历史模型 (CorrectionHistory)**
+   - 跟踪批改过程中的状态变化
+   - 记录处理时间和结果变更
+   - 相关文件：[app/models/correction_history.py](mdc:app/models/correction_history.py)
+
+## 数据关系
+
+```
+User (用户)
+ ↓ 1:N
+Essay (作文) → CorrectionHistory (批改历史)
+ ↓ 1:1
+Correction (批改结果)
+```
+
+## 数据库会话管理
+
+系统使用SQLAlchemy提供的会话管理:
+- 创建会话：[app/models/__init__.py](mdc:app/models/__init__.py)
+- 事务控制：[app/core/db/session.py](mdc:app/core/db/session.py)
+
+## 数据验证
+
+数据验证通过以下机制实现:
+- SQLAlchemy模型验证
+- 表单验证：[app/forms/](mdc:app/forms/)
+- API请求验证：[app/api/](mdc:app/api/)
+
+## 数据迁移
+
+系统使用Alembic进行数据库迁移管理:
+- 迁移配置：[migrations/alembic.ini](mdc:migrations/alembic.ini)
+- 版本控制：[migrations/versions/](mdc:migrations/versions/)
+
+## 查询优化
+
+数据库查询优化机制:
+- 索引设计：[check_db_indexes.py](mdc:check_db_indexes.py)
+- 查询优化：[app/core/db/query_helpers.py](mdc:app/core/db/query_helpers.py)
+
+## 数据一致性
+
+数据一致性保障机制:
+- 数据库触发器：[db_triggers.log](mdc:db_triggers.log)
+- 唯一约束：[check_db_structure.py](mdc:check_db_structure.py)

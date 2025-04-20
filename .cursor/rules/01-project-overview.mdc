@@ -1,0 +1,32 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+# 项目概述
+
+AutoCorrection V3.0是一个基于人工智能的作文批改系统，提供智能评分、详细点评和建议改进的在线服务平台。V3.0版本采用依赖注入架构，解决了循环导入问题，提高了系统的稳定性和可维护性。
+
+## 主要功能
+- 智能评分：使用AI模型对作文进行全方位评分
+- 详细点评：提供语言、结构、内容等多维度的专业点评
+- 历史记录：支持查看历史作文和评分记录
+- 用户管理：完整的用户注册、登录和个人中心功能
+- 实时反馈：即时的评分结果和改进建议
+
+## 技术栈
+- 后端：Python + Flask
+- 前端：HTML + CSS + JavaScript + Bootstrap 5
+- 数据库：SQLite/MySQL
+- AI模型：DashScope API + DeepSeek API
+- Web服务器：Nginx + Gunicorn
+- 任务队列：Celery + Redis
+- 监控系统：Prometheus + Flask监控端点
+- 依赖注入：dependency-injector
+- 日志系统：Python logging + 结构化日志
+
+## 核心文件
+- [wsgi.py](mdc:wsgi.py) - 应用入口点
+- [app/__init__.py](mdc:app/__init__.py) - 应用初始化
+- [app/core/services/service_registry_di.py](mdc:app/core/services/service_registry_di.py) - 依赖注入容器
+- [config/services.yaml](mdc:config/services.yaml) - 服务配置
