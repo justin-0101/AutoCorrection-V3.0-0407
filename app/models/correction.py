@@ -208,11 +208,28 @@ class Correction(BaseModel):
             
         try:
             results = self.results if isinstance(self.results, dict) else {}
-            self.essay.score = results.get('score')
+            
+            # 同步基本字段
+            self.essay.score = results.get('score') or results.get('total_score')
             self.essay.corrected_content = results.get('corrected_content')
             self.essay.comments = results.get('comments')
             self.essay.error_analysis = results.get('error_analysis')
             self.essay.improvement_suggestions = results.get('improvement_suggestions')
+            self.essay.corrected_at = datetime.utcnow()
+            
+            # AI结果字段
+            self.essay.ai_score = results.get('score') or results.get('total_score')
+            self.essay.ai_comments = results.get('comments')
+            self.essay.ai_analysis = results.get('error_analysis')
+            
+            # 更新批改次数
+            self.essay.correction_count = (self.essay.correction_count or 0) + 1
+            
+            # 更新字数统计如果之前没有
+            if not self.essay.word_count and 'word_count' in results:
+                self.essay.word_count = results.get('word_count')
+                
+            db.session.commit()
             return True
         except Exception as e:
             db.session.rollback()

@@ -23,6 +23,7 @@ import json
 import time
 import re
 import random
+import traceback  # 添加traceback导入
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 
@@ -30,7 +31,8 @@ from celery import shared_task
 from celery.utils.log import get_task_logger
 from sqlalchemy.exc import SQLAlchemyError
 from celery.result import AsyncResult
-from sqlalchemy import text
+from sqlalchemy import text, func, or_, and_
+from flask import has_app_context, current_app
 
 from app.models.db import db
 from app.models.essay import Essay, EssayStatus
@@ -254,614 +256,161 @@ def archive_old_task_statuses(self, days_threshold=90, batch_size=1000):
             'task_id': task_id
         }
 
-@celery_app.task(bind=True)
-def check_and_fix_inconsistent_statuses(self):
+@celery_app.task(name="maintenance.check_essay_statuses")
+def check_essay_statuses():
     """
-    检查并修复不一致的状态
-    定期运行此任务以确保作文和批改记录的状态一致性
-    
-    Returns:
-        Dict[str, Any]: 包含修复结果的字典
+    检查作文状态，处理长时间处于处理状态的作文
+    返回:
+        dict: 包含处理结果的字典
     """
-    logger.info("开始执行状态一致性检查")
-    
     try:
-        # 1. 查找状态不一致的记录
-        with db.session() as session:
-            inconsistent_records = session.query(Essay, Correction).join(
-                Correction, Essay.id == Correction.essay_id
-            ).filter(
-                ((Essay.status == EssayStatus.CORRECTING) & 
-                 (Correction.status != CorrectionStatus.CORRECTING)) |
-                ((Essay.status != EssayStatus.CORRECTING) & 
-                 (Correction.status == CorrectionStatus.CORRECTING))
-            ).all()
+        # 记录任务开始
+        task_id = record_task_status("check_essay_statuses", "started")
+        
+        logger.info("开始检查作文状态")
+        
+        # 确保在Flask应用上下文中执行
+        if not has_app_context():
+            # 如果不在应用上下文中，创建一个新的上下文
+            from app import create_app
+            app = create_app()
+            with app.app_context():
+                return _process_check_essay_statuses(task_id)
+        else:
+            # 如果已在应用上下文中，直接执行
+            return _process_check_essay_statuses(task_id)
             
-            logger.info(f"发现 {len(inconsistent_records)} 条状态不一致的记录")
-            fixed_count = 0
+    except Exception as e:
+        logger.error(f"检查作文状态失败: {str(e)}")
+        logger.error(traceback.format_exc())
+        
+        # 记录任务失败
+        if task_id:
+            update_task_status(task_id, "failed", error=str(e))
+        
+        return {
+            "status": "error",
+            "message": str(e),
+            "processed_count": 0
+        }
+
+def _process_check_essay_statuses(task_id):
+    """实际处理作文状态检查的内部函数"""
+    try:
+        # 查找长时间处于处理中状态的作文
+        stale_time = datetime.utcnow() - timedelta(hours=2)  # 2小时视为过期
+        stale_essays = Essay.query.filter(
+            Essay.status == 'correcting',
+            Essay.updated_at < stale_time
+        ).all()
+        
+        if not stale_essays:
+            logger.info("没有发现滞留的作文")
             
-            # 2. 修复不一致状态
-            for essay, correction in inconsistent_records:
-                logger.info(f"作文 {essay.id} 状态不一致: 作文状态={essay.status}, 批改状态={correction.status}")
+            # 更新任务状态
+            update_task_status(task_id, "completed", result={
+                "message": "没有发现滞留的作文",
+                "processed_count": 0
+            })
+            
+            return {
+                "status": "success",
+                "message": "没有发现滞留的作文",
+                "processed_count": 0
+            }
+        
+        # 记录滞留的作文数量
+        logger.info(f"发现 {len(stale_essays)} 篇滞留的作文")
+        
+        # 处理滞留的作文
+        processed_count = 0
+        for essay in stale_essays:
+            try:
+                logger.info(f"处理滞留作文: essay_id={essay.id}, 状态={essay.status}, 更新时间={essay.updated_at}")
+                
+                # 获取相关的批改记录
+                correction = Correction.query.filter_by(essay_id=essay.id).first()
+                
+                if not correction:
+                    logger.warning(f"作文 {essay.id} 没有关联的批改记录")
+                    # 将作文状态重置为pending
+                    essay.status = 'pending'
+                    db.session.add(essay)
+                    processed_count += 1
+                    continue
                 
                 # 检查任务状态
                 task_id = correction.task_id
-                task_status = "UNKNOWN"
                 if task_id:
                     task_result = AsyncResult(task_id, app=celery_app)
                     task_status = task_result.state
                     logger.info(f"任务 {task_id} 的状态为: {task_status}")
-                else:
-                    logger.warning(f"批改记录 {correction.id} 没有关联的任务ID")
-                
-                # 根据任务状态决定如何修复
-                try:
-                    session.begin_nested()
                     
                     if task_status in ["PENDING", "STARTED", "RETRY"]:
-                        # 任务正在处理，保持CORRECTING状态
-                        essay.status = EssayStatus.CORRECTING
-                        correction.status = CorrectionStatus.CORRECTING
-                        logger.info(f"更新作文 {essay.id} 和批改 {correction.id} 的状态为CORRECTING")
-                    elif task_status in ["SUCCESS"]:
-                        # 任务已成功，但状态未更新
-                        essay.status = EssayStatus.COMPLETED
-                        correction.status = CorrectionStatus.COMPLETED
-                        logger.info(f"更新作文 {essay.id} 和批改 {correction.id} 的状态为COMPLETED")
+                        # 任务仍在处理但时间过长，重置为待处理状态
+                        logger.info(f"任务 {task_id} 运行时间过长，重置状态")
+                        essay.status = 'pending'
+                        correction.status = 'pending'
+                        correction.task_id = None
+                    elif task_status == "SUCCESS":
+                        # 任务已成功但状态未更新
+                        essay.status = 'completed'
+                        correction.status = 'completed'
+                        logger.info(f"更新作文 {essay.id} 和批改 {correction.id} 的状态为completed")
                     elif task_status in ["FAILURE", "REVOKED"]:
                         # 任务已失败
-                        essay.status = EssayStatus.FAILED
-                        correction.status = CorrectionStatus.FAILED
-                        logger.info(f"更新作文 {essay.id} 和批改 {correction.id} 的状态为FAILED")
+                        essay.status = 'failed'
+                        correction.status = 'failed'
+                        correction.error = "任务执行失败或被撤销"
+                        logger.info(f"更新作文 {essay.id} 和批改 {correction.id} 的状态为failed")
                     else:
-                        # 任务状态未知或不存在，重置为待处理
-                        essay.status = EssayStatus.PENDING
-                        correction.status = CorrectionStatus.PENDING
+                        # 未知状态，重置为待处理
+                        essay.status = 'pending'
+                        correction.status = 'pending'
                         correction.task_id = None
-                        logger.info(f"重置作文 {essay.id} 和批改 {correction.id} 的状态为PENDING")
-                    
-                    session.commit()
-                    fixed_count += 1
-                except SQLAlchemyError as e:
-                    session.rollback()
-                    logger.error(f"修复作文 {essay.id} 状态失败: {str(e)}")
-            
-            # 3. 检查长时间处于CORRECTING状态的任务
-            stale_time = datetime.now() - timedelta(hours=1)  # 1小时视为过期
-            stale_corrections = session.query(Correction).filter(
-                Correction.status == CorrectionStatus.CORRECTING,
-                Correction.updated_at < stale_time
-            ).all()
-            
-            logger.info(f"发现 {len(stale_corrections)} 条滞留的批改记录")
-            stale_fixed_count = 0
-            
-            for correction in stale_corrections:
-                essay = session.query(Essay).filter_by(id=correction.essay_id).first()
-                if not essay:
-                    logger.warning(f"批改记录 {correction.id} 的作文 {correction.essay_id} 不存在")
-                    continue
-                    
-                logger.info(f"滞留的批改 {correction.id} (作文ID: {correction.essay_id}), "
-                           f"更新时间: {correction.updated_at}")
-                
-                # 检查任务状态
-                task_id = correction.task_id
-                if task_id:
-                    task_result = AsyncResult(task_id, app=celery_app)
-                    task_status = task_result.state
-                    logger.info(f"任务 {task_id} 的状态为: {task_status}")
-                    
-                    try:
-                        session.begin_nested()
-                        
-                        if task_status in ["PENDING", "STARTED", "RETRY"]:
-                            # 任务仍在处理但时间过长，重置为待处理状态
-                            logger.info(f"任务 {task_id} 运行时间过长，重置状态")
-                            # 可选择终止任务
-                            # task_result.revoke(terminate=True)
-                            essay.status = EssayStatus.PENDING
-                            correction.status = CorrectionStatus.PENDING
-                            correction.task_id = None
-                        elif task_status in ["SUCCESS"]:
-                            # 任务已成功但状态未更新
-                            essay.status = EssayStatus.COMPLETED
-                            correction.status = CorrectionStatus.COMPLETED
-                            logger.info(f"更新作文 {essay.id} 和批改 {correction.id} 的状态为COMPLETED")
-                        elif task_status in ["FAILURE", "REVOKED"]:
-                            # 任务已失败
-                            essay.status = EssayStatus.FAILED
-                            correction.status = CorrectionStatus.FAILED
-                            correction.error = "任务执行失败或被撤销"
-                            logger.info(f"更新作文 {essay.id} 和批改 {correction.id} 的状态为FAILED")
-                        else:
-                            # 未知状态，重置为待处理
-                            essay.status = EssayStatus.PENDING
-                            correction.status = CorrectionStatus.PENDING
-                            correction.task_id = None
-                            logger.info(f"未知任务状态，重置作文 {essay.id} 和批改 {correction.id} 的状态为PENDING")
-                        
-                        session.commit()
-                        stale_fixed_count += 1
-                    except SQLAlchemyError as e:
-                        session.rollback()
-                        logger.error(f"修复滞留任务 {task_id} 失败: {str(e)}")
+                        logger.info(f"未知任务状态，重置作文 {essay.id} 和批改 {correction.id} 的状态为pending")
                 else:
                     # 没有任务ID，重置为待处理
-                    try:
-                        session.begin_nested()
-                        essay.status = EssayStatus.PENDING
-                        correction.status = CorrectionStatus.PENDING
-                        logger.info(f"批改记录无任务ID，重置作文 {essay.id} 和批改 {correction.id} 的状态为PENDING")
-                        session.commit()
-                        stale_fixed_count += 1
-                    except SQLAlchemyError as e:
-                        session.rollback()
-                        logger.error(f"重置无任务ID的批改记录 {correction.id} 失败: {str(e)}")
+                    essay.status = 'pending'
+                    correction.status = 'pending'
+                    logger.info(f"批改记录无任务ID，重置作文 {essay.id} 和批改 {correction.id} 的状态为pending")
+                
+                db.session.add(essay)
+                db.session.add(correction)
+                processed_count += 1
+                
+            except Exception as e:
+                logger.error(f"处理作文 {essay.id} 时出错: {str(e)}")
+                logger.error(traceback.format_exc())
+        
+        # 提交所有更改
+        db.session.commit()
+        logger.info(f"已处理 {processed_count} 篇滞留的作文")
+        
+        # 更新任务状态
+        update_task_status(task_id, "completed", result={
+            "message": f"已处理 {processed_count} 篇滞留的作文",
+            "processed_count": processed_count
+        })
         
         return {
             "status": "success",
-            "inconsistent_count": len(inconsistent_records),
-            "fixed_count": fixed_count,
-            "stale_count": len(stale_corrections),
-            "stale_fixed_count": stale_fixed_count
+            "message": f"已处理 {processed_count} 篇滞留的作文",
+            "processed_count": processed_count
         }
-    except Exception as e:
-        logger.exception(f"状态检查和修复过程出错: {str(e)}")
-        return {"status": "error", "error": str(e)}
-
-def fix_empty_correction_results():
-    """
-    查找并修复空的批改结果记录，这些记录是由于API调用错误导致的
-    注意：此函数会排除标题包含"测试"或"test"的作文
-    
-    Returns:
-        dict: 包含处理结果的字典，如找到的记录数、修复的记录数等
-    """
-    logger.info("开始查找并修复空的批改结果记录")
-    settings = get_settings()
-    db_path = get_db_path()
-    
-    # 跟踪统计信息
-    stats = {
-        "total": 0,
-        "fixed": 0,
-        "failed": 0,
-        "skipped": 0,
-        "timestamp": datetime.datetime.now().isoformat()
-    }
-    
-    try:
-        # 连接数据库
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        # 查询所有已完成但结果为空的批改记录
-        # 排除标题包含"测试"或"test"的作文
-        query = """
-        SELECT c.id, c.essay_id, c.score, c.comments, c.error_analysis, c.improvement_suggestions,
-               e.title, e.content
-        FROM corrections c
-        JOIN essays e ON c.essay_id = e.id
-        WHERE c.status = 'completed' 
-          AND (c.results IS NULL OR c.results = '' OR c.results = '{}')
-          AND c.is_deleted = 0
-          AND e.title NOT LIKE '%测试%'
-          AND e.title NOT LIKE '%test%'
-        """
-        
-        cursor.execute(query)
-        empty_results = cursor.fetchall()
-        stats["total"] = len(empty_results)
-        
-        logger.info(f"找到 {stats['total']} 条空的批改结果记录")
-        
-        for record in empty_results:
-            try:
-                # 获取记录信息
-                correction_id = record['id']
-                essay_id = record['essay_id']
-                essay_title = record['title']
-                essay_content = record['content']
-                
-                logger.info(f"处理批改记录 ID={correction_id}，作文ID={essay_id}，标题='{essay_title}'")
-                
-                # 检查是否真的需要修复
-                if not record['score']:
-                    logger.warning(f"批改记录 ID={correction_id} 缺少分数，需要生成模拟结果")
-                
-                # 生成模拟批改结果
-                mock_result = {
-                    "total_score": record['score'] if record['score'] else 80,
-                    "scores": {
-                        "content": 80,
-                        "language": 80,
-                        "structure": 80,
-                        "writing": 80
-                    },
-                    "evaluation": record['comments'] if record['comments'] else "这篇作文整体表现良好。",
-                    "error_analysis": record['error_analysis'] if record['error_analysis'] else "未检测到明显错误。",
-                    "improvement_suggestions": record['improvement_suggestions'] if record['improvement_suggestions'] else "建议进一步丰富内容，提升语言表达的准确性。"
-                }
-                
-                # 更新数据库
-                update_query = """
-                UPDATE corrections
-                SET results = ?, updated_at = ?
-                WHERE id = ?
-                """
-                cursor.execute(update_query, (
-                    json.dumps(mock_result, ensure_ascii=False),
-                    datetime.datetime.now().isoformat(),
-                    correction_id
-                ))
-                
-                stats["fixed"] += 1
-                logger.info(f"成功修复批改记录 ID={correction_id}")
-                
-            except Exception as e:
-                stats["failed"] += 1
-                logger.error(f"修复批改记录 ID={record['id']} 时出错: {str(e)}")
-                logger.exception(e)
-        
-        # 提交更改
-        conn.commit()
-        logger.info(f"完成空批改结果修复。已修复: {stats['fixed']}, 失败: {stats['failed']}, 跳过: {stats['skipped']}")
         
     except Exception as e:
-        logger.error(f"执行空批改结果修复任务时出错: {str(e)}")
-        logger.exception(e)
-        stats["error"] = str(e)
-    finally:
-        if 'conn' in locals() and conn:
-            conn.close()
-    
-    return stats
-
-def verify_database_integrity():
-    """
-    验证数据库完整性并修复问题
-    
-    检查并修复以下问题:
-    1. 不一致的文章和批改状态
-    2. 孤立的批改记录
-    3. 缺失的批改结果
-    
-    返回:
-        dict: 检查和修复结果的统计信息
-    """
-    results = {
-        'issues_found': 0,
-        'issues_fixed': 0,
-        'details': {
-            'inconsistent_statuses': 0,
-            'fixed_statuses': 0,
-            'orphaned_corrections': 0,
-            'fixed_orphans': 0,
-            'empty_results': 0,
-            'fixed_results': 0
-        }
-    }
-    
-    try:
-        # 1. 检查不一致的状态
-        inconsistent_records = _check_inconsistent_statuses()
-        results['details']['inconsistent_statuses'] = len(inconsistent_records)
-        
-        if inconsistent_records:
-            fixed_count = _fix_inconsistent_statuses(inconsistent_records)
-            results['details']['fixed_statuses'] = fixed_count
-            logger.info(f"已修复 {fixed_count} 条不一致的状态记录")
-        
-        # 2. 检查孤立的批改记录
-        orphaned_records = _check_orphaned_corrections()
-        results['details']['orphaned_corrections'] = len(orphaned_records)
-        
-        if orphaned_records:
-            fixed_count = _fix_orphaned_corrections(orphaned_records)
-            results['details']['fixed_orphans'] = fixed_count
-            logger.info(f"已处理 {fixed_count} 条孤立的批改记录")
-        
-        # 3. 检查缺失的批改结果
-        empty_results = _check_empty_results()
-        results['details']['empty_results'] = len(empty_results)
-        
-        if empty_results:
-            fixed_count = _fix_empty_results(empty_results)
-            results['details']['fixed_results'] = fixed_count
-            logger.info(f"已修复 {fixed_count} 条缺失的批改结果")
-        
-        # 计算总问题数和修复数
-        results['issues_found'] = sum([
-            results['details']['inconsistent_statuses'],
-            results['details']['orphaned_corrections'],
-            results['details']['empty_results']
-        ])
-        
-        results['issues_fixed'] = sum([
-            results['details']['fixed_statuses'],
-            results['details']['fixed_orphans'],
-            results['details']['fixed_results']
-        ])
-        
-        return results
-    
-    except Exception as e:
-        logger.error(f"数据库完整性验证失败: {str(e)}")
+        logger.error(f"处理作文状态检查失败: {str(e)}")
         logger.error(traceback.format_exc())
+        
+        # 更新任务状态
+        update_task_status(task_id, "failed", error=str(e))
+        
         return {
-            'issues_found': -1,
-            'issues_fixed': 0,
-            'error': str(e)
+            "status": "error",
+            "message": str(e),
+            "processed_count": 0
         }
-
-def _check_inconsistent_statuses():
-    """
-    检查不一致的文章和批改状态
-    
-    返回:
-        list: 不一致的记录列表，每个记录包含essay_id和correction_id
-    """
-    inconsistent_records = []
-    
-    try:
-        # 查找文章状态为已完成但对应的批改未完成的记录
-        query = """
-        SELECT e.id as essay_id, c.id as correction_id 
-        FROM essays e 
-        JOIN corrections c ON e.id = c.essay_id 
-        WHERE e.status = 'completed' 
-        AND c.status != 'completed' 
-        AND e.is_deleted = 0 
-        AND c.is_deleted = 0
-        """
-        
-        result = db.session.execute(text(query))
-        for row in result:
-            inconsistent_records.append({
-                'essay_id': row.essay_id,
-                'correction_id': row.correction_id,
-                'issue_type': 'essay_completed_correction_pending'
-            })
-        
-        # 查找批改状态为已完成但文章未完成的记录
-        query = """
-        SELECT e.id as essay_id, c.id as correction_id 
-        FROM essays e 
-        JOIN corrections c ON e.id = c.essay_id 
-        WHERE e.status != 'completed' 
-        AND c.status = 'completed' 
-        AND e.is_deleted = 0 
-        AND c.is_deleted = 0
-        """
-        
-        result = db.session.execute(text(query))
-        for row in result:
-            inconsistent_records.append({
-                'essay_id': row.essay_id,
-                'correction_id': row.correction_id,
-                'issue_type': 'correction_completed_essay_pending'
-            })
-        
-        return inconsistent_records
-    
-    except Exception as e:
-        logger.error(f"检查不一致状态失败: {str(e)}")
-        logger.error(traceback.format_exc())
-        return []
-
-def _fix_inconsistent_statuses(inconsistent_records):
-    """
-    修复不一致的文章和批改状态
-    
-    参数:
-        inconsistent_records (list): 不一致的记录列表
-    
-    返回:
-        int: 修复的记录数量
-    """
-    fixed_count = 0
-    
-    for record in inconsistent_records:
-        try:
-            essay_id = record['essay_id']
-            correction_id = record['correction_id']
-            issue_type = record['issue_type']
-            
-            if issue_type == 'essay_completed_correction_pending':
-                # 文章完成但批改未完成，将批改标记为完成
-                correction = Correction.query.get(correction_id)
-                if correction:
-                    correction.status = 'completed'
-                    db.session.commit()
-                    logger.info(f"已将批改ID={correction_id}的状态更新为completed")
-                    fixed_count += 1
-            
-            elif issue_type == 'correction_completed_essay_pending':
-                # 批改完成但文章未完成，将文章标记为完成
-                essay = Essay.query.get(essay_id)
-                correction = Correction.query.get(correction_id)
-                if essay and correction:
-                    essay.status = 'completed'
-                    
-                    # 如果批改有结果，同步到文章
-                    if correction.results:
-                        try:
-                            # 同步评分和评语
-                            if hasattr(correction, 'score') and correction.score:
-                                essay.score = correction.score
-                            
-                            if hasattr(correction, 'comments') and correction.comments:
-                                essay.comments = correction.comments
-                                
-                            if hasattr(correction, 'error_analysis') and correction.error_analysis:
-                                essay.error_analysis = correction.error_analysis
-                                
-                            if hasattr(correction, 'improvement_suggestions') and correction.improvement_suggestions:
-                                essay.improvement_suggestions = correction.improvement_suggestions
-                        except Exception as e:
-                            logger.error(f"同步批改结果到文章时出错 (essay_id={essay_id}): {str(e)}")
-                    
-                    db.session.commit()
-                    logger.info(f"已将文章ID={essay_id}的状态更新为completed")
-                    fixed_count += 1
-        
-        except Exception as e:
-            logger.error(f"修复不一致状态失败 (essay_id={record.get('essay_id')}): {str(e)}")
-            logger.error(traceback.format_exc())
-            db.session.rollback()
-    
-    return fixed_count
-
-def _check_orphaned_corrections():
-    """
-    检查孤立的批改记录（没有对应文章的批改）
-    
-    返回:
-        list: 孤立的批改记录ID列表
-    """
-    orphaned_records = []
-    
-    try:
-        query = """
-        SELECT c.id as correction_id 
-        FROM corrections c 
-        LEFT JOIN essays e ON c.essay_id = e.id 
-        WHERE e.id IS NULL 
-        AND c.is_deleted = 0
-        """
-        
-        result = db.session.execute(text(query))
-        for row in result:
-            orphaned_records.append(row.correction_id)
-        
-        return orphaned_records
-    
-    except Exception as e:
-        logger.error(f"检查孤立批改记录失败: {str(e)}")
-        logger.error(traceback.format_exc())
-        return []
-
-def _fix_orphaned_corrections(orphaned_records):
-    """
-    修复孤立的批改记录（标记为已删除）
-    
-    参数:
-        orphaned_records (list): 孤立的批改记录ID列表
-    
-    返回:
-        int: 修复的记录数量
-    """
-    fixed_count = 0
-    
-    for correction_id in orphaned_records:
-        try:
-            correction = Correction.query.get(correction_id)
-            if correction:
-                correction.is_deleted = True
-                db.session.commit()
-                logger.info(f"已将孤立的批改记录ID={correction_id}标记为已删除")
-                fixed_count += 1
-        
-        except Exception as e:
-            logger.error(f"修复孤立批改记录失败 (correction_id={correction_id}): {str(e)}")
-            logger.error(traceback.format_exc())
-            db.session.rollback()
-    
-    return fixed_count
-
-def _check_empty_results():
-    """
-    检查缺失批改结果的记录
-    
-    返回:
-        list: 缺失批改结果的记录列表，每个记录包含correction_id和essay_id
-    """
-    empty_results = []
-    
-    try:
-        query = """
-        SELECT c.id as correction_id, c.essay_id 
-        FROM corrections c 
-        WHERE (c.results IS NULL OR c.results = '' OR c.results = '{}') 
-        AND c.status = 'completed' 
-        AND c.is_deleted = 0
-        """
-        
-        result = db.session.execute(text(query))
-        for row in result:
-            empty_results.append({
-                'correction_id': row.correction_id,
-                'essay_id': row.essay_id
-            })
-        
-        return empty_results
-    
-    except Exception as e:
-        logger.error(f"检查缺失批改结果失败: {str(e)}")
-        logger.error(traceback.format_exc())
-        return []
-
-def _fix_empty_results(empty_results):
-    """
-    修复缺失的批改结果（生成模拟结果）
-    
-    参数:
-        empty_results (list): 缺失批改结果的记录列表
-    
-    返回:
-        int: 修复的记录数量
-    """
-    fixed_count = 0
-    
-    for record in empty_results:
-        try:
-            correction_id = record['correction_id']
-            essay_id = record['essay_id']
-            
-            correction = Correction.query.get(correction_id)
-            essay = Essay.query.get(essay_id)
-            
-            if correction and essay:
-                # 根据文章内容生成模拟的批改结果
-                mock_result = create_mock_result(essay.content, correction_id)
-                
-                if mock_result:
-                    correction.results = mock_result
-                    
-                    # 提取并更新其他字段
-                    if 'score' in mock_result and mock_result['score']:
-                        correction.score = mock_result['score']
-                    
-                    if 'comments' in mock_result and mock_result['comments']:
-                        correction.comments = mock_result['comments']
-                    
-                    if 'error_analysis' in mock_result and mock_result['error_analysis']:
-                        correction.error_analysis = mock_result['error_analysis']
-                    
-                    if 'improvement_suggestions' in mock_result and mock_result['improvement_suggestions']:
-                        correction.improvement_suggestions = mock_result['improvement_suggestions']
-                    
-                    db.session.commit()
-                    
-                    # 确保相应的文章记录也得到更新
-                    essay.status = 'completed'
-                    essay.score = correction.score
-                    essay.comments = correction.comments
-                    essay.error_analysis = correction.error_analysis
-                    essay.improvement_suggestions = correction.improvement_suggestions
-                    db.session.commit()
-                    
-                    logger.info(f"已为批改ID={correction_id}(文章ID={essay_id})生成模拟批改结果")
-                    fixed_count += 1
-        
-        except Exception as e:
-            logger.error(f"修复缺失批改结果失败 (correction_id={record.get('correction_id')}): {str(e)}")
-            logger.error(traceback.format_exc())
-            db.session.rollback()
-    
-    return fixed_count
 
 def create_mock_deepseek_result(content, score=None):
     """
@@ -964,15 +513,18 @@ def create_mock_deepseek_result(content, score=None):
     return mock_result 
 
 @celery_app.task(
-    name='app.tasks.maintenance_tasks.reset_stuck_essays',
+    name='app.tasks.maintenance_tasks.check_correction_system_health',
     bind=True,
     max_retries=2,
     acks_late=True,
     queue='periodic'
 )
-def reset_stuck_essays(self, max_stuck_time_minutes=30):
+def check_correction_system_health(self, max_stuck_time_minutes=30):
     """
-    重置卡在处理中状态的作文
+    全面检查批改系统健康状况，自动修复识别到的问题
+    
+    该任务会检查所有可能卡住的作文状态（包括各种临时状态如CORRECTING、UPLOADING等），
+    并根据不同情况采取修复措施，同时记录详细日志以便后续分析。
     
     Args:
         self: Celery任务实例
@@ -982,14 +534,14 @@ def reset_stuck_essays(self, max_stuck_time_minutes=30):
         dict: 处理结果
     """
     task_id = self.request.id
-    logger.info(f"[{task_id}] 开始重置卡住的作文任务...")
+    logger.info(f"[{task_id}] 开始检查批改系统健康状况...")
     
     # 记录开始的任务状态
     try:
         if 'TaskStatus' in globals():
             task_status = TaskStatus.create_from_task(
                 task_id=task_id,
-                task_name='reset_stuck_essays',
+                task_name='check_correction_system_health',
                 args=f"[{max_stuck_time_minutes}]",
                 worker_id=self.request.hostname
             )
@@ -999,10 +551,10 @@ def reset_stuck_essays(self, max_stuck_time_minutes=30):
     
     try:
         # 导入必要的库
-        import traceback
         from datetime import datetime, timedelta
         from flask import has_app_context, current_app
         from app import create_app
+        from celery.result import AsyncResult
         
         # 检查应用上下文
         app = None
@@ -1018,51 +570,153 @@ def reset_stuck_essays(self, max_stuck_time_minutes=30):
             logger.info("检测到现有应用上下文，继续使用当前上下文")
             app = current_app
         
+        # 初始化CorrectionService
+        from app.core.correction.correction_service import CorrectionService
+        correction_service = CorrectionService()
+        
         try:
             # 计算最长卡住时间点
             threshold_time = datetime.utcnow() - timedelta(minutes=max_stuck_time_minutes)
             
-            # 查找卡住的作文
-            from app.models.essay import Essay, EssayStatus
+            # 记录开始检查
+            logger.info(f"[{task_id}] 检查卡住的作文 (阈值: {max_stuck_time_minutes}分钟)")
             
-            # 查找所有处于CORRECTING状态，且更新时间超过阈值的作文
-            stuck_essays = Essay.query.filter(
+            # 1. 检查"CORRECTING"状态卡住的作文
+            stuck_correcting_essays = Essay.query.filter(
                 Essay.status == EssayStatus.CORRECTING.value,
-                Essay.updated_at < threshold_time
+                Essay.updated_at < threshold_time,
+                Essay.is_deleted == False
             ).all()
             
-            if not stuck_essays:
-                logger.info(f"[{task_id}] 没有找到卡住的作文")
-                result = {"reset_count": 0}
-                
-                if 'task_status' in locals():
-                    task_status.mark_as_success(result=result)
-                
-                return result
+            # 2. 检查"PENDING"状态长时间未处理的作文
+            long_pending_threshold = datetime.utcnow() - timedelta(hours=2)
+            stuck_pending_essays = Essay.query.filter(
+                Essay.status == EssayStatus.PENDING.value,
+                Essay.updated_at < long_pending_threshold,
+                Essay.is_deleted == False
+            ).all()
             
-            # 重置作文状态
-            reset_count = 0
-            for essay in stuck_essays:
+            # 结果统计
+            results = {
+                "correcting_reset_count": 0,
+                "correcting_resubmit_count": 0,
+                "pending_resubmit_count": 0,
+                "failed_count": 0,
+                "task_cancelled_count": 0,
+                "errors": []
+            }
+            
+            # 处理"CORRECTING"状态卡住的作文
+            for essay in stuck_correcting_essays:
                 try:
-                    with db.session.begin():
-                        stuck_time = datetime.utcnow() - essay.updated_at
-                        logger.info(f"[{task_id}] 重置作文 ID: {essay.id}, 原状态: {essay.status}, 卡住时间: {stuck_time}")
-                        essay.status = EssayStatus.PENDING.value
-                        essay.error_message = f"系统自动重置卡住的作文状态 (卡住{stuck_time})"
-                        reset_count += 1
+                    stuck_time = datetime.utcnow() - essay.updated_at
+                    logger.info(f"[{task_id}] 处理卡住的作文: ID={essay.id}, 状态={essay.status}, 卡住时间={stuck_time}")
+                    
+                    # 获取关联的批改记录
+                    correction = Correction.query.filter_by(essay_id=essay.id).first()
+                    
+                    # 检查是否有任务ID
+                    if correction and correction.task_id:
+                        task_result = AsyncResult(correction.task_id)
+                        task_state = task_result.state
+                        
+                        if task_state in ["PENDING", "STARTED", "RECEIVED"]:
+                            logger.info(f"[{task_id}] 任务 {correction.task_id} 状态为 {task_state}，尝试撤销")
+                            
+                            # 尝试撤销任务
+                            from celery.task.control import revoke
+                            revoke(correction.task_id, terminate=True)
+                            results["task_cancelled_count"] += 1
+                            
+                            # 重置状态
+                            correction_service.transition_essay_state(
+                                essay.id,
+                                EssayStatus.CORRECTING.value,
+                                EssayStatus.PENDING.value,
+                                f"系统自动重置卡住的作文状态 (卡住{stuck_time})"
+                            )
+                            results["correcting_reset_count"] += 1
+                        
+                        elif task_state in ["FAILURE", "REVOKED"]:
+                            logger.info(f"[{task_id}] 任务 {correction.task_id} 状态为 {task_state}，标记为失败")
+                            
+                            # 标记为失败
+                            correction_service.transition_essay_state(
+                                essay.id,
+                                EssayStatus.CORRECTING.value,
+                                EssayStatus.FAILED.value,
+                                f"批改任务失败或被撤销 (状态: {task_state})"
+                            )
+                            results["failed_count"] += 1
+                            
+                        elif task_state == "SUCCESS":
+                            logger.warning(f"[{task_id}] 任务 {correction.task_id} 状态为SUCCESS但作文状态仍为CORRECTING，标记为完成")
+                            
+                            # 标记为完成
+                            correction_service.transition_essay_state(
+                                essay.id,
+                                EssayStatus.CORRECTING.value,
+                                EssayStatus.COMPLETED.value
+                            )
+                    else:
+                        # 没有任务ID或批改记录，重置状态
+                        logger.info(f"[{task_id}] 作文 {essay.id} 没有有效的任务ID，重置状态")
+                        
+                        correction_service.transition_essay_state(
+                            essay.id,
+                            EssayStatus.CORRECTING.value,
+                            EssayStatus.PENDING.value,
+                            f"系统自动重置卡住的作文状态 (卡住{stuck_time})"
+                        )
+                        results["correcting_reset_count"] += 1
+                    
                 except Exception as e:
-                    logger.error(f"[{task_id}] 重置作文 {essay.id} 状态时出错: {str(e)}")
+                    logger.error(f"[{task_id}] 处理卡住的作文 {essay.id} 时出错: {str(e)}")
                     logger.error(traceback.format_exc())
+                    results["errors"].append(f"处理作文{essay.id}错误: {str(e)}")
             
-            db.session.commit()
-            logger.info(f"[{task_id}] 成功重置 {reset_count} 个卡住的作文")
+            # 处理"PENDING"状态长时间未处理的作文
+            for essay in stuck_pending_essays:
+                try:
+                    pending_time = datetime.utcnow() - essay.updated_at
+                    logger.info(f"[{task_id}] 处理长时间PENDING的作文: ID={essay.id}, 状态={essay.status}, 未处理时间={pending_time}")
+                    
+                    # 获取关联的批改记录
+                    correction = Correction.query.filter_by(essay_id=essay.id).first()
+                    
+                    # 如果没有批改记录或任务ID，尝试重新提交
+                    if not correction or not correction.task_id:
+                        # 重新提交批改任务
+                        from app.tasks.correction_tasks import process_essay_correction
+                        
+                        try:
+                            # 提交新任务
+                            new_task = process_essay_correction.apply_async(args=[essay.id], queue='correction')
+                            logger.info(f"[{task_id}] 重新提交作文批改任务: {essay.id}, 新任务ID: {new_task.id}")
+                            
+                            # 更新批改记录的任务ID
+                            if correction:
+                                correction.task_id = new_task.id
+                                db.session.commit()
+                            
+                            results["pending_resubmit_count"] += 1
+                        except Exception as task_err:
+                            logger.error(f"[{task_id}] 重新提交作文 {essay.id} 批改任务失败: {str(task_err)}")
+                            results["errors"].append(f"重新提交任务{essay.id}错误: {str(task_err)}")
+                    
+                except Exception as e:
+                    logger.error(f"[{task_id}] 处理长时间PENDING的作文 {essay.id} 时出错: {str(e)}")
+                    logger.error(traceback.format_exc())
+                    results["errors"].append(f"处理作文{essay.id}错误: {str(e)}")
             
-            result = {"reset_count": reset_count}
+            # 统计结果
+            total_processed = results["correcting_reset_count"] + results["pending_resubmit_count"] + results["failed_count"]
+            logger.info(f"[{task_id}] 批改系统健康检查完成，共处理 {total_processed} 个问题作文")
             
             if 'task_status' in locals():
-                task_status.mark_as_success(result=result)
+                task_status.mark_as_success(result=results)
                 
-            return result
+            return results
             
         finally:
             # 如果创建了应用上下文，确保弹出它
@@ -1074,7 +728,7 @@ def reset_stuck_essays(self, max_stuck_time_minutes=30):
                     logger.warning(f"弹出应用上下文时出错: {str(ex)}")
     
     except Exception as e:
-        error_msg = f"重置卡住作文任务失败: {str(e)}"
+        error_msg = f"批改系统健康检查失败: {str(e)}"
         logger.error(error_msg)
         logger.error(traceback.format_exc())
         
@@ -1083,7 +737,7 @@ def reset_stuck_essays(self, max_stuck_time_minutes=30):
         
         # 尝试重试
         if self.request.retries < self.max_retries:
-            logger.info(f"[{task_id}] 将在 60 秒后重试重置卡住作文任务")
+            logger.info(f"[{task_id}] 将在 60 秒后重试批改系统健康检查")
             self.retry(exc=e, countdown=60)
             
         return {"status": "error", "message": error_msg} 

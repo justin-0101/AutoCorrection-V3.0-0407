@@ -1,0 +1,85 @@
+# config/field_mappings.yaml
+# 定义AI响应字段到系统内部标准字段的映射规则
+
+# 核心字段定义
+core_fields:
+  scores:
+    - total_score
+    - dimensions
+  analyses:
+    - overall_comment
+    - improvement_suggestions
+    - error_corrections
+
+# 提供商字段映射规则
+providers:
+  # DeepSeek API的字段映射
+  deepseek:
+    scores:
+      total_score: ["总分", "总评分", "total_score", "score", "totalScore"]
+      dimensions:
+        content: ["内容分", "内容", "content", "content_score"]
+        language: ["语言分", "语言", "language", "language_score"]
+        structure: ["结构分", "结构", "structure", "structure_score"]
+        writing: ["书写分", "格式", "writing", "format", "writing_score"]
+    analyses:
+      overall_comment: ["总体评价", "总评", "overall_comment", "overall", "comment", "evaluation"]
+      improvement_suggestions: ["改进建议", "建议", "suggestions", "improvement"]
+      dimension_comments:
+        content: ["内容分析", "内容评价", "content_analysis"]
+        language: ["语言分析", "语言评价", "language_analysis"]
+        structure: ["结构分析", "结构评价", "structure_analysis"]
+        writing: ["书写分析", "格式分析", "writing_analysis", "format_analysis"]
+      error_corrections: ["错误修正", "错误", "errors", "corrections", "typo_analysis"]
+    metadata:
+      model_version: ["model_version", "模型版本"]
+      processing_time: ["processing_time", "处理时间"]
+
+  # DashScope API的字段映射
+  dashscope:
+    scores:
+      total_score: ["score", "总分", "total"]
+      dimensions:
+        content: ["content_score", "内容得分"]
+        language: ["language_score", "语言得分"]
+        structure: ["structure_score", "结构得分"]
+        writing: ["format_score", "格式得分"]
+    analyses:
+      overall_comment: ["overall_evaluation", "总体评价"]
+      improvement_suggestions: ["improvement_suggestions", "建议"]
+      dimension_comments:
+        content: ["content_evaluation", "内容评价"]
+        language: ["language_evaluation", "语言评价"]
+        structure: ["structure_evaluation", "结构评价"]
+        writing: ["format_evaluation", "格式评价"]
+      error_corrections: ["error_analysis", "错误分析"]
+    metadata:
+      model_version: ["model_version", "模型版本"]
+      request_id: ["request_id", "请求ID"]
+
+  # OpenAI API的字段映射
+  openai:
+    scores:
+      total_score: ["total_score", "score", "overall_score"]
+      dimensions:
+        content: ["content_score"]
+        language: ["language_score"]
+        structure: ["structure_score"]
+        writing: ["writing_score", "mechanics_score"]
+    analyses:
+      overall_comment: ["overall_feedback", "summary", "evaluation"]
+      improvement_suggestions: ["suggestions", "improvement_points"]
+      dimension_comments:
+        content: ["content_feedback"]
+        language: ["language_feedback"]
+        structure: ["structure_feedback"]
+        writing: ["writing_feedback", "mechanics_feedback"]
+      error_corrections: ["corrections", "error_analysis", "grammar_corrections"]
+    metadata:
+      model: ["model"]
+      completion_tokens: ["completion_tokens"]
+      prompt_tokens: ["prompt_tokens"]
+      total_tokens: ["total_tokens"]
+
+# 注意：这里定义的是可能的AI响应字段名到我们系统内部标准字段名的映射。
+# 在代码中处理时，我们会查找列表中的任何一个名称，并将其值赋给对应的标准字段名（如 total_score）。 

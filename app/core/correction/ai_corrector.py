@@ -130,18 +130,57 @@ class AICorrectionService:
         Returns:
             bool: 是否有效
         """
-        # 检查是否有错误信息
-        if isinstance(result, dict) and "error" in result:
+        # 检查结果是否为字典
+        if not isinstance(result, dict):
+            logger.error(f"结果不是字典: {type(result)}")
             return False
             
-        # 检查必要字段
-        required_fields = ["总得分", "分项得分", "总体评价"]
-        for field in required_fields:
-            if field not in result:
-                return False
-                
-        # 检查分数是否在合理范围内
-        if not isinstance(result.get("总得分"), (int, float)) or result.get("总得分") < 0 or result.get("总得分") > 100:
+        # 检查状态和错误
+        if "status" in result and result["status"] == "error":
+            logger.error(f"结果状态为错误: {result.get('message', '未知错误')}")
+            return False
+            
+        # 获取result数据，可能在result字段内
+        result_data = result
+        if "result" in result and isinstance(result["result"], dict):
+            result_data = result["result"]
+            
+        # 检查是否有错误信息
+        if "error" in result_data:
+            logger.error(f"结果包含错误: {result_data['error']}")
+            return False
+            
+        # 检查总分是否存在（支持中文或英文字段）
+        has_score = False
+        
+        # 检查总分字段（支持多种可能的字段名）
+        if "total_score" in result_data and isinstance(result_data["total_score"], (int, float)) and result_data["total_score"] > 0:
+            has_score = True
+            logger.debug(f"发现有效的英文总分: {result_data['total_score']}")
+        
+        if "总得分" in result_data and isinstance(result_data["总得分"], (int, float)) and result_data["总得分"] > 0:
+            has_score = True
+            logger.debug(f"发现有效的中文总分: {result_data['总得分']}")
+            
+        if not has_score:
+            logger.error("结果缺少有效的总分")
+            return False
+            
+        # 检查是否有至少一个维度分数
+        has_dimension = False
+        
+        # 检查英文维度分数
+        if "dimension_scores" in result_data and isinstance(result_data["dimension_scores"], dict) and len(result_data["dimension_scores"]) > 0:
+            has_dimension = True
+            logger.debug(f"发现有效的英文维度分数: {list(result_data['dimension_scores'].keys())}")
+            
+        # 检查中文维度分数
+        if "分项得分" in result_data and isinstance(result_data["分项得分"], dict) and len(result_data["分项得分"]) > 0:
+            has_dimension = True
+            logger.debug(f"发现有效的中文维度分数: {list(result_data['分项得分'].keys())}")
+            
+        if not has_dimension:
+            logger.error("结果缺少有效的维度分数")
             return False
             
         return True

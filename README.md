@@ -47,7 +47,7 @@
 ## 系统要求
 
 - Python 3.8+
-- Redis 6.0+
+- Redis 6.0+（Windows环境推荐作为系统服务运行）
 - Nginx 1.20+（生产环境）
 - CentOS Stream 9（推荐）或其他Linux发行版/Windows
 - 4GB+ RAM
@@ -84,21 +84,37 @@ flask init-db
 ### 5. 启动服务
 
 #### Windows环境
-使用已提供的启动脚本：
+使用根目录中提供的批处理文件：
 ```bash
-scripts\startup\start-services.bat
+.\start.bat
 ```
 
 这将启动所有必要的服务：
-- Redis服务器检查
-- 数据库索引和触发器检查
+- Celery工作进程（在单独的命令窗口中）
 - Flask Web应用
-- Celery工作进程
+
+> **注意**：此启动脚本假定Redis已作为Windows系统服务运行。如果您尚未设置Redis系统服务，请先安装并启动Redis服务。
+
+#### 手动启动（如果批处理文件不工作）
+也可以分别启动各个组件：
+```bash
+# 启动Celery工作进程
+python -m celery -A app.tasks:celery worker --pool=solo --loglevel=info -E --concurrency=1
+
+# 在另一个窗口启动Flask应用
+python wsgi.py
+```
 
 #### Linux环境
 ```bash
-chmod +x scripts/startup/start-services.sh  # 首次运行前添加执行权限
-./scripts/startup/start-services.sh         # 启动所有服务
+# 启动Redis（如果尚未作为服务运行）
+redis-server &
+
+# 启动Celery工作进程
+celery -A app.tasks:celery worker --loglevel=info -E --concurrency=1 &
+
+# 启动Flask应用
+python wsgi.py
 ```
 
 服务启动后，访问 http://localhost:5000 开始使用系统。
@@ -295,8 +311,9 @@ AutoCorrection-V3.0/
 1. **系统无法启动**
    - 检查环境变量配置
    - 确认数据库是否初始化
-   - 验证Redis服务是否运行
-   - 查看错误日志
+   - 确保Redis作为系统服务运行（Windows）或者手动启动Redis服务
+   - 检查Celery工作进程是否成功启动
+   - 查看错误日志（logs/celery.log和logs/error.log）
 
 2. **评分服务异常**
    - 验证API密钥是否有效

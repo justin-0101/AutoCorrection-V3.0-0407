@@ -199,6 +199,33 @@
                                             <td>{{ results.content_score if results and results.content_score else '0' }}</td>
                                         </tr>
                                         <tr>
+                                            <td class="fw-bold ps-4">作者</td>
+                                            <td>{{ essay.author_name if essay and essay.author_name else '未知' }}</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="fw-bold ps-4">来源类型</td>
+                                            <td>
+                                                {% if essay and essay.source_type %}
+                                                    {% if essay.source_type == 'text' %}文本输入
+                                                    {% elif essay.source_type == 'upload' %}文件上传
+                                                    {% elif essay.source_type == 'paste' %}文本粘贴
+                                                    {% elif essay.source_type == 'api' %}API提交
+                                                    {% else %}{{ essay.source_type }}{% endif %}
+                                                {% else %}未知{% endif %}
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <td class="fw-bold ps-4">批改次数</td>
+                                            <td>{{ essay.correction_count if essay and essay.correction_count is not none else '0' }}</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="fw-bold ps-4">批改时间</td>
+                                            <!-- prettier-ignore -->
+                                            <!-- eslint-disable-next-line -->
+                                            <td>{{ essay.corrected_at_formatted }}</td>
+                                            <!-- eslint-enable -->
+                                        </tr>
+                                        <tr>
                                             <td class="fw-bold ps-4">表达文采得分</td>
                                             <td>{{ results.language_score if results and results.language_score else '0' }}</td>
                                         </tr>

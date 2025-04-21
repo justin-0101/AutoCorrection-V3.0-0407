@@ -242,111 +242,164 @@
                 <i class="bi bi-info-circle"></i> 您还没有提交过作文，点击"新建批改"按钮开始您的第一次批改。
             </div>
             {% else %}
-            <div class="essay-list">
-                {% for essay in essays %}
-                <div class="essay-item">
-                    <div class="row align-items-center">
-                        <div class="col-md-4">
-                            <div class="d-flex align-items-center">
-                                <div class="form-check me-2">
-                                    <input class="form-check-input essay-checkbox" type="checkbox" value="{{ essay.id }}" style="display: none;">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="selectAll">
                                 </div>
-                                <div>
-                                    <h3 class="essay-title">{{ essay.title }}</h3>
-                                    <div class="essay-meta d-flex align-items-center gap-3">
-                                        <span><i class="bi bi-clock me-1"></i>{{ essay.created_at_formatted }}</span>
-                                        {% if essay.status == 'completed' %}
-                                            <span class="status-badge bg-success">批改完成</span>
-                                        {% elif essay.status == 'correcting' %}
-                                            <span class="status-badge bg-info">批改中</span>
-                                        {% elif essay.status == 'pending' %}
-                                            <span class="status-badge bg-warning">等待批改</span>
-                                        {% elif essay.status == 'failed' %}
-                                            <span class="status-badge bg-danger">批改失败</span>
+                            </th>
+                            <th>标题</th>
+                            <th>作者</th>
+                            <th>字数</th>
+                            <th>来源</th>
+                            <th>状态</th>
+                            <th>分数</th>
+                            <th>批改次数</th>
+                            <th>创建时间</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for essay in essays %}
+                        <tr>
+                            <td>
+                                <div class="form-check">
+                                    <input class="form-check-input essay-checkbox" type="checkbox" value="{{ essay.id }}">
+                                </div>
+                            </td>
+                            <td>
+                                <div class="d-flex align-items-center">
+                                    <div class="essay-icon me-2">
+                                        {% if essay.source_type == 'upload' %}
+                                        <i class="bi bi-file-earmark-text"></i>
+                                        {% elif essay.source_type == 'text' %}
+                                        <i class="bi bi-pencil-square"></i>
+                                        {% elif essay.source_type == 'paste' %}
+                                        <i class="bi bi-clipboard"></i>
                                         {% else %}
-                                            <span class="status-badge bg-secondary">{{ essay.status }}</span>
+                                        <i class="bi bi-file-text"></i>
+                                        {% endif %}
+                                    </div>
+                                    <div>
+                                        {% if essay.status == 'completed' %}
+                                        <a href="{{ url_for('main.results', essay_id=essay.id) }}" class="essay-title">
+                                            {{ essay.title or '无标题' }}
+                                        </a>
+                                        {% else %}
+                                        <span class="essay-title">{{ essay.title or '无标题' }}</span>
                                         {% endif %}
                                     </div>
                                 </div>
-                            </div>
-                        </div>
-                        
-                        <div class="col-md-6">
-                            {% if essay.status == 'completed' %}
-                            <div class="score-display">
-                                <div>
-                                    <div class="total-score">{{ essay.total_score }}</div>
-                                    <small class="text-muted">总分</small>
-                                </div>
-                                <div class="score-breakdown">
-                                    <div class="score-item">
-                                        <div class="value">{{ essay.content_score }}</div>
-                                        <div class="label">内容主旨</div>
-                                    </div>
-                                    <div class="score-item">
-                                        <div class="value">{{ essay.language_score }}</div>
-                                        <div class="label">语言文采</div>
-                                    </div>
-                                    <div class="score-item">
-                                        <div class="value">{{ essay.structure_score }}</div>
-                                        <div class="label">文章结构</div>
-                                    </div>
-                                    <div class="score-item">
-                                        <div class="value">{{ essay.writing_score }}</div>
-                                        <div class="label">文面书写</div>
-                                    </div>
-                                </div>
-                            </div>
-                            {% endif %}
-                        </div>
-                        
-                        <div class="col-md-2">
-                            <div class="actions d-flex justify-content-end gap-2">
-                                {% if essay.status == 'completed' %}
-                                    <a href="{{ url_for('main.results', essay_id=essay.id) }}" 
-                                       class="btn btn-primary">
-                                        <i class="bi bi-eye"></i> 查看详情
-                                    </a>
-                                {% elif essay.status == 'failed' %}
-                                    <a href="{{ url_for('main.retry_correction', essay_id=essay.id) }}" 
-                                       class="btn btn-warning">
-                                        <i class="bi bi-arrow-clockwise"></i> 重新批改
-                                    </a>
+                            </td>
+                            <td>{{ essay.author_name or '未知' }}</td>
+                            <td>{{ essay.word_count or 0 }}</td>
+                            <td>
+                                {% if essay.source_type == 'text' %}
+                                <span class="badge bg-success">文本输入</span>
+                                {% elif essay.source_type == 'upload' %}
+                                <span class="badge bg-primary">文件上传</span>
+                                {% elif essay.source_type == 'paste' %}
+                                <span class="badge bg-info">文本粘贴</span>
+                                {% elif essay.source_type == 'api' %}
+                                <span class="badge bg-secondary">API</span>
+                                {% else %}
+                                <span class="badge bg-secondary">未知</span>
                                 {% endif %}
-                                <button type="button" 
-                                        class="btn btn-outline-danger" 
-                                        data-bs-toggle="modal" 
-                                        data-bs-target="#deleteModal{{ essay.id }}">
-                                    <i class="bi bi-trash"></i>
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                            </td>
+                            <td>
+                                {% if essay.status == 'completed' %}
+                                <span class="status-badge bg-success">批改完成</span>
+                                {% elif essay.status == 'correcting' %}
+                                <span class="status-badge bg-info">批改中</span>
+                                {% elif essay.status == 'pending' %}
+                                <span class="status-badge bg-warning">等待批改</span>
+                                {% elif essay.status == 'failed' %}
+                                <span class="status-badge bg-danger">批改失败</span>
+                                {% else %}
+                                <span class="status-badge bg-secondary">{{ essay.status }}</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if essay.status == 'completed' %}
+                                <div class="score-display">
+                                    <div>
+                                        <div class="total-score">{{ essay.total_score }}</div>
+                                        <small class="text-muted">总分</small>
+                                    </div>
+                                    <div class="score-breakdown">
+                                        <div class="score-item">
+                                            <div class="value">{{ essay.content_score }}</div>
+                                            <div class="label">内容主旨</div>
+                                        </div>
+                                        <div class="score-item">
+                                            <div class="value">{{ essay.language_score }}</div>
+                                            <div class="label">语言文采</div>
+                                        </div>
+                                        <div class="score-item">
+                                            <div class="value">{{ essay.structure_score }}</div>
+                                            <div class="label">文章结构</div>
+                                        </div>
+                                        <div class="score-item">
+                                            <div class="value">{{ essay.writing_score }}</div>
+                                            <div class="label">文面书写</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                {% endif %}
+                            </td>
+                            <td>{{ essay.correction_count or 0 }}</td>
+                            <td>{{ essay.created_at_formatted }}</td>
+                            <td>
+                                <div class="actions d-flex justify-content-end gap-2">
+                                    {% if essay.status == 'completed' %}
+                                        <a href="{{ url_for('main.results', essay_id=essay.id) }}" 
+                                           class="btn btn-primary">
+                                            <i class="bi bi-eye"></i> 查看详情
+                                        </a>
+                                    {% elif essay.status == 'failed' %}
+                                        <a href="{{ url_for('main.retry_correction', essay_id=essay.id) }}" 
+                                           class="btn btn-warning">
+                                            <i class="bi bi-arrow-clockwise"></i> 重新批改
+                                        </a>
+                                    {% endif %}
+                                    <button type="button" 
+                                            class="btn btn-outline-danger" 
+                                            data-bs-toggle="modal" 
+                                            data-bs-target="#deleteModal{{ essay.id }}">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
 
-                <!-- 删除确认对话框 -->
-                <div class="modal fade" id="deleteModal{{ essay.id }}" tabindex="-1">
-                    <div class="modal-dialog">
-                        <div class="modal-content">
-                            <div class="modal-header">
-                                <h5 class="modal-title">确认删除</h5>
-                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                            </div>
-                            <div class="modal-body">
-                                <p>您确定要删除这篇作文吗？此操作不可恢复。</p>
-                                <p><strong>作文标题：</strong>{{ essay.title }}</p>
-                            </div>
-                            <div class="modal-footer">
-                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                                <form action="{{ url_for('main.delete_essay', essay_id=essay.id) }}" method="POST" style="display: inline;">
-                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                    <button type="submit" class="btn btn-danger">确认删除</button>
-                                </form>
+                        <!-- 删除确认对话框 -->
+                        <div class="modal fade" id="deleteModal{{ essay.id }}" tabindex="-1">
+                            <div class="modal-dialog">
+                                <div class="modal-content">
+                                    <div class="modal-header">
+                                        <h5 class="modal-title">确认删除</h5>
+                                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                    </div>
+                                    <div class="modal-body">
+                                        <p>您确定要删除这篇作文吗？此操作不可恢复。</p>
+                                        <p><strong>作文标题：</strong>{{ essay.title }}</p>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                                        <form action="{{ url_for('main.delete_essay', essay_id=essay.id) }}" method="POST" style="display: inline;">
+                                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                            <button type="submit" class="btn btn-danger">确认删除</button>
+                                        </form>
+                                    </div>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                </div>
-                {% endfor %}
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
 
             <!-- 分页控件 -->

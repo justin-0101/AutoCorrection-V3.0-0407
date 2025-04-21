@@ -23,8 +23,10 @@ import logging
 import time
 import threading
 import schedule
+import traceback  # 添加traceback模块导入
 from app.config import get_settings
-from app.tasks.maintenance_tasks import fix_empty_correction_results, verify_database_integrity
+# 注释掉不存在的函数导入
+# from app.tasks.maintenance_tasks import fix_empty_correction_results, verify_database_integrity
 from celery.schedules import crontab
 
 # 配置日志
@@ -240,12 +242,13 @@ def run_maintenance_now():
 def setup_periodic_tasks(sender, **kwargs):
     """设置定时任务"""
     # 导入任务
-    from app.tasks.maintenance_tasks import (
-        cleanup_stale_task_statuses, 
-        archive_old_task_statuses,
-        verify_database_integrity,
-        reset_stuck_essays
-    )
+    # 注释掉不存在的函数导入
+    # from app.tasks.maintenance_tasks import (
+    #     cleanup_stale_task_statuses, 
+    #     archive_old_task_statuses,
+    #     verify_database_integrity,
+    #     reset_stuck_essays
+    # )
     
     # 初始数据库完整性检查
     logger.info("执行初始数据库完整性检查...")

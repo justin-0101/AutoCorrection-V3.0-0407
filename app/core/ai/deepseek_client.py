@@ -28,6 +28,7 @@ import pkg_resources
 from app.core.ai.api_client import BaseAPIClient, APIError
 from app.core.ai.api_monitor import log_api_call, log_api_call_async, api_monitor
 from config.ai_config import AI_CONFIG
+from app.utils.field_mapper import FieldMapper
 
 # 检查OpenAI版本
 try:
@@ -46,6 +47,19 @@ try:
     # 判断是否为新版OpenAI SDK (>= 1.0.0)
     is_new_openai_sdk = openai_version.split('.')[0] != '0'
     
+    # 检查版本是否>=1.8.0（支持更多模型的response_format参数）
+    supports_response_format = False
+    try:
+        if is_new_openai_sdk:
+            version_parts = openai_version.split('.')
+            major = int(version_parts[0])
+            minor = int(version_parts[1]) if len(version_parts) > 1 else 0
+            supports_response_format = (major > 1) or (major == 1 and minor >= 8)
+            logging.info(f"OpenAI SDK版本 {openai_version}, 是否支持response_format: {supports_response_format}")
+    except Exception as e:
+        logging.warning(f"无法检查OpenAI SDK版本详情: {str(e)}")
+        supports_response_format = False
+    
     if is_new_openai_sdk:
         from openai import OpenAI
         logging.info(f"使用OpenAI新版SDK: {openai_version}")
@@ -55,6 +69,7 @@ try:
 except ImportError:
     logging.error("未安装OpenAI SDK，请执行 pip install openai")
     is_new_openai_sdk = False
+    supports_response_format = False
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -64,16 +79,31 @@ class DeepseekClient(BaseAPIClient):
     
     def __init__(self, api_key: str = None, base_url: str = None, model: str = None, verify_ssl: bool = True):
         """
-        初始化Deepseek客户端
+        初始化DeepSeek API客户端
         
         Args:
-            api_key: Deepseek API密钥
-            base_url: Deepseek API基础URL
-            model: 使用的模型
+            api_key: API密钥
+            base_url: API基础URL
+            model: 模型名称
             verify_ssl: 是否验证SSL证书
         """
-        self.model = model or AI_CONFIG.get('MODEL', "deepseek-reasoner")
-        super().__init__(api_key, base_url, verify_ssl)
+        # 设置基本属性，确保在调用父类方法前已定义
+        self.model = model or ""  # 确保model一定有值
+        self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
+        self.debug_mode = bool(os.environ.get('DEBUG_MODE', False))
+        
+        # 初始化字段映射器
+        from app.utils.field_mapper import FieldMapper
+        self.field_mapper = FieldMapper()
+        self.logger.info("初始化DeepSeek客户端和字段映射器")
+        
+        # 调用父类初始化方法 - 该方法会调用_load_config_from_env
+        super().__init__(api_key=api_key, base_url=base_url, verify_ssl=verify_ssl)
+        
+        # 在父类初始化之后执行额外的初始化操作
+        # 检查是否使用了不支持JSON输出的模型
+        if self.model and "reasoner" in self.model.lower():
+            logger.warning(f"注意: {self.model} 模型不支持JSON输出格式，这可能会影响批改结果的解析")
         
         # 修正：正确处理API基础路径，确保包含/v1
         self.api_base = self.base_url.rstrip('/')
@@ -93,15 +123,25 @@ class DeepseekClient(BaseAPIClient):
         global is_new_openai_sdk
         try:
             if is_new_openai_sdk:
-                self.openai_client = OpenAI(api_key=self.api_key, base_url=self.api_base)
-                logger.info("已初始化新版OpenAI客户端")
+                # 修改：将verify_ssl参数传递给OpenAI客户端
+                self.openai_client = OpenAI(
+                    api_key=self.api_key,
+                    base_url=self.api_base,
+                    http_client=httpx.Client(verify=self.verify_ssl)
+                )
+                logger.info(f"已初始化新版OpenAI客户端，SSL验证: {self.verify_ssl}")
             else:
                 # 设置OpenAI全局配置
                 openai.api_key = self.api_key
                 openai.api_base = self.api_base
+                # 在旧版SDK中没有直接设置verify_ssl的方法，记录警告
                 logger.info("已设置旧版OpenAI全局配置")
+                if not self.verify_ssl:
+                    logger.warning("旧版OpenAI SDK不支持直接禁用SSL验证")
         except Exception as e:
             logger.error(f"初始化OpenAI客户端失败: {str(e)}")
+            if not self.verify_ssl:
+                logger.error("注意：您尝试禁用SSL验证，但在初始化客户端时仍然失败")
             
         # API调用配置
         self.api_config = {
@@ -119,580 +159,223 @@ class DeepseekClient(BaseAPIClient):
         if self.model not in VALID_MODELS:
             logger.warning(f"可能使用了未知的模型: {self.model}，建议使用: {', '.join(VALID_MODELS)}")
         
-        logger.info(f"Deepseek客户端初始化完成，使用模型: {self.model}")
+        # JSON输出格式支持状态
+        self.supports_json_output = "reasoner" not in self.model.lower()
+        if not self.supports_json_output:
+            logger.warning(f"当前模型 {self.model} 不支持JSON输出格式，这可能会影响批改结果的解析准确性")
+        
+        logger.info(f"DeepSeek客户端初始化完成，使用模型: {self.model}, 支持JSON输出: {self.supports_json_output}")
     
     @property
     def provider_name(self) -> str:
         """提供商名称"""
         return "deepseek"
     
-    def _load_config_from_env(self):
-        """从环境变量和配置加载配置"""
-        # 先从AI_CONFIG加载
-        self.api_key = self.api_key or AI_CONFIG.get('API_KEY', '')
-        self.base_url = self.base_url or AI_CONFIG.get('BASE_URL', '')
-        
-        # 如果还是没有，从环境变量加载
-        self.api_key = self.api_key or os.environ.get("DEEPSEEK_API_KEY", "")
-        self.base_url = self.base_url or os.environ.get("DEEPSEEK_BASE_URL", "")
-        
-        # 只有在没有任何配置的情况下使用默认值
-        # 根据官方文档，正确的默认URL是https://api.deepseek.com
-        if not self.base_url:
-            self.base_url = "https://api.deepseek.com"
-            logger.info(f"使用默认DeepSeek API URL: {self.base_url}")
-        
-        # 从环境变量或配置加载模型
-        config_model = AI_CONFIG.get('MODEL', "")
-        env_model = os.environ.get("DEEPSEEK_MODEL", "")
-        
-        if not self.model:
-            if config_model:
-                logger.info(f"从配置中加载模型: {config_model}")
-                self.model = config_model
-            elif env_model:
-                logger.info(f"从环境变量中加载模型: {env_model}")
-                self.model = env_model
-            else:
-                logger.info(f"使用默认模型: deepseek-reasoner")
-                self.model = "deepseek-reasoner"
-        
-        logger.info(f"DeepSeek API最终配置 - URL: {self.base_url}, 模型: {self.model}")
-    
-    def _clean_json(self, json_str: str) -> str:
+    def safe_parse_json(self, response_text: Union[str, Dict, None]) -> Optional[Dict]:
         """
-        清除JSON字符串中的控制字符和非法字符
+        安全解析JSON响应，处理各种JSON格式问题
         
         Args:
-            json_str: 原始JSON字符串
+            response_text: 可能包含JSON的文本或已是字典的响应
             
         Returns:
-            str: 清洗后的JSON字符串
+            Optional[Dict]: 解析后的JSON对象，解析失败则返回None
         """
-        # 移除控制字符和其他可能导致JSON解析错误的字符
-        return re.sub(r'[\x00-\x1F\x7F]', '', json_str)
-
-    def _clean_json_string(self, json_str: str) -> str:
-        """
-        清理JSON字符串，包括提取代码块中的JSON和去除无关字符
-        
-        Args:
-            json_str: 原始JSON字符串
+        # 检查空响应
+        if not response_text:
+            logger.warning("收到空响应")
+            return None
             
-        Returns:
-            str: 清洗后的JSON字符串
-        """
-        # 先尝试提取代码块中的JSON
-        json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', json_str)
-        if json_match:
-            logger.debug("从代码块中提取JSON")
-            json_str = json_match.group(1)
-        
-        # 移除控制字符和其他可能导致JSON解析错误的字符
-        json_str = re.sub(r'[\x00-\x1F\x7F]', '', json_str)
-        
-        # 尝试找到并截取第一个有效的JSON对象（从第一个{到匹配的最后一个}）
+        # 如果已经是字典，直接返回
+        if isinstance(response_text, dict):
+            return response_text
+            
+        # 清理JSON字符串并尝试解析
         try:
-            start_idx = json_str.find('{')
-            if start_idx >= 0:
-                # 找到平衡的大括号对
-                count = 0
-                end_idx = -1
-                for i in range(start_idx, len(json_str)):
-                    if json_str[i] == '{':
-                        count += 1
-                    elif json_str[i] == '}':
-                        count -= 1
-                        if count == 0:
-                            end_idx = i + 1
-                            break
-                
-                if end_idx > start_idx:
-                    json_str = json_str[start_idx:end_idx]
-                    logger.debug(f"截取了有效的JSON对象: {json_str[:50]}...")
+            # 去除可能导致问题的字符
+            cleaned_text = self._clean_json(response_text)
+            
+            # 尝试直接解析
+            try:
+                return json.loads(cleaned_text)
+            except json.JSONDecodeError as e:
+                logger.debug(f"直接JSON解析失败: {str(e)}")
+            
+            # 尝试提取最外层的JSON对象
+            json_pattern = r'({[\s\S]*?})'
+            matches = re.findall(json_pattern, cleaned_text)
+            
+            if matches:
+                for potential_json in matches:
+                    try:
+                        # 尝试解析每个匹配项
+                        result = json.loads(potential_json)
+                        if isinstance(result, dict):
+                            logger.debug("成功从文本中提取JSON对象")
+                            return result
+                    except json.JSONDecodeError:
+                        continue
+                        
+            # 最后尝试使用eval (确保只包含有效的JSON字符)
+            if all(c in '{}[](),:."\'0123456789truefalsenullabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_- \n\t\r' for c in cleaned_text):
+                try:
+                    # 将json关键字转换为Python兼容形式
+                    cleaned_text = cleaned_text.replace('null', 'None')
+                    cleaned_text = cleaned_text.replace('true', 'True')
+                    cleaned_text = cleaned_text.replace('false', 'False')
+                    
+                    result = eval(cleaned_text)
+                    if isinstance(result, dict):
+                        logger.warning("使用eval解析JSON成功，但这不是推荐的方法")
+                        return result
+                except Exception as e:
+                    logger.warning(f"使用eval解析失败: {str(e)}")
+            
+            logger.warning(f"所有JSON解析方法均失败，返回None。原始文本: {response_text[:100]}...")
+            return None
+            
         except Exception as e:
-            logger.warning(f"尝试截取JSON对象时出错: {str(e)}")
+            logger.error(f"安全解析JSON时出错: {str(e)}")
+            return None
+    
+    def _clean_json(self, text: str) -> str:
+        """
+        清理JSON字符串，提取代码块并移除不相关字符
         
-        return json_str
-
+        Args:
+            text: 包含JSON的文本
+            
+        Returns:
+            str: 清理后的JSON字符串
+        """
+        # 移除Unicode字符BOM和其他不可见字符
+        text = text.strip()
+        
+        # 尝试从markdown代码块中提取
+        code_block_pattern = r'```(?:json)?(.*?)```'
+        matches = re.findall(code_block_pattern, text, re.DOTALL)
+        if matches:
+            # 提取最后一个代码块(如果存在多个)
+            extracted_text = matches[-1].strip()
+            logger.debug("从代码块中提取到潜在的JSON文本")
+            return extracted_text
+            
+        # 如果没有代码块，尝试查找JSON块
+        json_block_start = text.find('{')
+        json_block_end = text.rfind('}')
+        
+        if json_block_start >= 0 and json_block_end > json_block_start:
+            extracted_text = text[json_block_start:json_block_end+1]
+            logger.debug("提取了可能的JSON块")
+            return extracted_text
+            
+        # 如果没有找到明确的JSON标记，返回原始文本
+        return text
+    
+    def _extract_result(self, response_text: str) -> Dict[str, Any]:
+        """
+        从API响应中提取格式化的结果
+        
+        Args:
+            response_text: API响应文本
+            
+        Returns:
+            Dict: 包含评分结果的字典，使用标准化字段结构
+        """
+        try:
+            # 从响应中提取JSON字符串
+            self.logger.debug(f"提取结果 - 响应长度: {len(response_text)}")
+            
+            # 保留原始响应用于调试
+            original_response = None
+            if isinstance(response_text, str) and len(response_text) < 1000:
+                original_response = response_text
+            
+            # 解析JSON响应
+            parsed_json = self.safe_parse_json(response_text)
+            if not parsed_json:
+                self.logger.error("无法解析响应JSON")
+                return {}
+                
+            # 使用字段映射器标准化结果
+            self.logger.debug(f"开始字段标准化，原始字段: {list(parsed_json.keys())}")
+            normalized = self.field_mapper.normalize_result(parsed_json, "deepseek")
+            
+            # 保留原始响应以便调试
+            if original_response:
+                normalized["_original_response"] = original_response
+                
+            # 保留原始解析结果供参考
+            normalized["_raw_data"] = parsed_json
+                
+            self.logger.debug(f"标准化结果完成: {normalized.keys()}")
+            
+            # 返回标准化结果
+            return normalized
+            
+        except Exception as e:
+            self.logger.exception(f"提取结果时出错: {str(e)}")
+            return {}
+    
     def format_response(self, response: Dict) -> Dict[str, Any]:
         """
-        格式化API响应结果
+        格式化API响应，检查分数是否有效
         
         Args:
-            response: API响应
+            response: API响应数据
             
         Returns:
-            Dict: 格式化后的结果
+            Dict: 格式化后的响应
         """
-        try:
-            result = self._extract_result(response)
-            return {
-                "status": "success",
-                "result": result
-            }
-        except Exception as e:
-            logger.error(f"格式化Deepseek响应时发生错误: {str(e)}")
-            return {
-                "status": "error",
-                "message": f"格式化响应失败: {str(e)}"
-            }
+        self.logger.debug(f"格式化API响应，keys: {list(response.keys())}")
+        
+        # 检查是否有 scores 字段和 total 值
+        if "scores" in response and "total" in response["scores"]:
+            total_score = response["scores"]["total"]
+            self.logger.debug(f"从标准化字段结构中获取到总分: {total_score}")
+            
+            # 如果总分为空或无效，设置为0
+            if total_score is None or not isinstance(total_score, (int, float)):
+                self.logger.warning(f"无效的总分值: {total_score}，设置为0")
+                response["scores"]["total"] = 0
+            
+            # 将总分限制在有效范围内 (0-50)
+            elif total_score < 0 or total_score > 50:
+                old_score = total_score
+                response["scores"]["total"] = max(0, min(50, total_score))
+                self.logger.warning(f"总分超出有效范围 ({old_score})，已调整为: {response['scores']['total']}")
+            
+            # 为向后兼容添加 total_score 字段
+            response["total_score"] = response["scores"]["total"]
+        
+        # 向后兼容检查，处理旧格式的响应
+        elif "total_score" in response:
+            total_score = response["total_score"]
+            self.logger.debug(f"从旧字段结构中获取到总分: {total_score}")
+            
+            # 如果总分为空或无效，设置为0
+            if total_score is None or not isinstance(total_score, (int, float)):
+                self.logger.warning(f"无效的总分值: {total_score}，设置为0")
+                response["total_score"] = 0
+            
+            # 将总分限制在有效范围内 (0-50)
+            elif total_score < 0 or total_score > 50:
+                old_score = total_score
+                response["total_score"] = max(0, min(50, total_score))
+                self.logger.warning(f"总分超出有效范围 ({old_score})，已调整为: {response['total_score']}")
+            
+            # 为新格式添加 scores 字段
+            if "scores" not in response:
+                response["scores"] = {"total": response["total_score"]}
+        
+        # 如果没有找到总分，返回错误结果
+        else:
+            self.logger.error("响应中缺少总分字段")
+            error_msg = "响应中缺少总分字段"
+            response = self._create_default_result(error_msg)
+            
+        return response
     
-    def _extract_result(self, response):
-        """
-        从API响应中提取结果
-        
-        Args:
-            response: API响应
-            
-        Returns:
-            Dict: 提取的结果
-        """
-        content = ""
-        try:
-            # 处理Deepseek API的响应格式
-            if isinstance(response, dict):
-                if 'choices' in response and len(response['choices']) > 0:
-                    choice = response['choices'][0]
-                    if 'message' in choice:
-                        # 检查是否有reasoning_content字段
-                        if 'reasoning_content' in choice['message']:
-                            raw_content = choice['message'].get('reasoning_content', '')
-                            logger.debug(f"从reasoning_content字段获取内容，长度: {len(raw_content)}")
-                        elif 'content' in choice['message']:
-                            raw_content = choice['message'].get('content', '')
-                            logger.debug(f"从content字段获取内容，长度: {len(raw_content)}")
-                        else:
-                            raw_content = ""
-                            logger.debug("message中未找到content或reasoning_content字段")
-                        
-                        # 处理内容
-                        if raw_content:
-                            # 处理Unicode编码
-                            if isinstance(raw_content, str):
-                                content = raw_content
-                
-                # 如果未从标准字段找到内容，检查fallback字段
-                if not content:
-                    for field in ['content', 'text', 'message', 'result', 'data', 'response']:
-                        if field in response and isinstance(response[field], str):
-                            content = response[field]
-                            logger.debug(f"从备选字段'{field}'获取内容")
-                            break
-            
-            # 如果响应本身就是字符串
-            elif isinstance(response, str):
-                content = response
-                logger.debug("响应本身是字符串，直接使用")
-            
-            # 如果仍未找到内容，尝试将整个响应转为字符串
-            if not content and response:
-                try:
-                    content = json.dumps(response, ensure_ascii=False)
-                    logger.debug("将整个响应转换为JSON字符串")
-                except Exception as e:
-                    logger.error(f"转换响应为字符串失败: {str(e)}")
-            
-            # 如果未找到有效内容，返回默认评分
-            if not content or content.strip() == "":
-                logger.warning("API响应中未找到有效内容，返回默认评分")
-                return self._create_default_result("API响应内容为空")
-            
-            # 先看看是否能直接解析JSON
-            try:
-                # 尝试直接解析整个内容为JSON
-                try:
-                    json_result = json.loads(content)
-                    logger.debug("成功直接解析内容为JSON")
-                    
-                    # 验证JSON结果是否包含必要字段
-                    if "总得分" in json_result and "分项得分" in json_result:
-                        logger.info("解析到有效的评分结果")
-                        return json_result
-                except json.JSONDecodeError:
-                    # 如果整个内容不是有效JSON，尝试提取代码块
-                    pass
-                    
-                # 尝试识别和提取JSON代码块
-                json_match = re.search(r'```(?:json)?\s*([\s\S]*?)```', content)
-                if json_match:
-                    json_str = json_match.group(1).strip()
-                    logger.debug(f"找到JSON代码块，长度:{len(json_str)}")
-                    json_result = json.loads(json_str)
-                    logger.debug("成功解析JSON代码块")
-                    return json_result
-            except Exception as json_err:
-                logger.debug(f"解析JSON块失败: {str(json_err)}")
-            
-            # 看看是否有结构化的格式
-            logger.debug("尝试从Markdown/文本中提取")
-            
-            # 提取评分数据
-            json_result = {}
-            
-            # 尝试提取总分和等级
-            score_pattern = r'(?:总[得评]分|得分|总分|score)[：:]\s*(\d+(?:\.\d+)?)'
-            score_match = re.search(score_pattern, content, re.IGNORECASE)
-            
-            total_score = 0
-            if score_match:
-                try:
-                    total_score = float(score_match.group(1))
-                    logger.debug(f"成功提取总分: {total_score}")
-                except ValueError:
-                    logger.debug(f"提取到的总分无法转换为数字: {score_match.group(1)}")
-            
-            # 从中考评分报告中提取
-            if "中考" in content and "得分" in content:
-                try:
-                    # 检查是否有综合得分的表示
-                    synth_pattern = r'综合[得评]分[：:]\s*(\d+)/(\d+)'
-                    synth_match = re.search(synth_pattern, content)
-                    if synth_match:
-                        score = float(synth_match.group(1))
-                        max_score = float(synth_match.group(2))
-                        total_score = score
-                        logger.debug(f"从中考评分报告提取到综合得分: {score}/{max_score}")
-                except Exception as e:
-                    logger.debug(f"从中考评分提取总分失败: {str(e)}")
-            
-            # 如果没有找到任何有效得分，返回默认评分
-            if total_score == 0:
-                logger.warning("未能从响应中提取到有效得分，返回默认评分")
-                return self._create_default_result("未能提取有效评分")
-            
-            # 提取等级信息
-            level_pattern = r'(?:等级评定|等级|level)[：:]\s*([A-D](?:-)?(?:[+-])?)'
-            level_match = re.search(level_pattern, content, re.IGNORECASE)
-            
-            level = "C"  # 默认等级
-            if level_match:
-                level = level_match.group(1)
-                logger.debug(f"成功提取等级: {level}")
-            
-            # 从字符串中提取关键信息
-            # 如果内容看起来像Deepseek中考评分报告
-            if "广东中考" in content and "评分报告" in content:
-                logger.debug("检测到广东中考评分报告格式")
-                
-                # 提取总分 (通常在"综合得分"或类似字段)
-                synth_pattern = r'综合[得评]分[：:]\s*(\d+)[/／](\d+)'
-                alt_pattern = r'[总综][得评]分[：:]\s*(\d+(?:\.\d+)?)'
-                
-                synth_match = re.search(synth_pattern, content)
-                if synth_match:
-                    total_score = float(synth_match.group(1))
-                    logger.debug(f"从中考报告提取总分: {total_score}")
-                else:
-                    alt_match = re.search(alt_pattern, content)
-                    if alt_match:
-                        total_score = float(alt_match.group(1))
-                        logger.debug(f"从替代模式提取总分: {total_score}")
-                
-                # 分项得分 (可能有"分项评分"部分)
-                content_score = self._extract_subscore(content, ["内容充实度", "内容主旨", "内容分"], 12)
-                language_score = self._extract_subscore(content, ["语言表达", "语言文采", "语言分"], 13)
-                structure_score = self._extract_subscore(content, ["结构严谨性", "文章结构", "结构分"], 8)
-                writing_score = self._extract_subscore(content, ["思想感情", "文面书写", "思想分"], 4)
-                
-                # 提取各分析段落
-                overall_assessment = self._extract_paragraph(content, ["总评", "总体评价", "综合评价"])
-                content_analysis = self._extract_paragraph(content, ["内容分析", "内容评价"])
-                language_analysis = self._extract_paragraph(content, ["语言分析", "语言评价"])
-                structure_analysis = self._extract_paragraph(content, ["结构分析", "结构评价"])
-                improvement_suggestions = self._extract_paragraph(content, ["写作建议", "改进建议", "升格建议"])
-                
-                # 错别字仍采用原有正则方式提取
-                spelling_errors = []
-                error_pattern = r'(?:错别字|拼写错误)[：:]\s*\[(.*?)\]'
-                error_match = re.search(error_pattern, content, re.DOTALL)
-                if error_match:
-                    errors_text = error_match.group(1)
-                    errors = re.findall(r'["\']([^"\']*)["\']', errors_text)
-                    spelling_errors = errors
-                    logger.debug(f"成功提取错别字列表，数量: {len(errors)}")
-                
-                # 构建完整结果
-                return {
-                    "总得分": total_score,
-                    "level": level,
-                    "分项得分": {
-                        "内容主旨": content_score,
-                        "语言文采": language_score,
-                        "文章结构": structure_score,
-                        "文面书写": writing_score
-                    },
-                    "total_score": total_score,
-                    "content_score": content_score,
-                    "language_score": language_score,
-                    "structure_score": structure_score,
-                    "writing_score": writing_score,
-                    "overall_assessment": overall_assessment,
-                    "content_analysis": content_analysis,
-                    "language_analysis": language_analysis,
-                    "structure_analysis": structure_analysis,
-                    "improvement_suggestions": improvement_suggestions,
-                    "总体评价": overall_assessment,
-                    "内容分析": content_analysis,
-                    "language_analysis": language_analysis,
-                    "structure_analysis": structure_analysis,
-                    "写作建议": improvement_suggestions,
-                    "spelling_errors": {
-                        "解析": spelling_errors
-                    },
-                    "错别字": spelling_errors
-                }
-
-            # 如果不是中考格式，尝试创建基本结果
-            # 从文本中尽可能提取评分信息
-            logger.info(f"尝试从普通文本中提取评分信息，获取到总分: {total_score}")
-            
-            # 估算分项得分
-            content_score = self._extract_subscore(content, ["内容", "主旨", "内容分"], int(total_score * 0.4))
-            language_score = self._extract_subscore(content, ["语言", "文采", "语言分"], int(total_score * 0.3))
-            structure_score = self._extract_subscore(content, ["结构", "布局", "结构分"], int(total_score * 0.2))
-            writing_score = self._extract_subscore(content, ["文面", "书写", "错别字"], int(total_score * 0.1))
-            
-            # 提取文本评价
-            overall_assessment = self._extract_paragraph(content, ["总评", "总体评价", "评价"])
-            content_analysis = self._extract_paragraph(content, ["内容分析", "内容"])
-            language_analysis = self._extract_paragraph(content, ["语言分析", "语言"])
-            structure_analysis = self._extract_paragraph(content, ["结构分析", "结构"])
-            improvement_suggestions = self._extract_paragraph(content, ["建议", "改进"])
-            
-            # 如果没有提取到评价，使用完整内容作为总体评价
-            if not overall_assessment:
-                overall_assessment = content[:300] if len(content) > 300 else content
-            
-            # 返回构建的结果
-            return {
-                "总得分": total_score,
-                "level": level,
-                "分项得分": {
-                    "内容主旨": content_score,
-                    "语言文采": language_score,
-                    "文章结构": structure_score,
-                    "文面书写": writing_score
-                },
-                "总体评价": overall_assessment or "系统从AI响应中提取评价信息",
-                "内容分析": content_analysis or "系统无法从AI响应中提取内容分析",
-                "语言分析": language_analysis or "系统无法从AI响应中提取语言分析",
-                "结构分析": structure_analysis or "系统无法从AI响应中提取结构分析",
-                "写作建议": improvement_suggestions or "系统无法从AI响应中提取写作建议",
-                "错别字": [],
-                "api_extraction_method": "text_parsing"  # 标记使用了文本解析方法
-                }
-            
-        except Exception as e:
-            logger.error(f"提取Deepseek响应数据时发生错误: {str(e)}")
-            logger.error(f"错误详情: {traceback.format_exc()}")
-            return self._create_default_result(error=str(e))
-
-    # 添加辅助方法用于提取中考评分报告中的分项得分
-    def _extract_subscore(self, content: str, field_names: List[str], default_value: int = 0) -> int:
-        """从内容中提取分项得分"""
-        for field in field_names:
-            pattern = rf'{field}[：:]\s*(\d+(?:\.\d+)?)/\d+'
-            alt_pattern = rf'{field}[：:]\s*(\d+(?:\.\d+)?)'
-            
-            match = re.search(pattern, content)
-            if match:
-                try:
-                    return float(match.group(1))
-                except ValueError:
-                    pass
-            
-            # 尝试替代模式
-            alt_match = re.search(alt_pattern, content)
-            if alt_match:
-                try:
-                    return float(alt_match.group(1))
-                except ValueError:
-                    pass
-                    
-        return default_value
-    
-    # 添加辅助方法用于提取各类分析段落
-    def _extract_paragraph(self, content: str, field_names: List[str]) -> str:
-        """从内容中提取特定段落"""
-        for field in field_names:
-            pattern = rf'{field}[：:](.*?)(?=\n\n|\n[^\n]+[：:]|$)'
-            
-            match = re.search(pattern, content, re.DOTALL)
-            if match:
-                text = match.group(1).strip()
-                if text:
-                    # 去除可能的子标题和项目符号
-                    text = re.sub(r'^\s*[-•*]|\n\s*[-•*]', '', text)
-                    return text
-        
-        return ""
-    
-    def _create_empty_result(self, error_message, essay_content=None):
-        """创建空批改结果，包含错误信息"""
-        logger.warning(f"创建空批改结果: {error_message}")
-        
-        # 估算文章长度作为基础评分依据
-        base_score = 30
-        content_length = len(essay_content) if essay_content else 0
-        length_factor = min(10, max(0, content_length - 300) // 100)
-        score = base_score + length_factor
-        
-        return {
-            "错误": error_message,
-            "总得分": score,
-            "分项得分": {
-                "内容主旨": int(score * 0.35),
-                "语言文采": int(score * 0.25),
-                "文章结构": int(score * 0.2),
-                "文面书写": int(score * 0.2)
-            },
-            "总体评价": f"由于技术原因无法完成批改，系统已生成临时评分。错误: {error_message}",
-            "内容分析": "无法分析内容，API调用失败。",
-            "语言分析": "无法分析语言，API调用失败。",
-            "结构分析": "无法分析结构，API调用失败。",
-            "写作建议": "建议重新提交作文以获取完整评价。",
-            "错别字": [],
-            "is_error_result": True,
-            "error_details": {
-                "message": error_message,
-                "timestamp": datetime.now().isoformat()  # 修正datetime调用
-            }
-        }
-
-    def _create_mock_result(self, content: str) -> Dict:
-        """
-        当JSON解析失败时，尝试从文本中提取信息生成模拟结果
-        
-        Args:
-            content: 原始响应内容
-            
-        Returns:
-            Dict: 模拟生成的结果
-        """
-        logger.warning("生成模拟结果以应对JSON解析失败")
-        
-        # 如果内容为空，返回默认结果
-        if not content or content.strip() == "":
-            return self._create_default_result("API返回空内容")
-            
-        result = self._create_empty_result()
-        
-        try:
-            # 尝试提取分数
-            score_match = re.search(r'总[分得]分[：:]\s*(\d+)', content)
-            if score_match:
-                result["总得分"] = int(score_match.group(1))
-                result["total_score"] = int(score_match.group(1))
-            else:
-                # 如果没有找到分数，使用默认分数
-                result["总得分"] = 40
-                result["total_score"] = 40
-            
-            # 尝试提取分项得分
-            content_score_match = re.search(r'内容主旨[：:]\s*(\d+)', content)
-            if content_score_match:
-                result["分项得分"]["内容主旨"] = int(content_score_match.group(1))
-                result["content_score"] = int(content_score_match.group(1))
-            else:
-                result["分项得分"]["内容主旨"] = 16
-                result["content_score"] = 16
-            
-            language_score_match = re.search(r'语言文采[：:]\s*(\d+)', content)
-            if language_score_match:
-                result["分项得分"]["语言文采"] = int(language_score_match.group(1))
-                result["language_score"] = int(language_score_match.group(1))
-            else:
-                result["分项得分"]["语言文采"] = 12
-                result["language_score"] = 12
-            
-            structure_score_match = re.search(r'文章结构[：:]\s*(\d+)', content)
-            if structure_score_match:
-                result["分项得分"]["文章结构"] = int(structure_score_match.group(1))
-                result["structure_score"] = int(structure_score_match.group(1))
-            else:
-                result["分项得分"]["文章结构"] = 8
-                result["structure_score"] = 8
-            
-            writing_score_match = re.search(r'文面书写[：:]\s*(\d+)', content)
-            if writing_score_match:
-                result["分项得分"]["文面书写"] = int(writing_score_match.group(1))
-                result["writing_score"] = int(writing_score_match.group(1))
-            else:
-                result["分项得分"]["文面书写"] = 4
-                result["writing_score"] = 4
-            
-            # 尝试提取评价
-            assessment_match = re.search(r'总体评价[：:](.*?)(?:内容分析|分项得分|语言分析|结构分析|写作建议|$)', content, re.DOTALL)
-            if assessment_match:
-                assessment = assessment_match.group(1).strip()
-                if assessment:
-                    result["总体评价"] = assessment
-                    result["overall_assessment"] = assessment
-            else:
-                result["总体评价"] = "由于API响应格式问题，无法提取详细评价。这是一个模拟评分。"
-                result["overall_assessment"] = "由于API响应格式问题，无法提取详细评价。这是一个模拟评分。"
-            
-            # 尝试提取内容分析
-            content_analysis_match = re.search(r'内容分析[：:](.*?)(?:总体评价|分项得分|语言分析|结构分析|写作建议|$)', content, re.DOTALL)
-            if content_analysis_match:
-                analysis = content_analysis_match.group(1).strip()
-                if analysis:
-                    result["内容分析"] = analysis
-                    result["content_analysis"] = analysis
-            else:
-                result["内容分析"] = "由于API响应格式问题，无法提取详细分析。"
-                result["content_analysis"] = "由于API响应格式问题，无法提取详细分析。"
-            
-            # 添加模拟标记
-            result["is_mock"] = True
-            result["mock_reason"] = "JSON解析失败，使用正则表达式提取信息"
-            
-            # 根据总分确定等级
-            total_score = result["总得分"] 
-            if total_score >= 43:
-                result["level"] = "A"
-            elif total_score >= 35:
-                result["level"] = "B"
-            elif total_score >= 27:
-                result["level"] = "C"
-            else:
-                result["level"] = "D"
-                
-            return result
-            
-        except Exception as e:
-            logger.error(f"生成模拟结果失败: {str(e)}")
-            # 返回默认结果
-            return self._create_default_result(f"生成模拟结果失败: {str(e)}")
-
-    def _create_default_result(self, error_message: str) -> Dict:
-        """
-        创建默认的批改结果（当API调用失败时使用）
-        
-        Args:
-            error_message: 错误信息
-            
-        Returns:
-            Dict: 默认的批改结果
-        """
-        return {
-            "总得分": 50,
-            "分项得分": {
-                "内容主旨": 20,
-                "语言文采": 15,
-                "文章结构": 10,
-                "文面书写": 5
-            },
-            "总体评价": f"由于技术原因无法完成完整批改。错误信息：{error_message}",
-            "内容分析": "无法评估",
-            "语言分析": "无法评估", 
-            "结构分析": "无法评估",
-            "写作建议": "请稍后重试",
-            "错别字": [],
-            "修改建议": "请稍后再次提交批改"
-        }
-        
     def correct_essay(self, essay_content: str, title: str = None, essay_type: str = None, prompt: str = None) -> Dict:
         """
         批改作文并返回详细评分和建议
@@ -728,29 +411,86 @@ class DeepseekClient(BaseAPIClient):
             try:
                 logger.info(f"正在发送API请求（尝试 {attempt+1}/{max_retries}）")
                 
-                # 使用字典传递参数，避免显式设置response_format
+                # 使用字典传递参数，根据模型决定是否添加response_format参数
                 api_params = {
                     "model": self.model,
                     "messages": messages,
                     "temperature": 0.3,  # 使用较低的温度以获得更一致的结果
                     "max_tokens": 4000,  # 为详细的批改结果提供足够的token
-                    "timeout": 60  # 设置60秒超时
+                    "timeout": 60,  # 设置60秒超时
                 }
+                
+                # 只有当SDK版本支持且模型不是reasoner时，才添加response_format参数
+                global supports_response_format, openai_version
+                can_use_json_format = supports_response_format and "reasoner" not in self.model.lower()
+                
+                if can_use_json_format:
+                    logger.info(f"SDK版本{openai_version}支持JSON输出，当前模型{self.model}也支持，添加response_format参数")
+                    api_params["response_format"] = {"type": "json_object"}
+                else:
+                    if "reasoner" in self.model.lower():
+                        logger.info(f"当前模型{self.model}不支持JSON输出格式，使用普通输出")
+                    elif not supports_response_format:
+                        logger.info(f"当前SDK版本{openai_version}不支持response_format参数，使用普通输出")
                 
                 response = self.openai_client.chat.completions.create(**api_params)
                 
-                # 提取结果
-                correction_result = self._extract_result(response.model_dump())
+                # 提取结果前做防御性检查
+                api_response = response.model_dump()
+                logger.debug(f"API响应类型: {type(api_response)}")
+                
+                # 从API响应中安全地提取内容
+                if isinstance(api_response, dict) and "choices" in api_response and api_response["choices"]:
+                    try:
+                        content = api_response["choices"][0]["message"]["content"]
+                        logger.debug(f"从API响应中提取到内容: {content[:100]}...")
+                        correction_result = self._extract_result(content)
+                    except (KeyError, TypeError, IndexError) as e:
+                        logger.warning(f"从API响应中提取内容失败: {str(e)}，尝试使用完整响应")
+                        correction_result = self._extract_result(api_response)
+                else:
+                    logger.warning("API响应格式异常，尝试使用完整响应")
+                    correction_result = self._extract_result(api_response)
                 
                 # 校验结果格式
-                if self._validate_correction_result_format(correction_result):
-                    # 确保在结果中添加状态字段，无论总分是否为0，只要格式有效就视为成功
+                valid_result = False
+                
+                # 检查分数是否有效
+                if "scores" in correction_result and "total" in correction_result["scores"] and correction_result["scores"]["total"] > 0:
+                    valid_result = True
+                    logger.info(f"成功提取评分结果，总分: {correction_result['scores']['total']}")
+                # 向后兼容旧字段
+                elif correction_result.get("total_score", 0) > 0:
+                    valid_result = True
+                    logger.info(f"成功提取评分结果(旧格式)，总分: {correction_result['total_score']}")
+                    # 为了保持一致性，添加scores字段
+                    if "scores" not in correction_result:
+                        correction_result["scores"] = {"total": correction_result["total_score"]}
+                # 检查中文响应
+                elif "raw_data" in correction_result and isinstance(correction_result["raw_data"], dict):
+                    # 尝试从原始数据中提取分数
+                    raw_data = correction_result["raw_data"]
+                    if "总得分" in raw_data:
+                        try:
+                            score = float(raw_data["总得分"])
+                            # 更新标准化结构
+                            correction_result["scores"] = correction_result.get("scores", {})
+                            correction_result["scores"]["total"] = score
+                            correction_result["total_score"] = score  # 添加兼容字段
+                            valid_result = True
+                            logger.info(f"从原始数据提取到总分: {score}")
+                        except (ValueError, TypeError):
+                            logger.warning("无法转换原始总分")
+                
+                if valid_result:
+                    # 确保返回的结果经过格式化处理，规范化分数范围
+                    formatted_result = self.format_response(correction_result)
                     return {
-                    "status": "success",
-                        "result": correction_result
+                        "status": "success",
+                        "result": formatted_result
                     }
                 else:
-                    error_msg = "API返回的结果格式无效"
+                    error_msg = "API返回的结果格式无效或未包含有效分数"
                     logger.error(error_msg)
                     return {
                         "status": "error",
@@ -838,42 +578,54 @@ class DeepseekClient(BaseAPIClient):
         Returns:
             List[Dict]: 准备好的消息列表
         """
-        # 构造系统提示词
+        # 修改系统提示词，强调JSON格式输出
         system_prompt = """你是专业的中文作文批改老师，擅长分析文章结构、内容、语言和表达，能够提供详尽的评价和建议。
-请对以下作文进行详细批改，评分标准满分为50分。在评分时要特别注意以下几点：
-1. 内容是否符合主题、深刻、有创意
-2. 语言是否流畅、准确、有文采
-3. 结构是否清晰、层次分明
-4. 是否存在错别字、语法错误、标点符号使用错误
-5. 论据是否充分、论证是否有力（议论文）
-6. 情感表达是否真挚、细腻（记叙文、散文）
-7. 想象是否丰富、创新（想象文）
+请对以下作文进行详细批改。
 
-请按以下格式返回评价结果：
+【作文评分标准】
+总分50分
+字数要求600字以上
 
-总得分：总体得分（50分制）
+【评分等级划分】
+A级（43-50分）：内容立意明确，中心突出，材料具体生动，有真情实感；语言得体、流畅；结构严谨，注意照应，详略得当；卷面整洁，书写优美。
+B级（35-42分）：内容立意明确，中心突出，材料具体；语言规范、通顺；结构完整，条理清楚；卷面整洁，书写工整。
+C级（27-34分）：内容立意明确，材料能表现中心；语言基本通顺，有少数错别字；结构基本完整，有条理；卷面较为整洁，书写清楚。
+D级（0-26分）：内容立意不明确，材料难以表现中心；语言不通顺，错别字较多；结构不完整，条理不清楚；卷面脏乱，字迹潦草。
 
-分项得分：
-- 内容主旨：内容方面的得分（25分制）
-- 语言文采：语言表达方面的得分（25分制）
-- 文章结构：结构方面的得分（25分制）
-- 文面书写：错别字、语法等方面的得分（25分制）
+【评分维度权重】
+各项分数必须为整数，且必须严格按照以下权重范围分配：
+1. 内容主旨：占总分的30%-40%（最高20分，最低视作文质量定）
+2. 语言文采：占总分的20%-30%（最高15分，最低视作文质量定）
+3. 文章结构：占总分的10%-20%（最高10分，最低视作文质量定）
+4. 文面书写：占总分的0%-10%（最高5分，最低视作文质量定）
 
-总体评价：整体评价和主要优缺点
+【具体扣分项】
+1. 无标题扣2分
+2. 字数不足：低于600字，每少50字扣1分
+3. 错别字：每个错别字扣1分
+4. 标点符号使用不规范：根据严重程度1-3分
 
-内容分析：对内容的具体点评
+错别字扣分是从四项得分总和中直接扣除的，而非从某个分项中扣除。
 
-语言分析：对语言表达的具体点评
+请严格按照以下JSON格式输出评分结果，不要包含任何额外的文字或解释：
 
-结构分析：对结构的具体点评
+{
+    "总得分": 45,
+    "分项得分": {
+        "内容主旨": 18,
+        "语言文采": 14,
+        "文章结构": 9,
+        "文面书写": 4
+    },
+    "总体评价": "这是一篇内容充实的文章，请在这里提供200字左右的总体评价。",
+    "内容分析": "文章主题明确，论述有力，请在这里提供200字左右的内容分析。",
+    "语言分析": "语言表达流畅，用词准确，请在这里提供200字左右的语言分析。",
+    "结构分析": "文章结构合理，层次分明，请在这里提供200字左右的结构分析。",
+    "写作建议": "建议在论述方面更加深入，请在这里提供200字左右的写作建议。",
+    "错别字": ["错误1->正确1", "错误2->正确2"]
+}
 
-写作建议：文章需要改进的地方（列出2-4点）
-
-错别字：列出文章中的错别字、语法错误、标点符号使用错误等
-
-修改建议：对文章进行具体的修改建议
-
-请确保评分公正客观，点评详细具体，并给出切实可行的改进建议。"""
+你的回复必须是一个有效的JSON对象，只输出JSON内容，不要有任何其他文字。请确保所有键名使用双引号，数值不使用引号，并确保总分和分项得分都是数字。"""
 
         # 如果有作文类型，添加相应的指导
         if essay_type:
@@ -886,7 +638,8 @@ class DeepseekClient(BaseAPIClient):
             }
             
             if essay_type in essay_type_guides:
-                system_prompt += f"\n\n{essay_type_guides[essay_type]}"
+                # 将类型指导加到修改后的 Prompt 之前
+                system_prompt = essay_type_guides[essay_type] + "\n\n" + system_prompt
             else:
                 logger.warning(f"未识别的作文类型: {essay_type}")
         
@@ -900,13 +653,17 @@ class DeepseekClient(BaseAPIClient):
         
         user_message += f"作文内容：\n{content}"
         
+        # 添加字数信息
+        text_length = len(content)
+        user_message += f"\n\n字数：{text_length}字"
+        
         # 构造消息列表
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message}
         ]
         
-        logger.debug(f"已准备批改消息，系统提示词长度: {len(system_prompt)}字，用户消息长度: {len(user_message)}字")
+        logger.debug(f"已准备批改消息 (JSON格式优化Prompt)，系统提示词长度: {len(system_prompt)}字，用户消息长度: {len(user_message)}字")
         
         return messages
         
@@ -920,25 +677,76 @@ class DeepseekClient(BaseAPIClient):
         Returns:
             bool: 格式是否有效
         """
-        # 检查必要字段是否存在
-        required_fields = ["总得分", "总体评价"]
+        # 首先检查原始数据中的中文字段
+        if "_raw_data" in result and isinstance(result["_raw_data"], dict):
+            raw_data = result["_raw_data"]
+            if "总得分" in raw_data:
+                try:
+                    score = float(raw_data["总得分"])
+                    if 0 <= score <= 50:
+                        logger.debug(f"通过原始数据中的总得分验证成功: {score}")
+                        return True
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"原始数据中的总得分无效: {raw_data['总得分']}, 错误: {str(e)}")
+                    # 继续检查其他格式
         
-        for field in required_fields:
-            if field not in result:
-                logger.warning(f"批改结果缺少必要字段: {field}")
-                return False
+        # 检查标准化字段结构
+        if "scores" in result and isinstance(result["scores"], dict) and "total" in result["scores"]:
+            logger.debug("使用标准化字段结构验证结果")
+            try:
+                score = float(result["scores"]["total"])
+                # 验证分数范围 (允许0-50的标准化范围)
+                if not (0 <= score <= 50):
+                    logger.warning(f"标准化总分超出合理范围(0-50): {score}")
+                    return False
+                logger.debug(f"标准化结果验证通过，总分: {score}")
+                return True
+            except (ValueError, TypeError) as e:
+                logger.warning(f"标准化总分不是有效数字: {result['scores'].get('total')}, 错误: {str(e)}")
+                # 继续检查旧格式字段
+        
+        # 向后兼容检查 - 支持中英文字段名
+        logger.debug("尝试使用旧格式字段验证结果")
+        required_fields_en = ["total_score"]
+        required_fields_cn = ["总得分"]
+        
+        # 验证中英文字段中至少有一组字段是完整的
+        en_fields_present = all(field in result for field in required_fields_en)
+        cn_fields_present = all(field in result for field in required_fields_cn)
+        
+        # 如果两种格式都不完整，记录警告并返回失败
+        if not (en_fields_present or cn_fields_present):
+            logger.warning(f"批改结果缺少必要字段: total_score 或 总得分")
+            return False
                 
         # 检查总分是否为数字且在合理范围内
         try:
-            score = float(result["总得分"])
-            if not (0 <= score <= 50):
-                logger.warning(f"总得分超出合理范围: {score}")
-                return False
-        except (ValueError, TypeError):
-            logger.warning(f"总得分不是有效数字: {result['总得分']}")
-            return False
+            # 尝试获取中文或英文的分数字段
+            score = None
+            if "总得分" in result:
+                score = float(result["总得分"])
+                # 中文结果使用0-50的范围
+                if not (0 <= score <= 50):
+                    logger.warning(f"中文总得分超出合理范围(0-50): {score}")
+                    return False
+            elif "total_score" in result:
+                score = float(result["total_score"])
+                # 英文结果使用0-50的范围
+                if not (0 <= score <= 50):
+                    logger.warning(f"英文total_score超出合理范围(0-50): {score}")
+                    return False
             
-        return True
+            if score is None:
+                logger.warning(f"未找到有效的分数字段")
+                return False
+                
+            logger.debug(f"旧格式结果验证通过，总分: {score}")
+            return True
+            
+        except (ValueError, TypeError) as e:
+            score_field = "总得分" if "总得分" in result else "total_score"
+            logger.warning(f"总得分不是有效数字: {result.get(score_field)}, 错误: {str(e)}")
+            return False
         
     async def _handle_long_content_async(self, essay_content, title=None, essay_type=None, prompt=None):
         """异步处理过长内容的批改请求"""
@@ -1208,9 +1016,22 @@ class DeepseekClient(BaseAPIClient):
             "max_tokens": max_tokens
         }
         
+        # 只有当SDK版本支持且模型不是reasoner时，才添加response_format参数
+        global supports_response_format, openai_version
+        can_use_json_format = supports_response_format and "reasoner" not in self.model.lower()
+        
+        if can_use_json_format:
+            logger.info(f"异步调用 - SDK版本{openai_version}支持JSON输出，当前模型{self.model}也支持，添加response_format参数")
+            data["response_format"] = {"type": "json_object"}
+        else:
+            if "reasoner" in self.model.lower():
+                logger.info(f"异步调用 - 当前模型{self.model}不支持JSON输出格式，使用普通输出")
+            elif not supports_response_format:
+                logger.info(f"异步调用 - 当前SDK版本{openai_version}不支持response_format参数，使用普通输出")
+        
         # 添加其他参数
         for key, value in kwargs.items():
-            if key != 'response_format':  # 确保不添加response_format参数，因为deepseek-reasoner不支持
+            if key != 'response_format':  # response_format已经处理，避免覆盖
                 data[key] = value
         
         logger.info(f"异步调用DeepSeek API: {url}")
@@ -1231,6 +1052,11 @@ class DeepseekClient(BaseAPIClient):
                 # 解析JSON响应
                 result = response.json()
                 logger.debug("API调用成功")
+                
+                # 记录完整响应以便调试
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(f"异步API完整响应: {json.dumps(result, ensure_ascii=False)[:500]}...")
+                
                 return result
                 
             except httpx.HTTPStatusError as e:
@@ -1257,3 +1083,116 @@ class DeepseekClient(BaseAPIClient):
                 error_msg = f"API调用异常: {str(e)}"
                 logger.error(f"API调用失败: {error_msg}")
                 raise openai.APIError(error_msg) 
+
+    def _create_default_result(self, error_message: str = None) -> Dict[str, Any]:
+        """
+        创建默认的结果对象，用于API调用失败时返回
+        
+        Args:
+            error_message: 错误信息
+            
+        Returns:
+            Dict: 包含默认值的结果对象，使用标准化字段结构
+        """
+        # 标准化字段结构的默认结果
+        default_result = {
+            "scores": {
+                "total": 0,
+                "dimensions": {
+                    "content": 0,
+                    "language": 0,
+                    "structure": 0,
+                    "grammar": 0
+                }
+            },
+            "analyses": {
+                "summary": error_message or "评分失败，请查看日志了解详情",
+                "content": "",
+                "language": "",
+                "structure": ""
+            },
+            "feedback": {
+                "strengths": [],
+                "weaknesses": [],
+                "improvements": [],
+                "corrections": []
+            },
+            "metadata": {
+                "provider": "deepseek",
+                "model": self.model,
+                "processing_time": 0,
+                "error": True,
+                "error_message": error_message
+            }
+        }
+        
+        logger.debug(f"已创建标准化默认结果对象")
+        return default_result
+        
+    def _create_empty_result(self, error_message: str = None, essay_content: str = None) -> Dict[str, Any]:
+        """
+        创建空结果对象，用于异步API调用失败时返回
+        
+        Args:
+            error_message: 错误信息
+            essay_content: 作文内容
+            
+        Returns:
+            Dict: 包含默认值和错误信息的结果对象，使用标准化字段结构
+        """
+        # 复用默认结果创建方法
+        result = self._create_default_result(error_message)
+        
+        # 更新元数据
+        result["metadata"].update({
+            "timestamp": datetime.now().isoformat(),
+            "async": True,
+            "content_length": len(essay_content) if essay_content else 0
+        })
+        
+        # 添加简短错误摘要到分析结果中
+        result["analyses"]["summary"] = f"错误: {error_message}" if error_message else "未知错误导致评分失败"
+        
+        return result 
+
+    def validate_content(self, content: str) -> None:
+        """
+        验证作文内容的有效性
+        
+        Args:
+            content: 作文内容
+            
+        Raises:
+            ValueError: 内容无效时抛出
+        """
+        if not content or not isinstance(content, str):
+            raise ValueError("作文内容不能为空且必须是字符串")
+            
+        if len(content) < 10:
+            raise ValueError(f"作文内容过短 ({len(content)}字)，至少需要10个字符")
+            
+        # 可以添加更多的验证逻辑
+        return
+
+    def _load_config_from_env(self):
+        """从环境变量和配置加载配置"""
+        # 首先调用父类方法
+        super()._load_config_from_env()
+        
+        # 额外处理模型配置
+        config_model = AI_CONFIG.get('MODEL', "")
+        env_model = os.environ.get("DEEPSEEK_MODEL", "")
+        
+        # 只有当model为空时才从环境变量或配置加载
+        if not self.model:
+            if config_model:
+                logger.info(f"从配置中加载模型: {config_model}")
+                self.model = config_model
+            elif env_model:
+                logger.info(f"从环境变量中加载模型: {env_model}")
+                self.model = env_model
+            else:
+                logger.info(f"使用默认模型: deepseek-reasoner")
+                self.model = "deepseek-reasoner"
+        
+        logger.info(f"DeepSeek API最终配置 - URL: {self.base_url}, 模型: {self.model}")

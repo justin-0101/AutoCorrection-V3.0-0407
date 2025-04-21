@@ -104,9 +104,6 @@ class Essay(BaseModel):
     corrected_at = Column(DateTime)
     error_message = Column(Text)  # 错误信息
     
-    # 添加grade字段
-    grade = Column(String(50), nullable=True, comment='作文年级水平')
-    
     # 来源信息
     source_type = Column(String(20), default=EssaySourceType.text.value,
                      nullable=False, comment='内容来源类型')
@@ -329,6 +326,7 @@ class Essay(BaseModel):
             'status_display': EssayStatus.get_display_text(self.status),
             'score': self.score,
             'corrected_at': self.corrected_at.isoformat() if self.corrected_at else None,
+            'corrected_at_formatted': self.corrected_at.strftime('%Y-%m-%d %H:%M:%S') if self.corrected_at else None,
             'error_message': self.error_message,
             'source_type': self.source_type,
             'source_type_display': EssaySourceType(self.source_type).display_name,

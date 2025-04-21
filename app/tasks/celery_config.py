@@ -277,6 +277,16 @@ beat_schedule = {
             'expires': 3600,  # 1小时后过期
         },
     },
+    
+    # 批改系统健康检查
+    'check-correction-system-health': {
+        'task': 'app.tasks.maintenance_tasks.check_correction_system_health',
+        'schedule': timedelta(minutes=15),  # 每15分钟执行一次
+        'options': {
+            'queue': 'periodic',
+            'expires': 900,  # 15分钟后过期
+        },
+    },
 }
 
 # Flower监控配置
@@ -284,7 +294,7 @@ flower_port = config.CELERY_CONFIG.get('flower_port', 5555)
 flower_basic_auth = config.CELERY_CONFIG.get('flower_basic_auth', None)
 
 # Worker池配置
-worker_pool = 'eventlet'  # 使用eventlet作为并发模型
+# worker_pool = 'eventlet'  # 使用eventlet作为并发模型 - 改用 -P 命令行参数
 worker_concurrency = 10  # 使用eventlet时的并发数
 
 # 任务发送重试配置

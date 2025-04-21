@@ -184,9 +184,11 @@ def get_essay(essay_id):
             "essay": {
                 "id": 123,
                 "title": "作文标题",
+                "status": "completed",
                 "content": "作文内容",
                 "score": 85,
-                "feedback": {...},
+                "correction_status": "completed",
+                "detailed_results": {...},
                 ...
             }
         }
@@ -194,13 +196,20 @@ def get_essay(essay_id):
     # 获取当前用户
     user = g.current_user
     
-    # 获取作文批改结果
-    result = CorrectionService().get_correction_result(essay_id, user.id)
+    # 调用新的方法获取详细信息
+    result = CorrectionService().get_detailed_essay_info(essay_id, user.id)
     
-    if result.get("success", False):
-        return jsonify(result), 200
+    # 根据 CorrectionService 返回的 status 决定 HTTP 状态码
+    if result.get("status") == "success":
+        # 移除外层的 status，直接返回 essay 数据
+        return jsonify(result['essay']), 200
+    elif result.get("message") == f"未找到作文 ID: {essay_id}" or "无权访问" in result.get("message", ""):
+        # 对 ResourceNotFoundError 和 PermissionDeniedError 返回 404 或 403
+        http_status = 403 if "无权访问" in result.get("message", "") else 404
+        return jsonify({"success": False, "message": result.get("message")}), http_status
     else:
-        return jsonify(result), 404
+        # 其他错误返回 500
+        return jsonify({"success": False, "message": result.get("message")}), 500
 
 @correction_bp.route('/essays/status/<int:essay_id>', methods=['GET'])
 @login_required

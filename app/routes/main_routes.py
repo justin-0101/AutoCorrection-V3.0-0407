@@ -135,6 +135,11 @@ def correction():
             # 提取表单数据
             source_type = request.form.get('source_type', 'upload')
             subject = request.form.get('subject', '未命名作文')
+            author_name = request.form.get('author_name', '')
+            
+            # 如果作者姓名为空，则使用用户名
+            if not author_name.strip():
+                author_name = user.username if user.username else f"用户{user.id}"
             
             # 判断是否是文件上传
             if source_type == 'upload' and 'file' in request.files:
@@ -201,15 +206,24 @@ def correction():
                         # 使用表单标题或文件名作为标题
                         essay_title = subject if subject and subject.strip() and subject != '未命名作文' else file_title
                         
-                        logger.info(f"使用标题: {essay_title}, 来源: {'表单输入' if essay_title == subject else '文件名'}")
+                        # 计算字数
+                        word_count = len(essay_content.strip())
+                        logger.info(f"使用标题: {essay_title}, 来源: {'表单输入' if essay_title == subject else '文件名'}, 字数: {word_count}")
                         
                         # 创建Essay记录 (使用 essay_content)
                         essay = Essay(
                             title=essay_title,
                             content=essay_content, # 使用读取到的内容
                             user_id=user_id,
+                            author_name=author_name,
+                            word_count=word_count,
                             status=EssayStatus.PENDING.value, # 使用枚举确保一致性
-                            source_type=EssaySourceType.upload.value # 明确来源类型
+                            source_type=EssaySourceType.upload.value, # 明确来源类型
+                            is_public=False,  # 默认不公开
+                            view_count=0,     # 初始化查看次数
+                            like_count=0,     # 初始化点赞次数
+                            comment_count=0,  # 初始化评论次数
+                            correction_count=0 # 初始化批改次数
                         )
                         
                         db.session.add(essay)
@@ -289,13 +303,26 @@ def batch_upload():
                 if not content:
                     raise ValueError('文件处理失败，内容为空')
                 
+                # 计算字数
+                word_count = len(content.strip())
+                
+                # 使用当前用户用户名作为作者名
+                author_name = current_user.username if current_user.username else f"用户{current_user.id}"
+                
                 # 创建Essay记录
                 essay = Essay(
                     title=file_title or os.path.splitext(secure_filename(file.filename))[0],
                     content=content,
                     user_id=current_user.id,
+                    author_name=author_name,
+                    word_count=word_count,
                     source_type=EssaySourceType.upload.value,
-                    status=EssayStatus.PENDING.value
+                    status=EssayStatus.PENDING.value,
+                    is_public=False,
+                    view_count=0,
+                    like_count=0,
+                    comment_count=0,
+                    correction_count=0
                 )
                 db.session.add(essay)
                 db.session.flush()  # 获取essay.id
@@ -549,6 +576,12 @@ def results(essay_id):
         if essay.user_id != current_user.id:
             flash('您没有权限查看该作文的批改结果。', 'warning')
             return redirect(url_for('main.user_history'))
+        
+        # 添加格式化的日期
+        if essay.corrected_at:
+            essay.corrected_at_formatted = essay.corrected_at.strftime('%Y-%m-%d %H:%M:%S')
+        else:
+            essay.corrected_at_formatted = '未知'
         
         correction = Correction.query.filter_by(essay_id=essay_id).first()
         

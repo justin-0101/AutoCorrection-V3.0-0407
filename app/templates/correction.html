@@ -229,6 +229,19 @@
                         
                         <input type="hidden" id="source_type" name="source_type" value="upload">
                         
+                        <!-- 添加作者姓名字段 -->
+                        <div class="mb-4">
+                            <label for="author_name" class="form-label">作者姓名</label>
+                            <input type="text" class="form-control" id="author_name" name="author_name" 
+                                   placeholder="请输入作者姓名（选填）">
+                            <div class="form-text">不填写则默认使用账号名称</div>
+                        </div>
+                        
+                        <!-- 添加字数统计提示 -->
+                        <div class="mb-4">
+                            <div class="form-text">系统将自动统计文章字数</div>
+                        </div>
+                        
                         <div class="mb-4">
                             <div class="upload-area p-5 text-center" id="dropZone">
                                 <i class="bi bi-cloud-upload"></i>

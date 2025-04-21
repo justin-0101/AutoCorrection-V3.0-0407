@@ -16,6 +16,7 @@ import uuid
 import traceback
 import re
 import random
+import signal
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm.exc import NoResultFound
@@ -628,23 +629,140 @@ class CorrectionService(ICorrectionService):
             db.session.rollback()
             return {'status': 'error', 'message': f'删除作文时发生错误: {str(e)}'}
     
+    def get_detailed_essay_info(self, essay_id: int, user_id: Optional[int] = None) -> Dict[str, Any]:
+        """
+        获取详细的作文信息，包含Essay本身和Correction结果
+        
+        Args:
+            essay_id: 作文ID
+            user_id: 用户ID（可选，用于权限检查）
+        
+        Returns:
+            Dict: 包含作文和批改信息的字典
+        """
+        try:
+            # 1. 获取 Essay 对象
+            essay = Essay.query.get(essay_id)
+            if not essay:
+                raise ResourceNotFoundError(f"未找到作文 ID: {essay_id}")
+            
+            # 2. 权限检查
+            if user_id is not None and essay.user_id != user_id:
+                user = self.user_service.get_user_by_id(user_id)
+                if not user or not user.is_admin:
+                    raise PermissionDeniedError("无权访问此作文")
+            
+            # 3. 构建基础 Essay 数据
+            essay_data = {
+                'id': essay.id,
+                'title': essay.title,
+                'content': essay.content,  # 根据需要决定是否返回完整内容
+                'status': essay.status,  # ***关键：使用 Essay 的状态***
+                'source_type': essay.source_type,
+                'grade': essay.grade,
+                'user_id': essay.user_id,
+                'created_at': essay.created_at.isoformat() if essay.created_at else None,
+                'updated_at': essay.updated_at.isoformat() if essay.updated_at else None,
+                'error_message': essay.error_message # 添加错误信息字段
+            }
+
+            # 4. 获取 Correction 对象
+            correction = Correction.query.filter_by(essay_id=essay_id, is_deleted=False).order_by(Correction.created_at.desc()).first()
+            
+            # 5. 合并 Correction 信息
+            if correction:
+                essay_data['correction_id'] = correction.id
+                essay_data['correction_status'] = correction.status # 保留批改记录状态
+                essay_data['task_id'] = correction.task_id
+                essay_data['correction_completed_at'] = correction.completed_at.isoformat() if correction.completed_at else None
+                
+                # 添加批改结果（如果已完成且存在）
+                if correction.status == CorrectionStatus.COMPLETED.value and correction.results:
+                    try:
+                        # 尝试解析JSON，兼容直接存储字典的情况
+                        if isinstance(correction.results, str):
+                            detailed_results = json.loads(correction.results)
+                        elif isinstance(correction.results, dict):
+                            detailed_results = correction.results
+                        else:
+                            detailed_results = {}
+                            logger.warning(f"批改结果类型未知: {type(correction.results)}, 作文ID: {essay_id}")
+
+                        # 更新 essay_data 中的批改信息字段
+                        essay_data.update({
+                            'score': correction.score,
+                            'comments': correction.comments,
+                            'error_analysis': correction.error_analysis, # 可能是JSON字符串
+                            'improvement_suggestions': correction.improvement_suggestions,
+                            'detailed_results': detailed_results # 添加解析后的详细结果
+                        })
+                        
+                        # 确保 Essay 模型中的字段也被填充 (虽然批改任务应该已经做了，这里再检查一遍)
+                        if essay.score is None and correction.score is not None:
+                             essay_data['score'] = correction.score # 使用Correction的分数（如果Essay没有）
+                        # 可以根据需要添加对 comments, error_analysis, improvement_suggestions 的类似检查
+
+                    except json.JSONDecodeError:
+                        logger.warning(f"解析批改结果JSON失败，作文ID: {essay_id}")
+                        essay_data['detailed_results'] = {} # 返回空字典
+                        essay_data['results_parsing_error'] = True
+                    except Exception as e:
+                        logger.error(f"处理批改结果时出错: {str(e)}", exc_info=True)
+                        essay_data['detailed_results'] = {} # 返回空字典
+                        essay_data['results_processing_error'] = True
+                        
+                # 如果批改失败，添加错误信息
+                elif correction.status == CorrectionStatus.FAILED.value:
+                     essay_data['correction_error'] = correction.error_message or "批改失败，未提供具体原因"
+
+            # 6. 如果 Essay 状态是 completed 但没有 correction 记录或结果
+            if essay.status == EssayStatus.COMPLETED.value and (not correction or not essay_data.get('detailed_results')):
+                 logger.warning(f"作文状态为已完成，但批改记录/结果不完整，作文ID: {essay_id}")
+                 # 填充 Essay 表中的分数等信息（如果存在）
+                 essay_data['score'] = essay_data.get('score', essay.score)
+                 essay_data['comments'] = essay_data.get('comments', essay.comments)
+                 essay_data['error_analysis'] = essay_data.get('error_analysis', essay.error_analysis)
+                 essay_data['improvement_suggestions'] = essay_data.get('improvement_suggestions', essay.improvement_suggestions)
+
+            return {
+                'status': 'success',
+                'essay': essay_data
+            }
+            
+        except ResourceNotFoundError as e:
+             logger.warning(str(e))
+             return {'status': 'error', 'message': str(e)}
+        except PermissionDeniedError as e:
+             logger.warning(str(e))
+             return {'status': 'error', 'message': str(e)}
+        except Exception as e:
+            logger.error(f"获取详细作文信息时发生错误: {str(e)}", exc_info=True)
+            return {'status': 'error', 'message': f'获取详细作文信息时发生内部错误'}
+
     @correction_logger.monitor_correction
     def perform_correction(self, essay_id: Union[int, Essay]) -> Dict[str, Any]:
         """
         执行作文批改
         
         Args:
-            essay_id: 作文ID或Essay对象
+            essay_id: 作文ID或作文对象
             
         Returns:
             Dict: 批改结果
         """
+        start_time = time.time()
         essay = None
         correction = None
         
         try:
-            # 获取作文对象
-            essay = essay_id if isinstance(essay_id, Essay) else Essay.query.get(essay_id)
+            # 如果传入的是Essay对象，直接使用
+            if isinstance(essay_id, Essay):
+                essay = essay_id
+                essay_id = essay.id
+            else:
+                # 查询作文
+                essay = Essay.query.get(essay_id)
+            
             if not essay:
                 logger.error(f"作文不存在，ID: {essay_id}")
                 return {
@@ -652,58 +770,78 @@ class CorrectionService(ICorrectionService):
                     "message": f"作文不存在，ID: {essay_id}"
                 }
 
-            # 在事务中创建或获取批改记录，并更新状态
+            # 获取或创建批改记录
+            correction = self._get_or_create_correction(essay.id)
+            
+            # 检查是否已经批改过
+            if essay.status == EssayStatus.COMPLETED.value:
+                logger.info(f"作文已经批改完成，直接返回结果，ID: {essay_id}")
+                return self._create_success_result(essay)
+            
+            # 记录开始批改
+            logger.info(f"开始批改作文 [ID: {essay.id}, 标题: {essay.title}]")
+            
+            # 确保状态为批改中
+            if essay.status != EssayStatus.CORRECTING.value:
+                # 使用安全的状态转换机制
+                success = self.transition_essay_state(
+                    essay.id,
+                    essay.status,
+                    EssayStatus.CORRECTING.value
+                )
+                
+                if not success:
+                    logger.error(f"无法将作文状态转换为批改中: {essay_id}")
+                    return {
+                        "status": "error",
+                        "message": "无法更新作文状态"
+                    }
+            
+            # 调用AI批改服务
+            logger.info(f"调用AI批改服务，作文ID: {essay.id}")
+            
+            # 设置批改超时时间
+            correction_timeout = 600  # 10分钟
+            
+            # 添加超时控制
             try:
-                # 开始外部事务
-                db.session.begin()
+                # 应用自定义超时处理
+                # 移除 signal.alarm 调用，因为它在 Windows 上不可用
+                # signal.alarm(correction_timeout)
                 
-                # 获取或创建批改记录
-                correction = self._get_or_create_correction(essay.id)
+                # 调用AI批改
+                correction_data = self._perform_ai_correction(essay.content)
                 
-                # 记录开始批改
-                logger.info(f"开始批改作文 [ID: {essay.id}, 标题: {essay.title}]")
-                
-                # 更新作文状态为批改中
-                essay.status = EssayStatus.CORRECTING.value
-                correction.status = CorrectionStatus.CORRECTING.value
-                correction.updated_at = datetime.datetime.now()
-                
-                # 提交事务
-                db.session.commit()
-            except Exception as e:
-                db.session.rollback()
-                logger.error(f"初始化批改状态失败: {str(e)}")
+                # 批改完成，取消超时警报
+                # signal.alarm(0)
+            except TimeoutError:
+                # 移除 signal.alarm 后，此异常块可能不再需要，但保留以防万一
+                logger.error(f"AI批改超时 [ID: {essay.id}]")
+                # 设置错误状态
+                self._set_error_status(essay, correction, "AI批改服务超时，请稍后重试")
                 return {
                     "status": "error",
-                    "message": f"初始化批改状态失败: {str(e)}"
+                    "message": "批改服务超时，请稍后重试"
                 }
-
-            # 调用AI批改
-            logger.info(f"调用AI批改服务，作文ID: {essay.id}")
-            correction_data = self._perform_ai_correction(essay.content)
+            except Exception as e:
+                # 取消超时警报 (不再需要)
+                # signal.alarm(0)
+                
+                # 记录错误并设置状态
+                logger.error(f"AI批改异常 [ID: {essay.id}]: {str(e)}")
+                self._set_error_status(essay, correction, f"AI批改服务异常: {str(e)}")
+                return {
+                    "status": "error",
+                    "message": f"批改服务异常: {str(e)}"
+                }
             
             # 检查AI返回结果状态
             if correction_data.get("status") != "success":
                 error_msg = correction_data.get("message", "AI返回结果状态错误")
                 logger.error(f"AI批改失败 [ID: {essay.id}] - {error_msg}")
                 
-                # 在新事务中更新作文状态为失败
-                try:
-                    db.session.begin()
-                    
-                    essay.status = EssayStatus.FAILED.value
-                    essay.error_message = error_msg
-                    
-                    # 同步更新批改记录状态
-                    correction.status = CorrectionStatus.FAILED.value
-                    correction.error_message = error_msg
-                    correction.updated_at = datetime.datetime.now()
-                    
-                    db.session.commit()
-                except Exception as e:
-                    db.session.rollback()
-                    logger.error(f"更新失败状态时发生错误: {str(e)}")
-                
+                # 更新作文状态为失败
+                self._set_error_status(essay, correction, error_msg)
                 return {
                     "status": "error",
                     "message": error_msg
@@ -715,34 +853,15 @@ class CorrectionService(ICorrectionService):
                 error_msg = "AI返回结果数据为空"
                 logger.error(f"AI批改失败 [ID: {essay.id}] - {error_msg}")
                 
-                # 在新事务中更新作文状态为失败
-                try:
-                    db.session.begin()
-                    
-                    essay.status = EssayStatus.FAILED.value
-                    essay.error_message = error_msg
-                    
-                    # 同步更新批改记录状态
-                    correction.status = CorrectionStatus.FAILED.value
-                    correction.error_message = error_msg
-                    correction.updated_at = datetime.datetime.now()
-                    
-                    db.session.commit()
-                except Exception as e:
-                    db.session.rollback()
-                    logger.error(f"更新失败状态时发生错误: {str(e)}")
-                
+                # 更新作文状态为失败
+                self._set_error_status(essay, correction, error_msg)
                 return {
                     "status": "error",
                     "message": error_msg
                 }
             
-            # 在新事务中更新作文和批改记录
+            # 更新作文和批改记录
             try:
-                db.session.begin()
-                
-                logger.info(f"更新作文信息，ID: {essay.id}")
-                
                 # 基本信息
                 essay.score = result_data.get("score", 0)
                 essay.corrected_content = essay.content  # 保持原文不变
@@ -760,7 +879,25 @@ class CorrectionService(ICorrectionService):
                     error_analysis = result_data.get("error_analysis", {})
                 
                 essay.error_analysis = json.dumps(error_analysis, ensure_ascii=False)
-                essay.improvement_suggestions = result_data.get("improvement_suggestions", "")
+                
+                # 处理improvement_suggestions字段，确保格式一致性
+                improvement_suggestions = result_data.get("improvement_suggestions", "")
+                if not improvement_suggestions and isinstance(result_data.get("raw_result"), dict):
+                    # 尝试从原始结果中提取
+                    raw_result = result_data.get("raw_result", {})
+                    improvement_suggestions = raw_result.get("improvement_suggestions", raw_result.get("写作建议", ""))
+                    logger.info(f"从原始结果中提取improvement_suggestions")
+                
+                # 确保是字符串格式
+                if isinstance(improvement_suggestions, (list, dict)):
+                    try:
+                        improvement_suggestions = json.dumps(improvement_suggestions, ensure_ascii=False)
+                        logger.info(f"将improvement_suggestions从复杂结构转换为JSON字符串")
+                    except Exception as e:
+                        logger.warning(f"转换improvement_suggestions格式失败: {str(e)}，使用空字符串")
+                        improvement_suggestions = ""
+                
+                essay.improvement_suggestions = improvement_suggestions
                 
                 # 分项得分
                 details = result_data.get("details", {})
@@ -769,23 +906,29 @@ class CorrectionService(ICorrectionService):
                 essay.structure_score = details.get("structure_score", 0)
                 essay.writing_score = details.get("writing_score", 0)
                 
-                # 更新作文状态
-                essay.status = EssayStatus.COMPLETED.value
-                
                 # 同步更新批改记录
                 correction.results = json.dumps(result_data, ensure_ascii=False)
                 correction.score = essay.score
                 correction.comments = essay.comments
                 correction.error_analysis = essay.error_analysis
                 correction.improvement_suggestions = essay.improvement_suggestions
-                correction.status = CorrectionStatus.COMPLETED.value
-                correction.updated_at = datetime.datetime.now()
                 correction.completed_at = datetime.datetime.now()
                 
-                # 提交事务
-                db.session.commit()
+                # 使用安全的状态转换机制将状态更新为已完成
+                success = self.transition_essay_state(
+                    essay.id,
+                    EssayStatus.CORRECTING.value,
+                    EssayStatus.COMPLETED.value
+                )
                 
-                logger.info(f"AI批改完成，作文ID: {essay.id}, 得分: {essay.score}")
+                if not success:
+                    logger.error(f"无法将作文状态转换为已完成: {essay_id}")
+                    return {
+                        "status": "error",
+                        "message": "无法更新作文状态为已完成"
+                    }
+                
+                logger.info(f"AI批改完成，作文ID: {essay.id}, 得分: {essay.score}, 耗时: {time.time() - start_time:.2f}秒")
                 return {
                     "status": "success",
                     "message": "批改成功",
@@ -793,78 +936,55 @@ class CorrectionService(ICorrectionService):
                     "score": essay.score
                 }
             except Exception as update_err:
-                db.session.rollback()
                 logger.error(f"更新作文信息失败 [ID: {essay.id}]: {str(update_err)}")
                 logger.error(traceback.format_exc())
                 
-                # 再次尝试，只更新状态
-                try:
-                    db.session.begin()
-                    
-                    # 更新作文状态为失败
-                    essay.status = EssayStatus.FAILED.value
-                    essay.error_message = f"更新作文信息失败: {str(update_err)}"
-                    
-                    # 同步更新批改记录状态
-                    correction.status = CorrectionStatus.FAILED.value
-                    correction.error_message = f"更新作文信息失败: {str(update_err)}"
-                    correction.updated_at = datetime.datetime.now()
-                    
-                    db.session.commit()
-                except Exception as e:
-                    db.session.rollback()
-                    logger.error(f"设置失败状态时出错: {str(e)}")
-                
+                # 尝试记录错误状态
+                self._set_error_status(essay, correction, f"更新作文信息失败: {str(update_err)}")
                 return {
                     "status": "error",
                     "message": f"更新作文信息失败: {str(update_err)}"
                 }
-
-        except json.JSONDecodeError as je:
-            error_msg = f"解析AI返回结果JSON失败: {str(je)}"
-            logger.error(f"批改作文失败 [ID: {essay_id if not isinstance(essay_id, Essay) else essay_id.id}] - {error_msg}")
-            
-            # 更新状态
-            self._set_error_status(essay, correction, error_msg)
-                
-            return {
-                "status": "error",
-                "message": error_msg
-            }
-            
         except Exception as e:
-            error_msg = f"批改作文失败: {str(e)}"
-            logger.error(f"批改作文失败 [ID: {essay_id if not isinstance(essay_id, Essay) else (essay.id if essay else 'Unknown')}] - {error_msg}")
+            correction_time = time.time() - start_time
+            logger.error(f"批改过程中发生异常 [ID: {essay_id}]: {str(e)}, 耗时: {correction_time:.2f}秒")
             logger.error(traceback.format_exc())
             
-            # 更新状态
-            self._set_error_status(essay, correction, error_msg)
-                
+            if essay and correction:
+                self._set_error_status(essay, correction, f"批改过程中发生异常: {str(e)}")
+            
             return {
                 "status": "error",
-                "message": error_msg
+                "message": f"批改过程中发生异常: {str(e)}"
             }
-    
+
     def _set_error_status(self, essay, correction, error_msg):
-        """设置错误状态，确保作文和批改记录状态一致"""
-        try:
-            db.session.begin()
+        """
+        设置错误状态，使用安全的状态转换机制
+        
+        Args:
+            essay: 作文对象
+            correction: 批改对象
+            error_msg: 错误信息
             
-            if essay:
-                essay.status = EssayStatus.FAILED.value
-                essay.error_message = error_msg
-                
-            if correction:
-                correction.status = CorrectionStatus.FAILED.value
-                correction.error_message = error_msg
-                correction.updated_at = datetime.datetime.now()
-                
-            db.session.commit()
+        Returns:
+            bool: 是否成功设置错误状态
+        """
+        try:
+            logger.error(f"设置错误状态 [ID: {essay.id}]: {error_msg}")
+            
+            # 使用安全的状态转换机制
+            return self.transition_essay_state(
+                essay.id,
+                essay.status,  # 从任何状态
+                EssayStatus.FAILED.value,
+                error_msg
+            )
         except Exception as e:
-            db.session.rollback()
             logger.error(f"设置错误状态失败: {str(e)}")
             logger.error(traceback.format_exc())
-    
+            return False
+
     def get_supported_file_types(self) -> Dict[str, Any]:
         """
         获取支持的文件类型
@@ -1106,7 +1226,7 @@ class CorrectionService(ICorrectionService):
             essay_content: 作文内容
             
         Returns:
-            Dict: 批改结果
+            Dict: 批改结果，使用标准化字段结构
         """
         try:
             logger.info(f"开始批改作文，内容长度: {len(essay_content)} 字符")
@@ -1130,7 +1250,7 @@ class CorrectionService(ICorrectionService):
                     "message": error_msg
                 }
             
-            # 从AI响应中提取原始数据
+            # 从AI响应中提取数据
             result_data = correction_results.get("result", {})
             
             # 检查result是否为None或非字典
@@ -1160,73 +1280,37 @@ class CorrectionService(ICorrectionService):
                     "message": "AI批改服务返回无效结果格式"
                 }
             
-            # 检查结果中是否包含必要字段
-            if not ("总得分" in result_data or "score" in result_data):
-                logger.error(f"AI批改服务返回结果缺少必要字段，返回: {result_data}")
-                # 如果是调试模式生成的模拟结果，但结构不正确
-                if result_data.get("is_mock", False):
-                    logger.warning("使用调试模式生成的模拟结果")
-                    result_data = self._generate_mock_result()
-                else:
-                    return {
-                        "status": "error",
-                        "message": "AI批改服务返回结果缺少必要字段"
-                    }
+            # 检查结果中是否包含必要的标准化字段
+            valid_result = False
             
-            # 构建标准化的返回结果（处理中文字段名称或英文字段名称的情况）
-            score = result_data.get("score", result_data.get("总得分", 0))
-            if not isinstance(score, (int, float)):
-                logger.warning(f"得分格式无效: {score}，设置为默认值0")
-                score = 0
-                
-            # 获取分项得分（处理中文或英文字段）
-            subscores = result_data.get("details", result_data.get("分项得分", {}))
-            if not isinstance(subscores, dict):
-                logger.warning(f"分项得分格式无效: {subscores}，使用空字典")
-                subscores = {}
-                
-            # 处理各种可能的字段名
-            content_score = subscores.get("content_score", subscores.get("内容主旨", 0))
-            language_score = subscores.get("language_score", subscores.get("语言文采", 0))
-            structure_score = subscores.get("structure_score", subscores.get("文章结构", 0))
-            writing_score = subscores.get("writing_score", subscores.get("文面书写", 0))
+            # 检查是否包含scores字段
+            if "scores" in result_data and "total" in result_data["scores"]:
+                valid_result = True
+            # 向后兼容检查旧字段
+            elif "总得分" in result_data or "score" in result_data or "total_score" in result_data:
+                valid_result = True
             
-            # 处理错误分析（可能是中文字段或英文字段）
-            content_analysis = result_data.get("content_analysis", result_data.get("内容分析", ""))
-            language_analysis = result_data.get("language_analysis", result_data.get("语言分析", ""))
-            structure_analysis = result_data.get("structure_analysis", result_data.get("结构分析", ""))
-            spelling_errors = result_data.get("spelling_errors", result_data.get("错别字", []))
+            # 如果结果不完整，直接返回错误
+            if not valid_result:
+                error_msg = "AI批改服务返回结果缺少必要字段"
+                logger.error(f"{error_msg}，返回: {result_data}")
+                return {
+                    "status": "error",
+                    "message": error_msg
+                }
             
-            # 处理评价和建议（可能是中文字段或英文字段）
-            feedback = result_data.get("feedback", result_data.get("总体评价", ""))
-            suggestions = result_data.get("improvement_suggestions", result_data.get("写作建议", ""))
+            # 确保结果中包含corrected_content字段
+            if "corrected_content" not in result_data:
+                # 使用原始文本作为修改后的内容
+                result_data["corrected_content"] = essay_content
+                logger.debug("添加原始文本作为corrected_content")
             
-            # 构建标准化的返回结果
-            standardized_result = {
-                "score": score,
-                "corrected_text": essay_content,  # 由于当前API不返回修改后的文本，暂时使用原文
-                "feedback": feedback,
-                "error_analysis": json.dumps({
-                    "spelling_errors": spelling_errors,
-                    "content_analysis": content_analysis,
-                    "language_analysis": language_analysis,
-                    "structure_analysis": structure_analysis
-                }, ensure_ascii=False),
-                "improvement_suggestions": suggestions,
-                "details": {
-                    "content_score": content_score,
-                    "language_score": language_score,
-                    "structure_score": structure_score,
-                    "writing_score": writing_score
-                },
-                "raw_result": result_data  # 保存原始结果用于调试
-            }
-            
-            logger.info(f"AI批改完成，得分: {standardized_result['score']}")
+            # 返回成功结果
+            logger.info(f"AI批改完成，结果使用标准化字段结构")
             
             return {
                 "status": "success",
-                "data": standardized_result
+                "data": result_data  # 直接返回标准化的结果
             }
             
         except Exception as e:
@@ -1237,36 +1321,214 @@ class CorrectionService(ICorrectionService):
                 "status": "error",
                 "message": error_msg
             }
+
+    def transition_essay_state(self, essay_id, from_state, to_state, error_msg=None):
+        """
+        安全地转换作文状态，包含事务保护和冗余检查
+        
+        Args:
+            essay_id: 作文ID
+            from_state: 期望的当前状态
+            to_state: 目标状态
+            error_msg: 错误信息（如果有）
             
-    def _generate_mock_result(self) -> Dict:
-        """
-        生成模拟批改结果（用于调试或AI服务返回无效结果时）
-        
         Returns:
-            Dict: 模拟的批改结果
+            bool: 状态转换是否成功
         """
-        # 生成随机分数 (30-50分)
-        total_score = random.randint(30, 50)
+        try:
+            logger.info(f"尝试转换作文状态：ID={essay_id}, {from_state} -> {to_state}")
+            
+            # 使用悲观锁获取作文记录，防止并发修改
+            essay = Essay.query.with_for_update().filter_by(id=essay_id).first()
+            
+            if not essay:
+                logger.error(f"状态转换失败：找不到作文 ID: {essay_id}")
+                return False
+                
+            if essay.status != from_state:
+                logger.warning(f"状态转换失败：作文当前状态 {essay.status} 不是预期的 {from_state}")
+                # 如果已经是目标状态，则认为成功
+                if essay.status == to_state:
+                    logger.info(f"作文状态已经是目标状态 {to_state}，无需转换")
+                    return True
+                return False
+                
+            # 记录原状态用于日志
+            old_status = essay.status
+            
+            # 更新状态
+            essay.status = to_state
+            essay.updated_at = datetime.datetime.now()
+            
+            if error_msg:
+                essay.error_message = error_msg
+                
+            # 同步更新批改记录状态
+            correction = self._get_or_create_correction(essay_id)
+            
+            # 映射作文状态到批改状态
+            correction_state_map = {
+                EssayStatus.PENDING.value: CorrectionStatus.PENDING.value,
+                EssayStatus.CORRECTING.value: CorrectionStatus.CORRECTING.value,
+                EssayStatus.COMPLETED.value: CorrectionStatus.COMPLETED.value,
+                EssayStatus.FAILED.value: CorrectionStatus.FAILED.value
+            }
+            
+            correction.status = correction_state_map.get(to_state, to_state)
+            correction.updated_at = datetime.datetime.now()
+            
+            if error_msg:
+                correction.error_message = error_msg
+            
+            # 记录状态变更日志
+            logger.info(f"作文状态已转换：ID={essay_id}, {old_status} -> {to_state}")
+            if error_msg:
+                logger.info(f"状态转换附带错误信息：{error_msg}")
+            
+            return True
+        except Exception as e:
+            # 事务将在调用者层面回滚
+            logger.error(f"状态转换出错：{str(e)}")
+            logger.error(traceback.format_exc())
+            return False 
+
+    def sync_correction_results(self, correction_id, essay=None, correction=None):
+        """
+        将批改结果同步到Essay
         
-        # 分项得分
-        content_score = int(total_score * 0.35)
-        language_score = int(total_score * 0.25)
-        structure_score = int(total_score * 0.15)
-        writing_score = int(total_score * 0.10)
-        
-        return {
-            "总得分": total_score,
-            "分项得分": {
-                "内容主旨": content_score,
-                "语言文采": language_score,
-                "文章结构": structure_score,
-                "文面书写": writing_score
-            },
-            "总体评价": "这是一份自动生成的评价。作文内容结构合理，但需要注意错别字和语言表达方面的问题。建议多阅读优秀范文，提高语言表达能力。",
-            "内容分析": "文章主题明确，有一定的思想深度。能够围绕主题展开论述，但论据的说服力和创新性有待提高。",
-            "语言分析": "语言表达基本流畅，用词基本准确，但部分句式单一，缺乏变化。建议增加修辞手法的运用。",
-            "结构分析": "文章结构比较清晰，但过渡不够自然，段落之间的连贯性有待加强。",
-            "错别字": [],
-            "写作建议": "1. 增加论据的说服力；2. 丰富句式和修辞手法；3. 加强段落间的过渡；4. 注意错别字的修正。",
-            "is_mock": True
-        } 
+        Args:
+            correction_id (int): 批改记录ID
+            essay (Essay, optional): 作文对象
+            correction (Correction, optional): 批改对象
+            
+        Returns:
+            bool: 是否成功同步
+        """
+        try:
+            # 获取批改记录
+            if correction is None:
+                correction = Correction.query.get(correction_id)
+                
+            if correction is None:
+                self.logger.error(f"找不到批改记录: {correction_id}")
+                return False
+                
+            # 获取作文记录
+            if essay is None:
+                essay = Essay.query.get(correction.essay_id)
+                
+            if essay is None:
+                self.logger.error(f"找不到作文记录: {correction.essay_id}")
+                return False
+            
+            # 解析results字段，确保处理字符串或字典
+            results = {}
+            if isinstance(correction.results, str):
+                try:
+                    results = json.loads(correction.results)
+                    self.logger.info(f"成功解析correction.results JSON字符串")
+                except json.JSONDecodeError:
+                    self.logger.warning(f"解析correction.results JSON失败，使用空字典")
+            elif isinstance(correction.results, dict):
+                results = correction.results
+            
+            # 使用标准化字段结构同步数据
+            # 1. 从scores中获取总分
+            if "scores" in results and "total" in results["scores"]:
+                essay.score = results["scores"]["total"]
+                essay.ai_score = results["scores"]["total"]
+                self.logger.debug(f"从标准化字段structures.scores.total获取到分数: {essay.score}")
+            else:
+                # 向后兼容，查找旧字段
+                essay.score = results.get('score') or results.get('total_score')
+                essay.ai_score = essay.score
+                self.logger.debug(f"从向后兼容字段获取到分数: {essay.score}")
+            
+            # 2. 保持corrected_content字段
+            essay.corrected_content = results.get('corrected_content')
+            
+            # 3. 从analyses中获取总体评价
+            if "analyses" in results and "summary" in results["analyses"]:
+                essay.comments = results["analyses"]["summary"]
+                essay.ai_comments = results["analyses"]["summary"]
+                self.logger.debug(f"从标准化字段analyses.summary获取到总体评价")
+            else:
+                # 向后兼容
+                essay.comments = results.get('comments')
+                essay.ai_comments = essay.comments
+            
+            # 4. 处理error_analysis，使用完整的analyses和dimensions
+            error_analysis = {}
+            
+            # 添加维度分数
+            if "scores" in results and "dimensions" in results["scores"]:
+                error_analysis["dimensions"] = results["scores"]["dimensions"]
+            
+            # 添加分析内容
+            if "analyses" in results:
+                error_analysis["analyses"] = results["analyses"]
+            
+            # 添加反馈
+            if "feedback" in results:
+                error_analysis["feedback"] = results["feedback"]
+            
+            # 保存error_analysis (将字典转换为JSON字符串)
+            essay.error_analysis = json.dumps(error_analysis, ensure_ascii=False)
+            essay.ai_analysis = essay.error_analysis
+            
+            # 5. 处理improvement_suggestions (从feedback.improvements获取)
+            if "feedback" in results and "improvements" in results["feedback"]:
+                improvements = results["feedback"]["improvements"]
+                if isinstance(improvements, list):
+                    essay.improvement_suggestions = "\n".join(improvements)
+                else:
+                    essay.improvement_suggestions = str(improvements)
+                self.logger.debug(f"从标准化字段feedback.improvements获取到改进建议")
+            else:
+                # 向后兼容
+                if 'improvement_suggestions' in results:
+                    if isinstance(results['improvement_suggestions'], (list, dict)):
+                        # 如果是复杂结构，转换为字符串
+                        essay.improvement_suggestions = json.dumps(results['improvement_suggestions'], ensure_ascii=False)
+                    else:
+                        # 保持字符串格式
+                        essay.improvement_suggestions = results['improvement_suggestions']
+                else:
+                    # 尝试从其他可能的字段中提取
+                    suggestion_fields = ['suggestions', '写作建议', 'writing_suggestions']
+                    for field in suggestion_fields:
+                        if field in results:
+                            value = results[field]
+                            if isinstance(value, (list, dict)):
+                                essay.improvement_suggestions = json.dumps(value, ensure_ascii=False)
+                            else:
+                                essay.improvement_suggestions = value
+                            self.logger.debug(f"从兼容字段{field}提取到improvement_suggestions")
+                            break
+            
+            # 更新批改时间和次数
+            essay.corrected_at = datetime.utcnow()
+            essay.correction_count = (essay.correction_count or 0) + 1
+            
+            # 更新字数统计如果之前没有
+            if not essay.word_count and 'word_count' in results:
+                essay.word_count = results.get('word_count')
+                
+            # 确保所有必要字段都有值，避免空字段
+            if not essay.improvement_suggestions:
+                essay.improvement_suggestions = "建议多阅读范文，注意语法和词汇使用，加强文章结构的逻辑性。"
+                self.logger.warning(f"缺少improvement_suggestions字段，使用默认值")
+            
+            if not essay.comments:
+                essay.comments = "作文已批改完成，请查看详细评分和建议。"
+                self.logger.warning(f"缺少comments字段，使用默认值")
+            
+            # 提交更改
+            db.session.commit()
+            self.logger.info(f"已同步批改结果到作文: {correction_id} -> {correction.essay_id}，使用标准化字段结构")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"同步批改结果时出错: {str(e)}", exc_info=True)
+            db.session.rollback()
+            return False 
